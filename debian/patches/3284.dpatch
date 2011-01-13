@@ -1,0 +1,29 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## 3284.dpatch by Francesco Paolo Lovergine <frankie@debian.org>
+##
+## All lines beginning with `## DP:' are a description of the patch.
+## DP: No description.
+
+@DPATCH@
+diff -urNad 1.3.1~/src/inet.c 1.3.1/src/inet.c
+--- 1.3.1~/src/inet.c	2009-02-09 10:12:58.000000000 +0100
++++ 1.3.1/src/inet.c	2009-09-15 14:49:55.000000000 +0200
+@@ -609,6 +609,18 @@
+           strerror(errno));
+       }
+     }
++
++    if (c->wfd != -1)
++      if (setsockopt(c->wfd, tcp_level, TCP_NODELAY, (void *) &nodelay,
++          sizeof(nodelay)) < 0)
++        pr_log_pri(PR_LOG_NOTICE, "error setting write fd TCP_NODELAY: %s",
++          strerror(errno));
++
++    if (c->rfd != -1)
++      if (setsockopt(c->rfd, IPPROTO_TCP, TCP_NODELAY, (void *) &nodelay,
++          sizeof(nodelay)) < 0)
++        pr_log_pri(PR_LOG_NOTICE, "error setting read fd TCP_NODELAY: %s",
++          strerror(errno));
+   }
+ #endif /* TCP_NODELAY */
+ 

@@ -1,0 +1,110 @@
+#
+#    Translators, if you are not familiar with the PO format, gettext
+#    documentation is worth reading, especially sections dedicated to
+#    this format, e.g. by running:
+#         info -n '(gettext)PO Files'
+#         info -n '(gettext)Header Entry'
+#
+#    Some information specific to po-debconf are available at
+#            /usr/share/doc/po-debconf/README-trans
+#         or http://www.debian.org/intl/l10n/po-debconf/README-trans
+#
+#    Developers do not need to manually edit POT or PO files.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: proftpd\n"
+"Report-Msgid-Bugs-To: proftpd-dfsg@packages.debian.org\n"
+"POT-Creation-Date: 2008-04-10 16:37+0200\n"
+"PO-Revision-Date: 2008-01-02 22:30+0100\n"
+"Last-Translator: Jan Outrata <outrataj@upcase.inf.upol.cz>\n"
+"Language-Team: Czech <debian-l10n-czech@lists.debian.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#. Type: select
+#. Choices
+#: ../proftpd.templates:2001
+msgid "from inetd"
+msgstr "z inetd"
+
+#. Type: select
+#. Choices
+#: ../proftpd.templates:2001
+msgid "standalone"
+msgstr "samostatně"
+
+#. Type: select
+#. Description
+#: ../proftpd.templates:2002
+msgid "Run proftpd:"
+msgstr "Spouštět proftpd:"
+
+#. Type: select
+#. Description
+#: ../proftpd.templates:2002
+msgid ""
+"ProFTPd can be run either as a service from inetd, or as a standalone "
+"server. Each choice has its own benefits. With only a few FTP connections "
+"per day, it is probably better to run ProFTPd from inetd in order to save "
+"resources."
+msgstr ""
+"ProFTPd může běžet buď jako služba z inetd, nebo jako samostatný server. Obě "
+"možnosti mají svoje výhody. Při několika ftp spojeních za den je lepší "
+"spouštět ProFTPd z inetd, aby šetřil zdroje."
+
+#. Type: select
+#. Description
+#: ../proftpd.templates:2002
+msgid ""
+"On the other hand, with higher traffic, ProFTPd should run as a standalone "
+"server to avoid spawning a new process for each incoming connection."
+msgstr ""
+"Naopak při větším provozu by měl ProFTPd běžet jako samostatná služba, aby "
+"nemusel při každém příchozím spojení spouštět nový proces."
+
+#~ msgid "Warning on syntax changes in ProFTPd configuration."
+#~ msgstr "Upozornění na změny syntaxe v konfiguraci ProFTPd."
+
+#~ msgid ""
+#~ "You are upgrading from a pre-1.3.0 version. Probably you will need to "
+#~ "revise your previous configuration to be compliant with current "
+#~ "directives. Please, consult documentation and how-tos available in "
+#~ "proftpd-doc and change /etc/proftpd/proftpd.conf as needed."
+#~ msgstr ""
+#~ "Aktualizujete z verze před 1.3.0. Pravděpodobně budete muset aktualizovat "
+#~ "své předchozí nastavení, aby bylo v souladu s nynějšími direktivami. "
+#~ "Konzultujte dokumentaci dostupnou v proftpd-doc a podle potřeby upravte /"
+#~ "etc/proftpd/proftpd.conf."
+
+#~ msgid ""
+#~ "Unfortunately, it is nearly impossible currently to convert your setup "
+#~ "automatically, but for some basic issues. You will have to do  it "
+#~ "yourself. ProFTPd could also be unable to use the resulting  "
+#~ "configuration, and it would not restart after upgrading."
+#~ msgstr ""
+#~ "Naneštěstí je téměř nemožné převést vaše nastavení, až na nějaké základní "
+#~ "věci, automaticky. Budete to muset udělat sami. ProFTPd také nemusí být "
+#~ "schopný použít výslednou konfiguraci a po aktualizaci by se znovu "
+#~ "nespustil."
+
+#~ msgid ""
+#~ "Note also that starting from 1.3.0 version, dynamic modules are used and "
+#~ "configuration should be splitted, keeping modules loading instructions "
+#~ "within the new /etc/proftpd/modules.conf configuration file for future "
+#~ "hacks. That file should be included by the main configuration file."
+#~ msgstr ""
+#~ "Od verze 1.3.0 se používají dynamické moduly a nastavení by mělo být "
+#~ "rozděleno. Instrukce pro zavedení modulů by se měly nacházet v novém "
+#~ "konfiguračním souboru /etc/proftpd/modules.conf. Tento soubor by měl být "
+#~ "zahrnut v hlavním konfiguračním souboru."
+
+#~ msgid ""
+#~ "On the other hand, if your ftp site is visited frequently, you should "
+#~ "rather run proftp as a standalone server (because with inetd, each time a "
+#~ "connection is opened, a new process is spawned)."
+#~ msgstr ""
+#~ "Na druhou stranu, pokud je váš ftp server navštěvován často, není inetd "
+#~ "dobrá volba, protože pokaždé, když je otevřeno spojení, je spuštěn nový "
+#~ "proces."

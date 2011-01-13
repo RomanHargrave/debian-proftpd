@@ -1,0 +1,30 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## xferstats.holger-preiss.dpatch by Francesco Paolo Lovergine <frankie@debian.org>
+##
+## All lines beginning with `## DP:' are a description of the patch.
+## DP: No description.
+
+@DPATCH@
+diff -urNad trunk~/contrib/xferstats.holger-preiss trunk/contrib/xferstats.holger-preiss
+--- trunk~/contrib/xferstats.holger-preiss	2008-08-08 16:05:07.000000000 +0200
++++ trunk/contrib/xferstats.holger-preiss	2008-09-13 16:10:21.000000000 +0200
+@@ -250,14 +250,14 @@
+ 
+ Total Transfers from each Archive Section (By bytes)
+ 
+-                                                 ---- Percent  Of ----
+-     Archive Section      Files Sent Bytes Sent  Files Sent Bytes Sent
+-------------------------- ---------- ----------- ---------- ----------
++                                                   ---- Percent  Of ----
++     Archive Section      Files Sent Bytes Sent    Files Sent Bytes Sent
++------------------------- ---------- ------------- ---------- ----------
+ .
+ 
+ format line2 =
+-@<<<<<<<<<<<<<<<<<<<<<<<< @>>>>>>>>> @>>>>>>>>>> @>>>>>>>   @>>>>>>>
+-$section,                 $files,    $bytes,     $pctfiles, $pctbytes
++@<<<<<<<<<<<<<<<<<<<<<<<< @>>>>>>>>> @>>>>>>>>>>>> @>>>>>>>   @>>>>>>>
++$section,                 $files,    $bytes,       $pctfiles, $pctbytes
+ .
+ 
+ $| = 1;

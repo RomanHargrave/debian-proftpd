@@ -1,0 +1,39 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## authoritative_pam.dpatch by Francesco Paolo Lovergine <frankie@debian.org>
+##
+## All lines beginning with `## DP:' are a description of the patch.
+## DP: No description.
+
+@DPATCH@
+diff -urNad trunk~/src/auth.c trunk/src/auth.c
+--- trunk~/src/auth.c	2007-10-09 23:44:52.000000000 +0200
++++ trunk/src/auth.c	2007-10-15 23:15:11.000000000 +0200
+@@ -528,6 +528,28 @@
+       return res;
+     }
+ 
++    if (MODRET_ISERROR(mr)) {
++      res = MODRET_ERROR(mr);
++
++      if (cmd->tmp_pool) {
++        destroy_pool(cmd->tmp_pool);
++        cmd->tmp_pool = NULL;
++      }
++
++      return res;
++    }
++
++    if (MODRET_ISERROR(mr)) {
++      res = MODRET_ERROR(mr);
++
++      if (cmd->tmp_pool) {
++        destroy_pool(cmd->tmp_pool);
++        cmd->tmp_pool = NULL;
++      }
++
++      return res;
++    }
++
+     m = NULL;
+   }
+ 

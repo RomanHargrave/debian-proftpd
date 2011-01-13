@@ -1,0 +1,26 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## mod_xfer.c.dpatch by Francesco Paolo Lovergine <frankie@debian.org>
+##
+## All lines beginning with `## DP:' are a description of the patch.
+## DP: No description.
+
+@DPATCH@
+diff -urNad trunk~/modules/mod_xfer.c trunk/modules/mod_xfer.c
+--- trunk~/modules/mod_xfer.c	2007-10-09 23:45:03.000000000 +0200
++++ trunk/modules/mod_xfer.c	2007-10-10 00:09:12.000000000 +0200
+@@ -1703,10 +1703,12 @@
+ 
+   fmode = file_mode(dir);
+ 
++  if(!fmode) {
++      pr_response_add_err(R_550,"%s: %s",cmd->arg,strerror(errno));
++      return PR_ERROR(cmd);
++  }
++ 
+   if (!S_ISREG(fmode)) {
+-    if (!fmode)
+-      pr_response_add_err(R_550, "%s: %s", cmd->arg, strerror(errno));
+-    else
+       pr_response_add_err(R_550, _("%s: Not a regular file"), cmd->arg);
+     return PR_ERROR(cmd);
+   }

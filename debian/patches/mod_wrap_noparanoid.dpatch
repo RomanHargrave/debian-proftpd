@@ -1,0 +1,20 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## mod_wrap_noparanoid.dpatch by Francesco Paolo Lovergine <frankie@debian.org>
+##
+## All lines beginning with `## DP:' are a description of the patch.
+## DP: No description.
+
+@DPATCH@
+diff -urNad proftpd-1.3.0~/contrib/mod_wrap.c proftpd-1.3.0/contrib/mod_wrap.c
+--- proftpd-1.3.0~/contrib/mod_wrap.c	2004-10-31 01:16:41.000000000 +0200
++++ proftpd-1.3.0/contrib/mod_wrap.c	2006-05-10 22:05:53.000000000 +0200
+@@ -888,8 +888,7 @@
+ 
+   fromhost(&request);
+ 
+-  if (STR_EQ(eval_hostname(request.client), paranoid) ||
+-      !hosts_access(&request)) {
++  if (!hosts_access(&request)) {
+     char *denymsg = NULL;
+ 
+     /* log the denied connection */

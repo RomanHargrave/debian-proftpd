@@ -1,0 +1,165 @@
+#!/usr/bin/make -f
+
+PACKAGE=proftpd-basic
+NAME=proftpd
+
+#
+# HAVE_OPENSSL is required by mod_sql.c. 
+# See #233031 for details. 
+#
+# FIXME: To be checked for 1.3.0+
+# 
+PROFTPD_FLAGS := -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64 -DHAVE_OPENSSL -DUSE_LDAP_TLS
+CFLAGS := -O2 $(PROFTPD_FLAGS) 
+CC := gcc
+
+# Some special build options
+ifneq (,$(findstring debug,$(DEB_BUILD_OPTIONS)))
+  CFLAGS += -g -O0
+endif
+ifneq (,$(findstring verbose,$(DEB_BUILD_OPTIONS)))
+DH_VERBOSE=1
+export DH_VERBOSE
+endif
+
+# the dpatch rules
+include /usr/share/dpatch/dpatch.make
+
+#
+# dpkg-arch rules
+# FIXME: To be checked for 1.3.0+
+# 
+ifeq (,$(DEB_BUILD_GNU_TYPE))
+  include debian/scripts/dpkg-arch.mk
+endif
+
+DSOMODS1 = mod_site_misc:mod_load:mod_ban:mod_quotatab:mod_sql:mod_sql_mysql:mod_sql_postgres:mod_dynmasq:
+DSOMODS2 = mod_quotatab_sql:mod_ldap:mod_quotatab_ldap:mod_ratio:mod_tls:mod_rewrite:mod_radius:mod_wrap:mod_wrap2:mod_wrap2_file:
+DSOMODS3 = mod_wrap2_sql:mod_quotatab_file:mod_quotatab_radius:mod_facl:mod_ctrls_admin:mod_ifsession
+CONF_ARGS := --prefix=/usr \
+	     --with-includes=$(shell pg_config --includedir):$(shell mysql_config --include|sed -e 's/-I//') \
+	     --mandir=/usr/share/man --sysconfdir=/etc/$(NAME) --localstatedir=/var/run --libexecdir=/usr/lib/$(NAME) \
+	     --enable-sendfile --enable-facl --enable-dso --enable-autoshadow --enable-ctrls --with-modules=mod_readme \
+	     --enable-ipv6 --enable-nls
+#	     --enable-devel=stacktrace 
+
+ifeq ($(DEB_BUILD_GNU_TYPE), $(DEB_HOST_GNU_TYPE))
+  CONF_ARGS += --build $(DEB_HOST_GNU_TYPE)
+else
+  CONF_ARGS += --build $(DEB_BUILD_GNU_TYPE) --host $(DEB_HOST_GNU_TYPE)
+endif
+	
+build: configure-stamp build-stamp
+build-stamp: 
+	dh_testdir
+	
+	$(MAKE) CC="$(CC)" CFLAGS="$(CFLAGS)" all
+	
+	touch build-stamp 
+
+install: build-stamp
+	dh_testdir
+	dh_clean -k
+	
+	$(MAKE) DESTDIR=$(CURDIR)/debian/tmp install
+
+configure: configure-stamp
+configure-stamp: patch-stamp
+	
+	./configure $(CONF_ARGS) --with-shared=$(DSOMODS1)$(DSOMODS2)$(DSOMODS3)
+	
+	touch configure-stamp
+
+clean: myclean unpatch
+myclean:
+	dh_testdir
+	dh_clean
+	
+	$(MAKE) distclean || true
+	
+	-test -r /usr/share/misc/config.sub && \
+		cp -f /usr/share/misc/config.sub ./config.sub
+	-test -r /usr/share/misc/config.guess && \
+		cp -f /usr/share/misc/config.guess ./config.guess
+	
+	rm -f build-stamp configure-stamp install-stamp patch-stamp
+	rm -f stamp-build stamp-configure debian/files.saved debian/files
+	rm -f $$(find . -type l) $$(find . -name "*~" -o -name "*.o")
+	rm -f $(NAME) config.cache config.log lib/*.a ftpshut Make.rules
+	rm -rf debian/$(PACKAGE) debian/$(NAME)-doc
+	rm -rf debian/files* debian/*substvars* debian/*.gz core
+	rm -f $$(find * -name "*.orig") modules/mod_ratio.c
+	rm -f contrib/dist/rpm/proftpd.spec
+	rm -rf $$(find $(CURDIR) -name .libs)
+	rm -f $$(find $(CURDIR) -name config.log )
+	rm -f $$(find $(CURDIR) -name config.status )
+	rm -f contrib/mod_wrap2/mod_wrap2.h \
+	      contrib/mod_wrap2/Makefile \
+	      contrib/mod_load/mod_load.c \
+	      contrib/mod_load/mod_load.h \
+	      contrib/mod_load/Makefile 
+	# clean up libtool files still around
+	find contrib -name "*.la" -exec rm -f {} \;
+
+binary-indep: checkroot build
+	dh_installdirs -i 
+	dh_install -i 
+	dh_installdocs -i 
+	dh_installchangelogs -i ./ChangeLog
+	dh_installexamples -i 
+	
+	dh_compress -i
+	dh_fixperms -i
+	dh_installdeb -i
+	dh_gencontrol -i 
+	dh_md5sums -i
+	dh_fixperms -i
+	dh_builddeb -i
+
+binary-arch: checkroot build install
+	dh_installdirs -a
+	dh_install -a --sourcedir=debian/tmp
+	dh_installdocs -a
+	dh_installchangelogs -a ChangeLog
+	
+	# removes proftpd.conf installed by upstream
+	rm -f debian/$(PACKAGE)/etc/$(NAME)/$(NAME).conf
+	# removes .la and .a files currently not useful
+	rm -f debian/$(PACKAGE)/usr/lib/$(NAME)/mod_*.la debian/$(PACKAGE)/usr/lib/$(NAME)/mod_*.a
+	
+	install -m 644 debian/templates/*.conf debian/$(PACKAGE)/usr/share/$(NAME)/templates
+	install -m 644 debian/templates/welcome.msg debian/$(PACKAGE)/usr/share/$(NAME)/templates/welcome.msg 
+	install -m 644 debian/templates/ftpusers debian/$(PACKAGE)/etc 
+	install -m 755 debian/$(PACKAGE).init debian/$(PACKAGE)/etc/init.d/$(NAME) 
+	install -m 644 debian/$(NAME).pam debian/$(PACKAGE)/etc/pam.d/$(NAME) 
+	install -m 644 debian/templates/default debian/$(PACKAGE)/etc/default/$(NAME) 
+	install debian/ftpusers.5 debian/$(PACKAGE)/usr/share/man/man5/ftpusers.5
+	install debian/ftpasswd.8 debian/$(PACKAGE)/usr/share/man/man8/ftpasswd.8
+	install debian/ftpstats.8 debian/$(PACKAGE)/usr/share/man/man8
+	install contrib/xferstats.holger-preiss debian/$(PACKAGE)/usr/sbin/ftpstats
+	install -m 755 contrib/ftpasswd debian/$(PACKAGE)/usr/sbin/ftpasswd
+	install -m 755 contrib/ftpquota debian/$(PACKAGE)/usr/sbin/ftpquota
+	install -m 755 debian/$(NAME).cron.monthly debian/$(PACKAGE)/etc/cron.monthly/$(NAME)
+	install -m 755 debian/proftpd-gencert debian/$(PACKAGE)/usr/sbin/proftpd-gencert
+
+	dh_installdebconf -a
+	dh_compress -a
+	dh_fixperms -a
+	dh_installdeb -a
+	dh_makeshlibs -a
+	dh_shlibdeps -a -l$(CURDIR)/debian/tmp/usr/lib/$(NAME)
+	dh_perl -a
+	dh_gencontrol -a 
+	dh_strip -a
+	dh_md5sums -a
+	dh_fixperms -a
+	dh_builddeb -a
+
+binary:	binary-arch binary-indep
+
+checkroot:
+	dh_testdir
+	dh_testroot
+
+.PHONY: binary binary-arch binary-indep clean checkroot patch unpatch myclean install configure
+

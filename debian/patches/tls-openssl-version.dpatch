@@ -1,0 +1,30 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## tls-openssl-version.dpatch by Francesco Paolo Lovergine <frankie@debian.org>
+##
+## All lines beginning with `## DP:' are a description of the patch.
+## DP: No description.
+
+@DPATCH@
+diff -urNad trunk~/contrib/mod_tls.c trunk/contrib/mod_tls.c
+--- trunk~/contrib/mod_tls.c	2007-10-09 23:45:04.000000000 +0200
++++ trunk/contrib/mod_tls.c	2007-10-18 16:56:31.000000000 +0200
+@@ -4466,8 +4466,10 @@
+ static int tls_init(void) {
+   int res = 0;
+ 
+-  /* Make sure that the OpenSSL headers used match the version of the
++  /* Check that the OpenSSL headers used match the version of the
+    * OpenSSL library used.
++   *
++   * For now, we only log if there is a difference.
+    */
+   if (SSLeay() != OPENSSL_VERSION_NUMBER) {
+     pr_log_pri(PR_LOG_ERR, MOD_TLS_VERSION
+@@ -4477,7 +4479,6 @@
+     tls_log("compiled using OpenSSL version '%s' headers, but linked to "
+       "OpenSSL version '%s' library", OPENSSL_VERSION_TEXT,
+       SSLeay_version(SSLEAY_VERSION));
+-    return -1;
+   }
+ 
+   /* Install our control channel NetIO handlers.  This is done here

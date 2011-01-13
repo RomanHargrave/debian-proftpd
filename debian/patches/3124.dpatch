@@ -1,0 +1,99 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## 3124.dpatch by Francesco Paolo Lovergine <frankie@debian.org>
+##
+## All lines beginning with `## DP:' are a description of the patch.
+## DP: No description.
+
+@DPATCH@
+diff -urNad 1.3.1~/contrib/mod_sql.c 1.3.1/contrib/mod_sql.c
+--- 1.3.1~/contrib/mod_sql.c	2009-02-09 10:13:01.000000000 +0100
++++ 1.3.1/contrib/mod_sql.c	2009-02-22 22:41:42.000000000 +0100
+@@ -1206,7 +1206,6 @@
+       return NULL;
+ 
+     username = (char *) mr->data;
+-
+     usrwhere = pstrcat(cmd->tmp_pool, cmap.usrfield, "='", username, "'", NULL);
+ 
+     sql_log(DEBUG_WARN, "cache miss for user '%s'", realname);
+@@ -1231,7 +1230,8 @@
+   }
+ 
+   if (!cmap.usercustom) { 
+-    where = sql_prepare_where(0, cmd, 2, usrwhere, cmap.userwhere, NULL);
++    where = sql_prepare_where(SQL_PREPARE_WHERE_FL_NO_TAGS, cmd, 2, usrwhere,
++      sql_prepare_where(0, cmd, 1, cmap.userwhere, NULL), NULL);
+ 
+     mr = _sql_dispatch(_sql_make_cmd(cmd->tmp_pool, 5, "default",
+       cmap.usrtable, cmap.usrfields, where, "1"), "sql_select");
+@@ -1457,7 +1457,8 @@
+       return NULL;
+     }
+ 
+-    where = sql_prepare_where(0, cmd, 2, grpwhere, cmap.groupwhere, NULL);
++    where = sql_prepare_where(SQL_PREPARE_WHERE_FL_NO_TAGS, cmd, 2, grpwhere,
++      sql_prepare_where(0, cmd, 1, cmap.groupwhere, NULL), NULL);
+ 
+     mr = _sql_dispatch(_sql_make_cmd(cmd->tmp_pool, 5, "default",
+       cmap.grptable, cmap.grpfield, where, "1"), "sql_select");
+@@ -1476,7 +1477,8 @@
+   grpwhere = pstrcat(cmd->tmp_pool, cmap.grpfield, " = '", groupname, "'",
+     NULL);
+ 
+-  where = sql_prepare_where(0, cmd, 2, grpwhere, cmap.groupwhere, NULL);
++  where = sql_prepare_where(SQL_PREPARE_WHERE_FL_NO_TAGS, cmd, 2, grpwhere,
++    sql_prepare_where(0, cmd, 1, cmap.groupwhere, NULL), NULL);
+ 
+   mr = _sql_dispatch(_sql_make_cmd(cmd->tmp_pool, 4, "default",
+     cmap.grptable, cmap.grpfields, where), "sql_select");
+@@ -1551,7 +1553,8 @@
+   usrwhere = pstrcat(cmd->tmp_pool, cmap.usrfield, " = '", _sql_realuser(cmd),
+     "'", NULL);
+ 
+-  where = sql_prepare_where(0, cmd, 2, usrwhere, cmap.userwhere, NULL);
++  where = sql_prepare_where(SQL_PREPARE_WHERE_FL_NO_TAGS, cmd, 2, usrwhere,
++    sql_prepare_where(0, cmd, 1, cmap.userwhere, NULL), NULL);
+ 
+   mr = _sql_dispatch(_sql_make_cmd(cmd->tmp_pool, 4, "default", cmap.usrtable,
+     query, where), "sql_update");
+@@ -1742,7 +1745,9 @@
+ 
+   if (strlen(tag) > 5 &&
+       strncmp(tag, "env:", 4) == 0) {
+-    char *env = pr_env_get(cmd->pool, tag + 4);
++    char *env;
++
++    env = pr_env_get(cmd->pool, tag + 4);
+     return pstrdup(cmd->tmp_pool, env ? env : "");
+   }
+ 
+@@ -2137,6 +2142,7 @@
+ 
+         } else {
+           argp = resolve_short_tag(cmd, *tmp);
++
+           mr = _sql_dispatch(_sql_make_cmd(cmd->tmp_pool, 2, "default",
+             argp), "sql_escapestring");
+           if (check_response(mr) < 0)
+@@ -3619,8 +3625,9 @@
+   usrwhere = pstrcat(cmd->tmp_pool, cmap.usrfield, " = '", _sql_realuser(cmd),
+     "'", NULL);
+ 
+-  where = sql_prepare_where(0, cmd, 2, usrwhere, cmap.userwhere, NULL);
+- 
++  where = sql_prepare_where(SQL_PREPARE_WHERE_FL_NO_TAGS, cmd, 2, usrwhere,
++    sql_prepare_where(0, cmd, 1, cmap.userwhere, NULL), NULL);
++
+   query = pstrcat(cmd->tmp_pool, cmap.sql_fstor, ", ",
+ 		  cmap.sql_fretr, ", ", cmap.sql_bstor, ", ",
+ 		  cmap.sql_bretr, NULL);
+@@ -3654,7 +3661,8 @@
+   usrwhere = pstrcat(cmd->tmp_pool, cmap.usrfield, " = '", _sql_realuser(cmd),
+     "'", NULL);
+ 
+-  where = sql_prepare_where(0, cmd, 2, usrwhere, cmap.userwhere, NULL);
++  where = sql_prepare_where(SQL_PREPARE_WHERE_FL_NO_TAGS, cmd, 2, usrwhere,
++    sql_prepare_where(0, cmd, 1, cmap.userwhere, NULL), NULL);
+ 
+   query = pstrcat(cmd->tmp_pool, cmap.sql_frate, ", ",
+ 		  cmap.sql_fcred, ", ", cmap.sql_brate, ", ",

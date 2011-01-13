@@ -1,0 +1,99 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## mod_delay.dpatch by Francesco Paolo Lovergine <frankie@debian.org>
+##
+## All lines beginning with `## DP:' are a description of the patch.
+## DP: No description.
+
+@DPATCH@
+diff -urNad trunk~/modules/mod_delay.c trunk/modules/mod_delay.c
+--- trunk~/modules/mod_delay.c	2007-10-09 23:45:03.000000000 +0200
++++ trunk/modules/mod_delay.c	2008-02-20 10:58:19.000000000 +0100
+@@ -388,12 +388,17 @@
+     MAP_SHARED, delay_tab.dt_fd, 0);
+ 
+   if (delay_tab.dt_data == MAP_FAILED) {
++    delay_tab.dt_data = NULL;
++
+     pr_log_pri(PR_LOG_ERR, MOD_DELAY_VERSION
+       ": error mapping DelayTable '%s' into memory: %s", delay_tab.dt_path,
+       strerror(errno));
+     pr_trace_msg("delay", 1, "error mapping DelayTable '%s' into memory: %s",
+       delay_tab.dt_path, strerror(errno));
++
+     pr_fsio_close(fh);
++    delay_tab.dt_fd = -1;
++
+     return -1;
+   }
+ 
+@@ -492,6 +497,7 @@
+   }
+ 
+   delay_tab.dt_data = NULL;
++  delay_tab.dt_fd = -1;
+ 
+   if (pr_fsio_close(fh) < 0) {
+     pr_log_pri(PR_LOG_WARNING, MOD_DELAY_VERSION
+@@ -502,7 +508,6 @@
+     return -1;
+   }
+ 
+-  delay_tab.dt_fd = -1;
+   return 0;
+ }
+ 
+@@ -527,15 +532,17 @@
+     }
+   }
+ 
+-  if (!delay_tab.dt_data) {
++  if (delay_tab.dt_data == NULL) {
+     pr_trace_msg("delay", 8, "mapping DelayTable '%s' (%" PR_LU
+       " bytes, fd %d) into memory", delay_tab.dt_path,
+       (pr_off_t) delay_tab.dt_size, delay_tab.dt_fd);
+     delay_tab.dt_data = mmap(NULL, delay_tab.dt_size, PROT_READ|PROT_WRITE,
+       MAP_SHARED, delay_tab.dt_fd, 0);
+ 
+-    if (delay_tab.dt_data == MAP_FAILED)
++    if (delay_tab.dt_data == MAP_FAILED) {
++      delay_tab.dt_data = NULL;
+       return -1;
++    }
+   }
+ 
+   return 0;
+@@ -947,7 +954,7 @@
+   /* Prepare for manipulating the table. */
+   if (delay_table_load(FALSE) < 0) {
+     pr_log_pri(PR_LOG_WARNING, MOD_DELAY_VERSION
+-      "warning: unable to load DelayTable '%s' into memory: %s",
++      ": unable to load DelayTable '%s' into memory: %s",
+       delay_tab.dt_path, strerror(errno));
+     pr_trace_msg("delay", 1, "unable to load DelayTable '%s' into memory: %s",
+       delay_tab.dt_path, strerror(errno));
+@@ -1020,7 +1027,7 @@
+   /* Prepare for manipulating the table. */
+   if (delay_table_load(FALSE) < 0) {
+     pr_log_pri(PR_LOG_WARNING, MOD_DELAY_VERSION
+-      "warning: unable to load DelayTable '%s' into memory: %s",
++      ": unable to load DelayTable '%s' into memory: %s",
+       delay_tab.dt_path, strerror(errno));
+     pr_trace_msg("delay", 1, "unable to load DelayTable '%s' into memory: %s",
+       delay_tab.dt_path, strerror(errno));
+@@ -1112,7 +1119,7 @@
+ 
+     errno = xerrno;
+     pr_log_pri(PR_LOG_WARNING, MOD_DELAY_VERSION
+-      "warning: unable to load DelayTable '%s' into memory: %s",
++      ": unable to load DelayTable '%s' into memory: %s",
+       delay_tab.dt_path, strerror(errno));
+     pr_trace_msg("delay", 1, "unable to load DelayTable '%s' into memory: %s",
+       delay_tab.dt_path, strerror(errno));
+@@ -1135,6 +1142,7 @@
+       strerror(errno));
+   }
+ 
++  delay_tab.dt_fd = -1;
+   if (pr_fsio_close(fh) < 0) {
+     pr_log_pri(PR_LOG_WARNING, MOD_DELAY_VERSION
+       ": warning: error writing DelayTable '%s': %s", delay_tab.dt_path,

@@ -1,0 +1,106 @@
+#
+#    Translators, if you are not familiar with the PO format, gettext
+#    documentation is worth reading, especially sections dedicated to
+#    this format, e.g. by running:
+#         info -n '(gettext)PO Files'
+#         info -n '(gettext)Header Entry'
+#
+#    Some information specific to po-debconf are available at
+#            /usr/share/doc/po-debconf/README-trans
+#         or http://www.debian.org/intl/l10n/po-debconf/README-trans
+#
+#    Developers do not need to manually edit POT or PO files.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: proftpd 1.2.9-16\n"
+"Report-Msgid-Bugs-To: proftpd-dfsg@packages.debian.org\n"
+"POT-Creation-Date: 2008-04-10 16:37+0200\n"
+"PO-Revision-Date: 2004-10-13 18:53+0200\n"
+"Last-Translator: Morten Brix Pedersen <morten@wtf.dk>\n"
+"Language-Team: Danish <dansk@klid.dk>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#. Type: select
+#. Choices
+#: ../proftpd.templates:2001
+msgid "from inetd"
+msgstr ""
+
+#. Type: select
+#. Choices
+#: ../proftpd.templates:2001
+#, fuzzy
+#| msgid "inetd, standalone"
+msgid "standalone"
+msgstr "inetd, alene"
+
+#. Type: select
+#. Description
+#: ../proftpd.templates:2002
+msgid "Run proftpd:"
+msgstr ""
+
+#. Type: select
+#. Description
+#: ../proftpd.templates:2002
+#, fuzzy
+msgid ""
+"ProFTPd can be run either as a service from inetd, or as a standalone "
+"server. Each choice has its own benefits. With only a few FTP connections "
+"per day, it is probably better to run ProFTPd from inetd in order to save "
+"resources."
+msgstr ""
+"ProFTPd kan køre enten som en service fra inetd, eller som en alenestående "
+"server. Hvert valg har deres fordele. Hvis du kun har et par ftp "
+"forbindelser om dagen, kan det måske ikke være ressourcerne værd at have "
+"proftpd kørende hele tiden."
+
+#. Type: select
+#. Description
+#: ../proftpd.templates:2002
+msgid ""
+"On the other hand, with higher traffic, ProFTPd should run as a standalone "
+"server to avoid spawning a new process for each incoming connection."
+msgstr ""
+
+#~ msgid "Warning on syntax changes in ProFTPd configuration."
+#~ msgstr "Advarsel om syntaksændringer i ProFTPd opsætning."
+
+#, fuzzy
+#~ msgid ""
+#~ "You are upgrading from a pre-1.3.0 version. Probably you will need to "
+#~ "revise your previous configuration to be compliant with current "
+#~ "directives. Please, consult documentation and how-tos available in "
+#~ "proftpd-doc and change /etc/proftpd/proftpd.conf as needed."
+#~ msgstr ""
+#~ "Du opgraderer fra en før-1.2.8 version. Du bør kigge din gamle opsætning "
+#~ "igennem for at sikre, at den er kompatibel med de nuværende direktiver. "
+#~ "Se dokumentationen tilgængelig i proftpd-doc og ret /etc/proftpd.conf til "
+#~ "dine behov."
+
+#, fuzzy
+#~ msgid ""
+#~ "Unfortunately, it is nearly impossible currently to convert your setup "
+#~ "automatically, but for some basic issues. You will have to do  it "
+#~ "yourself. ProFTPd could also be unable to use the resulting  "
+#~ "configuration, and it would not restart after upgrading."
+#~ msgstr ""
+#~ "Desværre er det næsten umuligt for mig at konvertere hele din opsætning "
+#~ "automatisk. Du skal gøre det selv. ProFTPd kan måske ikke bruge den "
+#~ "resulterede opsætning, og vil ikke kunne starte efter opgraderingen."
+
+#~ msgid "Run proftpd from inetd or standalone?"
+#~ msgstr "Kør proftpd fra inetd eller alene?"
+
+#, fuzzy
+#~ msgid ""
+#~ "On the other hand, if your ftp site is visited frequently, you should "
+#~ "rather run proftp as a standalone server (because with inetd, each time a "
+#~ "connection is opened, a new process is spawned)."
+#~ msgstr ""
+#~ "På den anden side, hvis dit ftpsted bliver besøgt ofte, så er inetd ikke "
+#~ "et godt valg, fordi hver gang en forbindelse bliver åbnet, skal en ny "
+#~ "proces startes."

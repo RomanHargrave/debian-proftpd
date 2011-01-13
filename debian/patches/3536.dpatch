@@ -1,0 +1,612 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## 3536.dpatch by Francesco Paolo Lovergine <frankie@debian.org>
+##
+## All lines beginning with `## DP:' are a description of the patch.
+## DP: No description.
+
+@DPATCH@
+diff -urNad '--exclude=CVS' '--exclude=.svn' '--exclude=.git' '--exclude=.arch' '--exclude=.hg' '--exclude=_darcs' '--exclude=.bzr' proftpd-dfsg~/contrib/mod_sql.c proftpd-dfsg/contrib/mod_sql.c
+--- proftpd-dfsg~/contrib/mod_sql.c	2011-01-25 10:10:43.000000000 +0100
++++ proftpd-dfsg/contrib/mod_sql.c	2011-01-25 10:11:57.000000000 +0100
+@@ -104,6 +104,12 @@
+ 
+ module sql_module;
+ 
++/* It is best if this value is larger than the PR_TUNABLE_BUFFER_SIZE value.
++ * PR_TUNABLE_BUFFER_SIZE controls how much network data from a client at
++ * a time we might read; by keeping the statement buffer size larger, we reduce
++ * the chance of handling data from the network which exceeds the statement
++ * buffer length.
++ */
+ #define SQL_MAX_STMT_LEN	4096
+ 
+ static char *sql_prepare_where(int, cmd_rec *, int, ...);
+@@ -120,6 +126,8 @@
+ 
+ static pool *sql_pool = NULL;
+ 
++static const char *trace_channel = "sql";
++
+ /*
+  * cache typedefs
+  */
+@@ -765,7 +773,8 @@
+   char *buf = "", *res;
+   va_list dummy;
+ 
+-  res = pcalloc(cmd->tmp_pool, SQL_MAX_STMT_LEN);
++  /* Allocate one byte more for the terminating NUL. */
++  res = pcalloc(cmd->tmp_pool, SQL_MAX_STMT_LEN + 1);
+ 
+   flag = 0;
+   va_start(dummy, cnt);
+@@ -788,13 +797,20 @@
+   if (!(flags & SQL_PREPARE_WHERE_FL_NO_TAGS)) {
+     char *curr, *tmp;
+ 
+-    /* Process variables in WHERE clauses, except any "%{num}" references. */
++    /* Process variables in WHERE clauses, except any "%{num}" references.
++     *
++     * curr_avail is deliberately set to be one byte less than the allocated
++     * length, to make sure that there is a terminating NUL.
++     */
+     curr = res;
+     curr_avail = SQL_MAX_STMT_LEN;
+ 
+     for (tmp = buf; *tmp; ) {
+       char *str;
+       modret_t *mr;
++      size_t taglen;
++
++      pr_signals_handle();
+ 
+       if (*tmp == '%') {
+         char *tag = NULL;
+@@ -819,10 +835,24 @@
+             if (check_response(mr) < 0)
+               return NULL;
+ 
+-            sstrcat(curr, mr->data, curr_avail);
+-            curr += strlen(mr->data);
+-            curr_avail -= strlen(mr->data);
++            /* Make sure we don't write too much data. */
++            taglen = strlen(mr->data);
++            if (curr_avail > taglen) {
++              sstrcat(curr, mr->data, curr_avail);
++              curr += taglen;
++              curr_avail -= taglen;
++
++            } else {
++              /* Log when this happens; it means we have more input than buffer
++               * space.
++               */
++              sql_log(DEBUG_FUNC, "insufficient statement buffer size "
++                "(%d of %lu bytes) for tag (%lu bytes) when preparing "
++                "statement, ignoring tag '%s'", curr_avail,
++                (unsigned long) SQL_MAX_STMT_LEN, (unsigned long) taglen, tag);
++            }
+ 
++            /* Advance past the tag. */
+             if (*tmp != '\0')
+               tmp++;
+ 
+@@ -837,20 +867,51 @@
+           if (check_response(mr) < 0)
+             return NULL;
+ 
+-          sstrcat(curr, mr->data, curr_avail);
+-          curr += strlen(mr->data);
+-          curr_avail -= strlen(mr->data);
++          /* Make sure we don't write too much data. */
++          taglen = strlen(mr->data);
++          if (curr_avail > taglen) {
++            sstrcat(curr, mr->data, curr_avail);
++            curr += taglen;
++            curr_avail -= taglen;
++
++          } else {
++            /* Log when this happens; it means we have more input than buffer
++             * space.
++             */
++            sql_log(DEBUG_FUNC, "insufficient statement buffer size "
++              "(%d of %lu bytes) for tag (%lu bytes) when preparing "
++              "statement, ignoring tag '%%%c'", curr_avail,
++              (unsigned long) SQL_MAX_STMT_LEN, (unsigned long) taglen, *tmp);
++          }
+ 
++          /* Advance past the tag. */
+           if (*tmp != '\0')
+             tmp++;
+         }
+ 
+       } else {
+-        *curr++ = *tmp++;
+-        curr_avail--;
++
++        /* Make sure we don't try to write too much data. */
++        if (curr_avail > 0) {
++          *curr++ = *tmp;
++          curr_avail--;
++
++        } else {
++          /* Log when this happens; it means we have more input than buffer
++           * space.  And break out of the processing loop.
++           */
++          sql_log(DEBUG_FUNC, "insufficient statement buffer size "
++            "(%d of %lu bytes) for input when preparing statement, skipping",
++            curr_avail, (unsigned long) SQL_MAX_STMT_LEN);
++          break;
++        }
++
++        if (*tmp != '\0')
++          tmp++;
+       }
+     }
+-    *curr++ = '\0';
++
++    *curr = '\0';
+ 
+   } else {
+     res = buf;
+@@ -1569,7 +1630,7 @@
+   modret_t *mr = NULL;
+   array_header *gids = NULL, *groups = NULL;
+   char *name = cmd->argv[0], *username = NULL;
+-  int numrows = 0;
++  int argc, numrows = 0, res = -1;
+   register unsigned int i = 0;
+ 
+   /* Check for NULL values */
+@@ -1582,10 +1643,21 @@
+   lpw.pw_uid = -1;
+   lpw.pw_name = name;
+   
++
++  /* Now that we have the pointers for the lists, tweak the argc field
++   * before passing this cmd_rec on, lest we try to resolve some variable
++   * like %r which will assume that all of the cmd_rec args are strings, as
++   * from the client.
++   */
++  argc = cmd->argc;
++  cmd->argc = 1;
++
+   /* Retrieve the necessary info */
+   if (!name ||
+-      !(pw = _sql_getpasswd(cmd, &lpw)))
++      !(pw = _sql_getpasswd(cmd, &lpw))) {
++    cmd->argc = argc;
+     return -1;
++  }
+ 
+   /* Populate the first group ID and name */
+   if (gids)
+@@ -1600,8 +1672,10 @@
+ 
+   mr = _sql_dispatch(_sql_make_cmd(cmd->tmp_pool, 2, "default", name),
+     "sql_escapestring");
+-  if (check_response(mr) < 0)
++  if (check_response(mr) < 0) {
++    cmd->argc = argc;
+     return -1;
++  }
+ 
+   username = (char *) mr->data;
+ 
+@@ -1635,14 +1709,18 @@
+   
+   mr = _sql_dispatch(_sql_make_cmd(cmd->tmp_pool, 4, "default",
+     cmap.grptable, cmap.grpfields, where), "sql_select");
+-  if (check_response(mr) < 0)
++  if (check_response(mr) < 0) {
++    cmd->argc = argc;
+     return -1;
+-  
++  }
++
+   sd = (sql_data_t *) mr->data;
+ 
+   /* If we have no data... */
+-  if (sd->rnum == 0)
++  if (sd->rnum == 0) {
++    cmd->argc = argc;
+     return -1;
++  }
+ 
+   rows = sd->data;
+   numrows = sd->rnum;
+@@ -1671,15 +1749,16 @@
+   }
+ 
+   if (gids &&
+-      gids->nelts > 0)
+-    return gids->nelts;
++      gids->nelts > 0) 
++    res = gids->nelts;
+ 
+   else if (groups &&
+            groups->nelts)
+-    return groups->nelts;
++    res = groups->nelts;
+ 
+   /* Default */
+-  return -1;
++  cmd->argc = argc;
++  return res;
+ }
+ 
+ /* Command handlers
+@@ -1769,7 +1848,7 @@
+ }
+ 
+ static char *resolve_short_tag(cmd_rec *cmd, char tag) {
+-  char arg[256] = {'\0'}, *argp;
++  char arg[256] = {'\0'}, *argp = NULL, *short_tag = NULL;
+ 
+   switch (tag) {
+   case 'A': {
+@@ -2048,7 +2127,11 @@
+     break;
+   }
+ 
+-  return pstrdup(cmd->tmp_pool, argp);
++  short_tag = pstrdup(cmd->tmp_pool, argp);
++  pr_trace_msg(trace_channel, 15, "returning short tag '%s' for tag '%%%c'",
++    short_tag, tag);
++
++  return short_tag;
+ }
+ 
+ static char *_named_query_type(cmd_rec *cmd, char *name) {
+@@ -2067,7 +2150,7 @@
+ static modret_t *_process_named_query(cmd_rec *cmd, char *name) {
+   config_rec *c;
+   char *query, *tmp, *argp;
+-  char outs[SQL_MAX_STMT_LEN] = {'\0'}, *outsp;
++  char outs[SQL_MAX_STMT_LEN+1], *outsp = NULL;
+   char *esc_arg = NULL;
+   modret_t *mr = NULL;
+   int num = 0;
+@@ -2080,6 +2163,8 @@
+ 
+   c = find_config(main_server->conf, CONF_PARAM, query, FALSE);
+   if (c) {
++    size_t arglen, outs_remain = sizeof(outs)-1;
++
+     /* Select string fixup */
+     memset(outs, '\0', sizeof(outs));
+     outsp = outs;
+@@ -2151,19 +2236,47 @@
+           esc_arg = (char *) mr->data;
+         }
+ 
+-        /* XXX Should be sstrcat(). */
+-        strcat(outs, esc_arg);
+-        outsp += strlen(esc_arg);
++        arglen = strlen(esc_arg);
++        if (outs_remain > arglen) {
++          sstrcat(outsp, esc_arg, outs_remain);
++          outsp += arglen;
++          outs_remain -= arglen;
++
++        } else {
++          /* Log when this happens; it means we have more input than buffer
++           * space.
++           */
++          sql_log(DEBUG_FUNC, "insufficient statement buffer size "
++            "(%lu of %lu bytes) for tag (%Lu bytes) when processing named "
++            "query '%s', ignoring tag", (unsigned long) outs_remain,
++            (unsigned long) SQL_MAX_STMT_LEN, (unsigned long) arglen, name);
++        }
+ 
+         if (*tmp != '\0')
+           tmp++;
+ 
+       } else {
+-        *outsp++ = *tmp++;
++        if (outs_remain > 0) {
++          *outsp++ = *tmp;
++          outs_remain--;
++
++        } else {
++          /* Log when this happens; it means we have more input than buffer
++           * space.  And break out the processing loop.
++           */
++          sql_log(DEBUG_FUNC, "insufficient statement buffer size "
++            "(%lu of %lu bytes) for input when processing named query '%s', "
++            "skipping", (unsigned long) outs_remain,
++            (unsigned long) SQL_MAX_STMT_LEN, name);
++          break;
++        }
++
++        if (*tmp != '\0')
++          tmp++;
+       }
+     }
+       
+-    *outsp++ = 0;
++    *outsp++ = '\0';
+ 
+     /* Construct our return data based on the type of query */
+     if (strcasecmp(c->argv[0], SQL_UPDATE_C) == 0) {
+@@ -2364,7 +2477,7 @@
+   char *type = NULL;
+   char *name = NULL;
+   config_rec *c = NULL;
+-  char outs[SQL_MAX_STMT_LEN] = {'\0'}, *outsp;
++  char outs[SQL_MAX_STMT_LEN+1], *outsp;
+   char *argp = NULL; 
+   char *tmp = NULL;
+   modret_t *mr = NULL;
+@@ -2386,10 +2499,14 @@
+      */
+ 
+     do {
++      size_t arglen, outs_remain = sizeof(outs)-1;
++
+       memset(outs, '\0', sizeof(outs));
+       outsp = outs;
+ 
+       for (tmp = c->argv[1]; *tmp; ) {
++          pr_signals_handle();
++
+ 	if (*tmp == '%') {
+ 	  /* is the tag a named_query reference?  If so, process the 
+ 	   * named query, otherwise process it as a normal tag.. 
+@@ -2433,18 +2550,48 @@
+ 	    argp = resolve_short_tag(cmd, *tmp);
+ 	  }
+ 
+-	  sstrcat(outs, argp, sizeof(outs));
+-	  outsp += strlen(argp);
++      arglen = strlen(argp);
++      if (outs_remain > arglen) {
++        sstrcat(outsp, argp, outs_remain);
++        outsp += arglen;
++        outs_remain -= arglen;
++
++      } else {
++        /* Log when this happens; it means we have more input than buffer
++         * space.
++         */
++        sql_log(DEBUG_FUNC, "insufficient statement buffer size "
++          "(%lu of %lu bytes) for tag (%Lu bytes) when processing "
++          "SQLShowInfo query '%s', ignoring tag",
++          (unsigned long) outs_remain, (unsigned long) SQL_MAX_STMT_LEN,
++          (unsigned long) arglen, name);
++      }
+ 
+ 	  if (*tmp != '\0')
+             tmp++;
+ 
+ 	} else {
+-	  *outsp++ = *tmp++;
+-	}
++        if (outs_remain > 0) {
++          *outsp++ = *tmp++;
++          outs_remain--;
++
++        } else {
++          /* Log when this happens; it means we have more input than
++           * buffer space.  And break out of the processing loop.
++           */
++          sql_log(DEBUG_FUNC, "insufficient statement buffer size "
++            "(%lu of %lu bytes) when processing SQLShowInfo query '%s', "
++            "ignoring input", (unsigned long) outs_remain,
++            (unsigned long) SQL_MAX_STMT_LEN, (unsigned long) arglen);
++          break;
++        }
++
++        if (*tmp != '\0')
++          tmp++;
++    	}
+       }
+       
+-      *outsp++ = 0;
++      *outsp++ = '\0';
+ 
+       /* add the response */
+       pr_response_add(c->argv[0], "%s", outs);
+@@ -2467,10 +2614,14 @@
+      */
+ 
+     do {
++      size_t arglen, outs_remain = sizeof(outs)-1;
++
+       memset(outs, '\0', sizeof(outs));
+       outsp = outs;
+ 
+       for (tmp = c->argv[1]; *tmp; ) {
++          pr_signals_handle();
++
+ 	if (*tmp == '%') {
+ 	  /* is the tag a named_query reference?  If so, process the 
+ 	   * named query, otherwise process it as a normal tag.. 
+@@ -2513,18 +2664,48 @@
+ 	    argp = resolve_short_tag(cmd, *tmp);
+ 	  }
+ 
+-	  sstrcat(outs, argp, sizeof(outs));
+-	  outsp += strlen(argp);
++      arglen = strlen(argp);
++      if (outs_remain > arglen) {
++        sstrcat(outsp, argp, outs_remain);
++        outsp += arglen;
++        outs_remain -= arglen;
++
++      } else {
++        /* Log when this happens; it means we have more input than buffer
++         * space.
++         */
++        sql_log(DEBUG_FUNC, "insufficient statement buffer size "
++          "(%lu of %lu bytes) for tag (%Lu bytes) when processing "
++          "SQLShowInfo query '%s', ignoring tag",
++          (unsigned long) outs_remain, (unsigned long) SQL_MAX_STMT_LEN,
++          (unsigned long) arglen, name);
++      }
+ 
+ 	  if (*tmp != '\0')
+             tmp++;
+ 
+ 	} else {
+-	  *outsp++ = *tmp++;
+-	}
++        if (outs_remain > 0) {
++          *outsp++ = *tmp;
++          outs_remain--;
++
++        } else {
++          /* Log when this happens; it means we have more input than
++           * buffer space.  And break out of the processing loop.
++           */
++          sql_log(DEBUG_FUNC, "insufficient statement buffer size "
++            "(%lu of %lu bytes) when processing SQLShowInfo query '%s', "
++            "ignoring input", (unsigned long) outs_remain,
++            (unsigned long) SQL_MAX_STMT_LEN, (unsigned long) arglen);
++          break;
++        }
++
++        if (*tmp != '\0')
++          tmp++;
++    	}
+       }
+       
+-      *outsp++ = 0;
++      *outsp++ = '\0';
+ 
+       /* add the response */
+       pr_response_add(c->argv[0], "%s", outs);
+@@ -2541,7 +2722,7 @@
+   char *type = NULL;
+   char *name = NULL;
+   config_rec *c = NULL;
+-  char outs[SQL_MAX_STMT_LEN] = {'\0'}, *outsp;
++  char outs[SQL_MAX_STMT_LEN+1], *outsp = NULL;
+   char *argp = NULL; 
+   char *tmp = NULL;
+   modret_t *mr = NULL;
+@@ -2563,6 +2744,8 @@
+      */
+ 
+     do {
++      size_t arglen, outs_remain = sizeof(outs)-1;
++
+       memset(outs, '\0', sizeof(outs));
+       outsp = outs;
+ 
+@@ -2609,18 +2792,48 @@
+ 	    argp = resolve_short_tag(cmd, *tmp);
+ 	  }
+ 
+-	  sstrcat(outs, argp, sizeof(outs));
+-	  outsp += strlen(argp);
++      arglen = strlen(argp);
++      if (outs_remain > arglen) {
++        sstrcat(outsp, argp, outs_remain);
++        outsp += arglen;
++        outs_remain -= arglen;
++
++      } else {
++        /* Log when this happens; it means we have more input than buffer
++         * space.
++         */
++        sql_log(DEBUG_FUNC, "insufficient statement buffer size "
++          "(%lu of %lu bytes) for tag (%Lu bytes) when processing "
++          "SQLShowInfo query '%s', ignoring tag",
++          (unsigned long) outs_remain, (unsigned long) SQL_MAX_STMT_LEN,
++          (unsigned long) arglen, name);
++      }
+ 
+ 	  if (*tmp != '\0')
+             tmp++;
+ 
+ 	} else {
+-	  *outsp++ = *tmp++;
+-	}
++        if (outs_remain > 0) {
++          *outsp++ = *tmp;
++          outs_remain--;
++
++        } else {
++          /* Log when this happens; it means we have more input than
++           * buffer space.  And break out of the processing loop.
++           */
++          sql_log(DEBUG_FUNC, "insufficient statement buffer size "
++            "(%lu of %lu bytes) when processing SQLShowInfo query '%s', "
++            "ignoring input", (unsigned long) outs_remain,
++            (unsigned long) SQL_MAX_STMT_LEN, (unsigned long) arglen);
++          break;
++        }
++
++        if (*tmp != '\0')
++          tmp++;
++    	}
+       }
+       
+-      *outsp++ = 0;
++      *outsp++ = '\0';
+ 
+       /* add the response */
+       pr_response_add_err(c->argv[0], "%s", outs);
+@@ -2643,6 +2856,8 @@
+      */
+ 
+     do {
++      size_t arglen, outs_remain = sizeof(outs)-1;
++
+       memset(outs, '\0', sizeof(outs));
+       outsp = outs;
+ 
+@@ -2689,18 +2904,48 @@
+ 	    argp = resolve_short_tag(cmd, *tmp);
+ 	  }
+ 
+-	  sstrcat(outs, argp, sizeof(outs));
+-	  outsp += strlen(argp);
++      arglen = strlen(argp);
++      if (outs_remain > arglen) {
++        sstrcat(outsp, argp, outs_remain);
++        outsp += arglen;
++        outs_remain -= arglen;
++
++      } else {
++        /* Log when this happens; it means we have more input than buffer
++         * space.
++         */
++        sql_log(DEBUG_FUNC, "insufficient statement buffer size "
++          "(%lu of %lu bytes) for tag (%Lu bytes) when processing "
++          "SQLShowInfo query '%s', ignoring tag",
++          (unsigned long) outs_remain, (unsigned long) SQL_MAX_STMT_LEN,
++          (unsigned long) arglen, name);
++      }
+ 
+ 	  if (*tmp != '\0')
+             tmp++;
+ 
+ 	} else {
+-	  *outsp++ = *tmp++;
+-	}
++        if (outs_remain > 0) {
++          *outsp++ = *tmp;
++          outs_remain--;
++
++        } else {
++          /* Log when this happens; it means we have more input than
++           * buffer space.  And break out of the processing loop.
++           */
++          sql_log(DEBUG_FUNC, "insufficient statement buffer size "
++            "(%lu of %lu bytes) when processing SQLShowInfo query '%s', "
++            "ignoring input", (unsigned long) outs_remain,
++            (unsigned long) SQL_MAX_STMT_LEN, (unsigned long) arglen);
++          break;
++        }
++
++        if (*tmp != '\0')
++          tmp++;
++    	}
+       }
+       
+-      *outsp++ = 0;
++      *outsp++ = '\0';
+ 
+       /* add the response */
+       pr_response_add(c->argv[0], "%s", outs);

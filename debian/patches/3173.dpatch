@@ -1,0 +1,266 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## 3173.dpatch by Francesco Paolo Lovergine <frankie@debian.org>
+##
+## All lines beginning with `## DP:' are a description of the patch.
+## DP: No description.
+
+@DPATCH@
+diff -urNad trunk~/contrib/mod_sql_mysql.c trunk/contrib/mod_sql_mysql.c
+--- trunk~/contrib/mod_sql_mysql.c	2009-02-06 11:17:51.000000000 +0100
++++ trunk/contrib/mod_sql_mysql.c	2009-02-06 11:17:56.000000000 +0100
+@@ -128,7 +128,7 @@
+  * Internal define used for debug and logging.  All backends are encouraged
+  * to use the same format.
+  */
+-#define MOD_SQL_MYSQL_VERSION		"mod_sql_mysql/4.0.7"
++#define MOD_SQL_MYSQL_VERSION		"mod_sql_mysql/4.0.8"
+ 
+ #define _MYSQL_PORT "3306"
+ 
+@@ -440,6 +440,49 @@
+     return _build_error(cmd, conn);
+   }
+ 
++#ifdef PR_USE_NLS
++  if (pr_utf8_get_encoding() != NULL) {
++
++# if MYSQL_VERSION_ID >= 50007
++    /* Configure the connection for the current local character set.
++     *
++     * Note: the mysql_set_character_set() function appeared in MySQL 5.0.7,
++     * as per:
++     *
++     *  http://dev.mysql.com/doc/refman/5.0/en/mysql-set-character-set.html
++     */
++    if (!mysql_set_character_set(conn->mysql, pr_utf8_get_charset())) {
++      sql_log(DEBUG_FUNC, "%s", "exiting \tmysql cmd_open");
++      return _build_error(cmd, conn);
++    }
++
++    sql_log(DEBUG_FUNC, "MySQL connection character set now '%s' (from '%s')",
++      mysql_character_set_name(conn->mysql), pr_utf8_get_charset());
++
++# else
++    /* No mysql_set_character_set() API available.  But
++     * mysql_character_set_name() has been around for a while; we can use it
++     * to at least see whether there might be a character set discrepancy.
++     */
++
++    const char *local_charset = pr_utf8_get_charset();
++    const char *mysql_charset = mysql_character_set_name(conn->mysql);
++
++    if (local_charset &&
++        mysql_charset &&
++        strcasecmp(local_charset, mysql_charset) != 0) {
++      pr_log_pri(PR_LOG_ERR, MOD_SQL_MYSQL_VERSION
++        ": local character set '%s' does not match MySQL character set '%s', "
++        "SQL injection possible, shutting down", local_charset, mysql_charset);
++      sql_log(DEBUG_WARN, "local character set '%s' does not match MySQL "
++        "character set '%s', SQL injection possible, shutting down",
++        local_charset, mysql_charset);
++      end_login(1);
++    }
++# endif /* older MySQL */
++  }
++#endif /* !PR_USE_NLS */
++
+   /* bump connections */
+   entry->connections++;
+ 
+diff -urNad trunk~/contrib/mod_sql_postgres.c trunk/contrib/mod_sql_postgres.c
+--- trunk~/contrib/mod_sql_postgres.c	2009-02-06 11:17:51.000000000 +0100
++++ trunk/contrib/mod_sql_postgres.c	2009-02-06 11:17:56.000000000 +0100
+@@ -34,7 +34,7 @@
+  * Internal define used for debug and logging.  All backends are encouraged
+  * to use the same format.
+  */
+-#define MOD_SQL_POSTGRES_VERSION	"mod_sql_postgres/4.03"
++#define MOD_SQL_POSTGRES_VERSION	"mod_sql_postgres/4.0.4"
+ 
+ #define _POSTGRES_PORT "5432"
+ 
+@@ -43,6 +43,21 @@
+ 
+ #include <libpq-fe.h>
+ 
++/* For the pg_encoding_to_char() function, used for NLS support, we need
++ * to include the <mb/pg_wchar.h> file.  It's OK; the function has been
++ * declared in that file for a while, according to:
++ *
++ *  http://archives.postgresql.org/pgsql-bugs/2006-07/msg00125.php
++ *
++ * But it's a pain to quell all of the compiler warnings about redefined
++ * this, undefined that.  The linker finds the symbol without issue, so
++ * punt on including <mb/pg_wchar.h> file.  Instead, we'll copy the
++ * function declaration here.
++ */
++#ifdef PR_USE_NLS
++extern const char *pg_encoding_to_char(int encoding);
++#endif
++
+ /* 
+  * timer-handling code adds the need for a couple of forward declarations
+  */
+@@ -306,6 +321,39 @@
+     return _build_error( cmd, conn );
+   }
+ 
++#ifdef PR_USE_NLS
++  if (pr_utf8_get_encoding() != NULL) {
++    const char *encoding = pr_utf8_get_encoding();
++
++    /* XXX Hack to deal with Postgres' incredibly broken behavior when
++     * handling the 'ASCII' encoding.  Specifically, Postgres chokes on
++     * 'ASCII', and instead insists on calling it 'SQL_ASCII' (which, of
++     * course, is not even close to being a valid encoding name according
++     * to libiconv.)
++     *
++     * Treat 'ANSI_X3.4-1968' (another common name/alias for ASCII) the
++     * same; rename it to 'SQL_ASCII' for Postgres' benefit.  And same for
++     * 'US-ASCII'.
++     */
++    if (strcmp(encoding, "ANSI_X3.4-1968") == 0 ||
++        strcmp(encoding, "ASCII") == 0 ||
++        strcmp(encoding, "US-ASCII") == 0) {
++      encoding = "SQL_ASCII";
++    }
++
++    /* Configure the connection for the current local character set. */
++    if (PQsetClientEncoding(conn->postgres, encoding) < 0) {
++      /* if it didn't work, return an error */
++      sql_log(DEBUG_FUNC, "%s", "exiting \tpostgres cmd_open");
++      return _build_error(cmd, conn);
++    }
++
++    sql_log(DEBUG_FUNC, "Postgres connection character set now '%s' "
++      "(from '%s')", pg_encoding_to_char(PQclientEncoding(conn->postgres)),
++      pr_utf8_get_charset());
++  }
++#endif /* !PR_USE_NLS */
++
+   /* bump connections */
+   entry->connections++;
+ 
+diff -urNad trunk~/include/utf8.h trunk/include/utf8.h
+--- trunk~/include/utf8.h	2008-08-07 15:24:18.000000000 +0200
++++ trunk/include/utf8.h	2009-02-06 11:17:56.000000000 +0100
+@@ -37,6 +37,9 @@
+  */
+ char *pr_utf8_encode(pool *p, const char *in, size_t inlen, size_t *outlen);
+ 
++const char *pr_utf8_get_charset(void);
++const char *pr_utf8_get_encoding(void);
++
+ /* Internal use only. */
+ int utf8_init(void);
+ int utf8_free(void);
+diff -urNad trunk~/src/utf8.c trunk/src/utf8.c
+--- trunk~/src/utf8.c	2008-08-07 15:24:15.000000000 +0200
++++ trunk/src/utf8.c	2009-02-06 11:17:56.000000000 +0100
+@@ -42,6 +42,9 @@
+ static iconv_t decode_conv = (iconv_t) -1;
+ static iconv_t encode_conv = (iconv_t) -1;
+ 
++static const char *local_charset = NULL;
++static const char *encoding = "UTF-8";
++
+ static int utf8_convert(iconv_t conv, char *inbuf, size_t *inbuflen,
+     char *outbuf, size_t *outbuflen) {
+ # ifdef HAVE_ICONV
+@@ -78,10 +81,14 @@
+   if (res < 0) 
+     return -1;
+ 
++  encode_conv = (iconv_t) -1;
++
+   res = iconv_close(decode_conv);
+   if (res < 0)
+     return -1;
+ 
++  decode_conv = (iconv_t) -1;
++
+   return 0;
+ # else
+   errno = ENOSYS;
+@@ -90,36 +97,37 @@
+ }
+ 
+ int utf8_init(void) {
+-  const char *local_charset;
+ 
++  if (local_charset == NULL) {
+ #ifdef HAVE_NL_LANGINFO
+-  /* Look up the current charset.  If there's a problem, default to
+-   * UCS-2.
+-   */
+-  local_charset = nl_langinfo(CODESET);
+-  if (!local_charset) {
+-    local_charset = "C";
+-    pr_trace_msg("utf8", 1,
+-      "unable to determine locale, defaulting to 'C' for UTF8 conversion");
++    /* Look up the current charset.  If there's a problem, default to
++     * UCS-2.
++     */
++    local_charset = nl_langinfo(CODESET);
++    if (!local_charset) {
++      local_charset = "C";
++      pr_trace_msg("utf8", 1,
++        "unable to determine locale, defaulting to 'C' for UTF8 conversion");
+ 
+-  } else {
+-    pr_trace_msg("utf8", 1, "converting UTF8 to local character set '%s'",
+-      local_charset);
+-  }
++    } else {
++      pr_trace_msg("utf8", 1, "converting UTF8 to local character set '%s'",
++        local_charset);
++    }
+ #else
+-  local_charset = "C";
+-  pr_trace_msg("utf8", 1,
+-    "nl_langinfo(3) not supported, defaulting to using 'C' for UTF8 "
+-    "conversion");
++    local_charset = "C";
++    pr_trace_msg("utf8", 1,
++      "nl_langinfo(3) not supported, defaulting to using 'C' for UTF8 "
++      "conversion");
+ #endif /* HAVE_NL_LANGINFO */
++  }
+ 
+ # ifdef HAVE_ICONV
+   /* Get the iconv handles. */
+-  encode_conv = iconv_open(local_charset, "UTF-8");
++  encode_conv = iconv_open(encoding, local_charset);
+   if (encode_conv == (iconv_t) -1)
+     return -1;
+  
+-  decode_conv = iconv_open("UTF-8", local_charset);
++  decode_conv = iconv_open(local_charset, encoding);
+   if (decode_conv == (iconv_t) -1)
+     return -1;
+ 
+@@ -200,4 +208,24 @@
+ #endif /* !HAVE_ICONV_H */
+ }
+ 
++const char *pr_utf8_get_charset(void) {
++#ifdef HAVE_ICONV_H
++  return local_charset;
++
++#else
++  errno = ENOSYS;
++  return NULL;
++#endif /* !HAVE_ICONV_H */
++}
++
++const char *pr_utf8_get_encoding(void) {
++#ifdef HAVE_ICONV_H
++  return encoding;
++
++#else
++  errno = ENOSYS;
++  return NULL;
++#endif /* !HAVE_ICONV_H */
++}
++
+ #endif /* PR_USE_NLS */

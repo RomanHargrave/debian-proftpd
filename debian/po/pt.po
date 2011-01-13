@@ -1,0 +1,108 @@
+# Portuguese translation of proftpd debconf messages.
+# This file is distributed under the same license as the proftpd package.
+# Ricardo Silva <ardoric@gmail.com>, 2006.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: proftpd-dfsg 1.3.1-3:\n"
+"Report-Msgid-Bugs-To: proftpd-dfsg@packages.debian.org\n"
+"POT-Creation-Date: 2008-04-10 16:37+0200\n"
+"PO-Revision-Date: 2007-12-15 12:23+0000\n"
+"Last-Translator: Ricardo Silva <ardoric@gmail.com>\n"
+"Language-Team: Native Portuguese <traduz@debianpt.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=ISO-8859-1\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#. Type: select
+#. Choices
+#: ../proftpd.templates:2001
+msgid "from inetd"
+msgstr "a partir do inetd"
+
+#. Type: select
+#. Choices
+#: ../proftpd.templates:2001
+msgid "standalone"
+msgstr "em modo solitário"
+
+#. Type: select
+#. Description
+#: ../proftpd.templates:2002
+msgid "Run proftpd:"
+msgstr "Correr o proftpd:"
+
+#. Type: select
+#. Description
+#: ../proftpd.templates:2002
+msgid ""
+"ProFTPd can be run either as a service from inetd, or as a standalone "
+"server. Each choice has its own benefits. With only a few FTP connections "
+"per day, it is probably better to run ProFTPd from inetd in order to save "
+"resources."
+msgstr ""
+"O ProFTPd pode ser corrido tanto como um serviço do inetd, bem como um "
+"servidor solitário. Cada escolha tem os seus benefícios. Se tem apenas "
+"algumas ligações ftp por dia, é provavelmente melhor correr o proftpd pelo "
+"inetd para poupar recursos."
+
+#. Type: select
+#. Description
+#: ../proftpd.templates:2002
+msgid ""
+"On the other hand, with higher traffic, ProFTPd should run as a standalone "
+"server to avoid spawning a new process for each incoming connection."
+msgstr ""
+"Por outro lado, com mais trafego, o ProFTPd deve ser iniciado como um "
+"servidor solitário para evitar a criação de novos processos para cada "
+"ligação."
+
+#~ msgid "Warning on syntax changes in ProFTPd configuration."
+#~ msgstr "Aviso sobre mudanças de sintaxe na configuração do ProFTPd."
+
+#~ msgid ""
+#~ "You are upgrading from a pre-1.3.0 version. Probably you will need to "
+#~ "revise your previous configuration to be compliant with current "
+#~ "directives. Please, consult documentation and how-tos available in "
+#~ "proftpd-doc and change /etc/proftpd/proftpd.conf as needed."
+#~ msgstr ""
+#~ "Está a actualizar de uma versão anterior a 1.3.0. Provavelmente terá de "
+#~ "rever a sua configuração prévia de forma a ser compatível com as "
+#~ "directivas actuais. Por favor, consulte a documentação e os how-to's "
+#~ "disponíveis no pacote proftpd-doc e mude o ficheiro /etc/proftpd/proftpd."
+#~ "conf conforme necessário."
+
+#~ msgid ""
+#~ "Unfortunately, it is nearly impossible currently to convert your setup "
+#~ "automatically, but for some basic issues. You will have to do  it "
+#~ "yourself. ProFTPd could also be unable to use the resulting  "
+#~ "configuration, and it would not restart after upgrading."
+#~ msgstr ""
+#~ "Infelizmente, é quase impossível actualmente converter a sua configuração "
+#~ "automaticamente, a não ser em alguns pontos básicos. Terá de o fazer por "
+#~ "si próprio. O ProFTPd pode também não ser capaz de usar a configuração "
+#~ "resultante, e não se inicializar depois da actualização."
+
+#~ msgid ""
+#~ "Note also that starting from 1.3.0 version, dynamic modules are used and "
+#~ "configuration should be splitted, keeping modules loading instructions "
+#~ "within the new /etc/proftpd/modules.conf configuration file for future "
+#~ "hacks. That file should be included by the main configuration file."
+#~ msgstr ""
+#~ "Note também que a partir da versão 1.3.0, são usados módulos dinâmicos e "
+#~ "a configuração deve ser separada, mantendo instruções de carregamento do "
+#~ "módulos no novo ficheiro de configuração /etc/proftpd/modules.conf para "
+#~ "'hacks' futuros. Esse ficheiro deve ser incluído pelo ficheiro principal "
+#~ "de configuração."
+
+#~ msgid "Run proftpd from inetd or standalone?"
+#~ msgstr "Correr o proftpd a partir do inetd ou em modo solitário?"
+
+#~ msgid ""
+#~ "On the other hand, if your ftp site is visited frequently, you should "
+#~ "rather run proftp as a standalone server (because with inetd, each time a "
+#~ "connection is opened, a new process is spawned)."
+#~ msgstr ""
+#~ "Por outro lado, se o seu 'site' de ftp é visitado frequentemente, deve "
+#~ "correr o proftpd como um servidor solitário (porque com o inetd, sempre "
+#~ "que uma nova ligação é aberta, é corrido um novo processo)."
