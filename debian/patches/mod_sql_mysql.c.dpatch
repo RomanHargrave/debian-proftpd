@@ -2,7 +2,7 @@
 ## mod_sql_mysql.c.dpatch by Francesco Paolo Lovergine <frankie@debian.org>
 ##
 ## All lines beginning with `## DP:' are a description of the patch.
-## DP: No description.
+## DP: Debian specific fix for mysql.h location.
 
 @DPATCH@
 diff -urNad trunk~/contrib/mod_sql_mysql.c trunk/contrib/mod_sql_mysql.c

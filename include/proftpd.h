@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2006 The ProFTPD Project team
+ * Copyright (c) 2001-2008 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* General options
- * $Id: proftpd.h,v 1.56 2006/06/22 17:06:27 castaglia Exp $
+ * $Id: proftpd.h,v 1.60 2009/09/02 17:58:53 castaglia Exp $
  */
 
 #ifndef PR_PROFTPD_H
@@ -73,9 +73,6 @@ typedef struct {
   pr_netaddr_t data_addr;		/* Remote data address */
   unsigned short data_port;		/* Remote data port */
 
-  unsigned char ident_lookups;		/* Is RFC931 (ident) protocol used? */
-  char *ident_user;			/* User identified by ident protocol */
-
   const char *auth_mech;		/* Name of the authentication
                                          * module/mechanism that successfully
                                          * authenticated the client
@@ -91,6 +88,9 @@ typedef struct {
   struct config_struc *dir_config;	/* Closest matching configuration
                                          * for current operation
                                          */
+
+  /* Process ID of the session */
+  pid_t pid;
 
   /* The uid/gids are manipulated by the PRIVS macros in
    * privs.h
@@ -238,18 +238,17 @@ extern char MultilineRFC2228;
 #define RECEIVED_SIG_ALRM	0x0400
 
 /* Timers */
-#define TIMER_LOGIN		1
-#define TIMER_IDLE		2
-#define TIMER_NOXFER		3
-#define TIMER_STALLED		4
-#define TIMER_SESSION		5
+#define PR_TIMER_LOGIN		1
+#define PR_TIMER_IDLE		2
+#define PR_TIMER_NOXFER		3
+#define PR_TIMER_STALLED	4
+#define PR_TIMER_SESSION	5
 
 /* Misc Prototypes */
 
 void end_login(int);
 void pr_signals_handle(void);
 void session_exit(int, void *, int, void *);
-void session_set_idle(void);
 void set_daemon_rlimits(void);
 void set_session_rlimits(void);
 

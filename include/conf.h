@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2007 The ProFTPD Project team
+ * Copyright (c) 2001-2009 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* Generic configuration and standard header file includes.
- * $Id: conf.h,v 1.70 2007/01/18 02:48:32 castaglia Exp $
+ * $Id: conf.h,v 1.80.2.1 2010/03/08 22:14:17 castaglia Exp $
  */
 
 #ifndef PR_CONF_H
@@ -136,6 +136,10 @@ char *strchr(),*strrchr();
 # include <sys/param.h>
 #endif
 
+#ifdef HAVE_SYS_RESOURCE_H
+# include <sys/resource.h>
+#endif
+
 #ifdef HAVE_SYS_SOCKET_H
 # include <sys/socket.h>
 #endif
@@ -233,19 +237,23 @@ char *strchr(),*strrchr();
  * then try termio.h
  */
 
-#ifdef HAVE_SYS_TERMIOS_H
-# include <sys/termios.h>
+#ifdef HAVE_TERMIOS_H
+# include <termios.h>
 #else
-# ifdef HAVE_SYS_TERMIO_H
-#  include <sys/termio.h>
-# endif /* HAVE_SYS_TERMIO_H */
-#endif /* HAVE_SYS_TERMIOS_H */
+# ifdef HAVE_SYS_TERMIOS_H
+#  include <sys/termios.h>
+# else
+#  ifdef HAVE_SYS_TERMIO_H
+#   include <sys/termio.h>
+#  endif /* HAVE_SYS_TERMIO_H */
+# endif /* HAVE_SYS_TERMIOS_H */
+#endif /* HAVE_TERMIOS_H */
 
 #ifdef PR_USE_NLS
 # ifdef HAVE_LIBINTL_H
 #  include <libintl.h>
 # endif
-# define _(str) gettext(str)
+# define _(str) dgettext("proftpd", str)
 # ifdef HAVE_LOCALE_H
 #  include <locale.h>
 # endif
@@ -399,12 +407,16 @@ typedef struct {
 } pr_netaddr_t;
 
 #include "pool.h"
+#include "str.h"
 #include "regexp.h"
 #include "table.h"
 #include "proftpd.h"
 #include "support.h"
+#include "str.h"
 #include "sets.h"
 #include "dirtree.h"
+#include "expr.h"
+#include "filter.h"
 #include "netio.h"
 #include "modules.h"
 #include "auth.h"
@@ -415,8 +427,8 @@ typedef struct {
 #include "netaddr.h"
 #include "netacl.h"
 #include "class.h"
+#include "cmd.h"
 #include "bindings.h"
-#include "ident.h"
 #include "help.h"
 #include "feat.h"
 #include "ftp.h"
@@ -430,10 +442,12 @@ typedef struct {
 #include "fsio.h"
 #include "mkhome.h"
 #include "ctrls.h"
+#include "session.h"
 #include "event.h"
 #include "var.h"
+#include "throttle.h"
 #include "trace.h"
-#include "utf8.h"
+#include "encode.h"
 #include "compat.h"
 #include "proctitle.h"
 #include "pidfile.h"

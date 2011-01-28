@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: proftpd-dfsg\n"
 "Report-Msgid-Bugs-To: proftpd-dfsg@packages.debian.org\n"
-"POT-Creation-Date: 2008-04-10 16:37+0200\n"
+"POT-Creation-Date: 2009-09-01 22:31+0200\n"
 "PO-Revision-Date: 2007-12-15 12:36+0100\n"
 "Last-Translator: Bjørn Steensrud <bjornst@skogkatt.homelinux.org>\n"
 "Language-Team: Norwegian Bokmål <i18n-nb@lister.ping.uio.no>\n"
@@ -18,25 +18,25 @@ msgstr ""
 
 #. Type: select
 #. Choices
-#: ../proftpd.templates:2001
+#: ../proftpd-basic.templates:2001
 msgid "from inetd"
 msgstr "fra inetd"
 
 #. Type: select
 #. Choices
-#: ../proftpd.templates:2001
+#: ../proftpd-basic.templates:2001
 msgid "standalone"
 msgstr "frittstående"
 
 #. Type: select
 #. Description
-#: ../proftpd.templates:2002
+#: ../proftpd-basic.templates:2002
 msgid "Run proftpd:"
 msgstr "Kjør proftpd:"
 
 #. Type: select
 #. Description
-#: ../proftpd.templates:2002
+#: ../proftpd-basic.templates:2002
 msgid ""
 "ProFTPd can be run either as a service from inetd, or as a standalone "
 "server. Each choice has its own benefits. With only a few FTP connections "
@@ -50,7 +50,7 @@ msgstr ""
 
 #. Type: select
 #. Description
-#: ../proftpd.templates:2002
+#: ../proftpd-basic.templates:2002
 msgid ""
 "On the other hand, with higher traffic, ProFTPd should run as a standalone "
 "server to avoid spawning a new process for each incoming connection."

@@ -2,13 +2,14 @@
 ## autotools.dpatch by Francesco Paolo Lovergine <frankie@debian.org>
 ##
 ## All lines beginning with `## DP:' are a description of the patch.
-## DP: No description.
+## DP: Remove autoheader and autoconf running to avoid 
+## DP: possibile issues on systems with autotools installed.
 
 @DPATCH@
-diff -urNad trunk~/Makefile.in trunk/Makefile.in
---- trunk~/Makefile.in	2007-10-09 23:44:52.000000000 +0200
-+++ trunk/Makefile.in	2007-10-10 00:02:02.000000000 +0200
-@@ -168,17 +168,17 @@
+diff -urNad '--exclude=CVS' '--exclude=.svn' '--exclude=.git' '--exclude=.arch' '--exclude=.hg' '--exclude=_darcs' '--exclude=.bzr' proftpd-dfsg~/Makefile.in proftpd-dfsg/Makefile.in
+--- proftpd-dfsg~/Makefile.in	2010-04-19 11:46:04.000000000 +0200
++++ proftpd-dfsg/Makefile.in	2010-04-19 12:11:59.000000000 +0200
+@@ -195,10 +195,10 @@
  
  
  # autoheader might not change config.h.in, so touch a stamp file.
@@ -17,18 +18,9 @@ diff -urNad trunk~/Makefile.in trunk/Makefile.in
 -	cd ${srcdir} && autoheader
 -	echo timestamp > ${srcdir}/stamp-h.in
 +#${srcdir}/config.h.in: stamp-h.in
-+#${srcdir}/stamp-h.in: configure.ac acconfig.h
++#${srcdir}/stamp-h.in: configure.in acconfig.h
 +#	cd ${srcdir} && autoheader
 +#	echo timestamp > ${srcdir}/stamp-h.in
  
  config.h: stamp-h
  stamp-h: config.h.in config.status
- 	./config.status
- 
--${srcdir}/configure: configure.in
--	cd ${srcdir} && autoconf
-+#${srcdir}/configure: configure.ac
-+#	cd ${srcdir} && autoconf
- 
- Make.rules: Make.rules.in config.status
- 	./config.status

@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2001-2007 The ProFTPD Project team
+ * Copyright (c) 2001-2009 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,26 +23,43 @@
  */
 
 /* NetIO routines
- * $Id: netio.c,v 1.28 2007/08/22 14:50:23 castaglia Exp $
+ * $Id: netio.c,v 1.39 2009/03/05 06:01:51 castaglia Exp $
  */
 
 #include "conf.h"
 #include <signal.h>
 
-#ifndef IAC
-#define IAC	255
+/* See RFC 854 for the definition of these Telnet values */
+
+/* Telnet "Interpret As Command" indicator */
+#ifndef TELNET_IAC
+# define TELNET_IAC	255
 #endif
-#ifndef DONT
-#define DONT	254
+
+#ifndef TELNET_DONT
+# define TELNET_DONT	254
 #endif
-#ifndef DO
-#define DO	253
+
+#ifndef TELNET_DO
+# define TELNET_DO	253
 #endif
-#ifndef WONT
-#define WONT	252
+
+#ifndef TELNET_WONT
+# define TELNET_WONT	252
 #endif
-#ifndef WILL
-#define WILL	251
+
+#ifndef TELNET_WILL
+# define TELNET_WILL	251
+#endif
+
+/* Telnet "Interrupt Process" code */
+#ifndef TELNET_IP
+# define TELNET_IP	244
+#endif
+
+/* Telnet "Data Mark" code */
+#ifndef TELNET_DM
+# define TELNET_DM	242
 #endif
 
 static const char *trace_channel = "netio";
@@ -50,6 +67,17 @@ static const char *trace_channel = "netio";
 static pr_netio_t *core_ctrl_netio = NULL, *ctrl_netio = NULL;
 static pr_netio_t *core_data_netio = NULL, *data_netio = NULL;
 static pr_netio_t *core_othr_netio = NULL, *othr_netio = NULL;
+
+/* Used to track whether the previous text read from the client's control
+ * connection was a properly-terminated command.  If so, then read in the
+ * next/current text as per normal.  If NOT (e.g. the client sent a too-long
+ * command), then read in the next/current text, but ignore it.  Only clear
+ * this flag if the next/current command can be read as per normal.
+ *
+ * The pr_netio_telnet_gets() uses this variable, in conjunction with its
+ * saw_newline flag, for handling too-long commands from clients.
+ */
+static int properly_terminated_prev_command = TRUE;
 
 static pr_netio_stream_t *netio_stream_alloc(pool *parent_pool) {
   pool *netio_pool = NULL;
@@ -75,19 +103,21 @@ static pr_netio_stream_t *netio_stream_alloc(pool *parent_pool) {
 }
 
 static pr_buffer_t *netio_buffer_alloc(pr_netio_stream_t *nstrm) {
+  size_t bufsz;
   pr_buffer_t *pbuf = NULL;
 
   pbuf = pcalloc(nstrm->strm_pool, sizeof(pr_buffer_t));
 
   /* Allocate a buffer. */
-  pbuf->buf = pcalloc(nstrm->strm_pool, PR_TUNABLE_BUFFER_SIZE);
-  pbuf->buflen = PR_TUNABLE_BUFFER_SIZE;
+  bufsz = pr_config_get_xfer_bufsz();
+  pbuf->buf = pcalloc(nstrm->strm_pool, bufsz);
+  pbuf->buflen = bufsz;
 
   /* Position the offset at the start of the buffer, and set the
    * remaining bytes value accordingly.
    */
   pbuf->current = pbuf->buf;
-  pbuf->remaining = PR_TUNABLE_BUFFER_SIZE;
+  pbuf->remaining = bufsz;
 
   /* Add this buffer to the given stream. */
   nstrm->strm_buf = pbuf;
@@ -124,20 +154,25 @@ static pr_netio_stream_t *core_netio_open_cb(pr_netio_stream_t *nstrm, int fd,
 }
 
 static int core_netio_poll_cb(pr_netio_stream_t *nstrm) {
-  fd_set rfds, wfds;
+  int res;
+  fd_set rfds, *rfdsp, wfds, *wfdsp;
   struct timeval tval;
 
   FD_ZERO(&rfds);
+  rfdsp = NULL;
   FD_ZERO(&wfds);
+  wfdsp = NULL;
 
   if (nstrm->strm_mode == PR_NETIO_IO_RD) {
     if (nstrm->strm_fd >= 0) {
       FD_SET(nstrm->strm_fd, &rfds);
+      rfdsp = &rfds;
     }
 
   } else {
     if (nstrm->strm_fd >= 0) {
       FD_SET(nstrm->strm_fd, &wfds);
+      wfdsp = &wfds;
     }
   }
 
@@ -145,7 +180,8 @@ static int core_netio_poll_cb(pr_netio_stream_t *nstrm) {
     nstrm->strm_interval: 60);
   tval.tv_usec = 0;
 
-  return select(nstrm->strm_fd + 1, &rfds, &wfds, NULL, &tval);
+  res = select(nstrm->strm_fd + 1, rfdsp, wfdsp, NULL, &tval);
+  return res;
 }
 
 static int core_netio_postopen_cb(pr_netio_stream_t *nstrm) {
@@ -254,7 +290,7 @@ static int netio_lingering_close(pr_netio_stream_t *nstrm, long linger,
 
   if (nstrm->strm_fd >= 0) {
     struct timeval tv;
-    fd_set rs;
+    fd_set rfds;
     time_t when = time(NULL) + linger;
 
     tv.tv_sec = linger;
@@ -267,14 +303,14 @@ static int netio_lingering_close(pr_netio_stream_t *nstrm, long linger,
     while (TRUE) {
       run_schedule();
 
-      FD_ZERO(&rs);
-      FD_SET(nstrm->strm_fd, &rs);
+      FD_ZERO(&rfds);
+      FD_SET(nstrm->strm_fd, &rfds);
 
       pr_trace_msg(trace_channel, 8,
         "lingering %lu secs before closing fd %d", (unsigned long) tv.tv_sec,
         nstrm->strm_fd);
 
-      res = select(nstrm->strm_fd+1, &rs, NULL, NULL, &tv);
+      res = select(nstrm->strm_fd+1, &rfds, NULL, NULL, &tv);
       if (res == -1) {
         if (errno == EINTR) {
           time_t now = time(NULL);
@@ -293,6 +329,12 @@ static int netio_lingering_close(pr_netio_stream_t *nstrm, long linger,
         } else {
           nstrm->strm_errno = errno;
           return -1;
+        }
+
+      } else {
+        if (FD_ISSET(nstrm->strm_fd, &rfds)) {
+          pr_trace_msg(trace_channel, 8,
+            "received data for reading on fd %d, ignoring", nstrm->strm_fd);
         }
       }
 
@@ -438,6 +480,16 @@ pr_netio_stream_t *pr_netio_reopen(pr_netio_stream_t *nstrm, int fd, int mode) {
   return NULL;
 }
 
+void pr_netio_reset_poll_interval(pr_netio_stream_t *nstrm) {
+  if (!nstrm) {
+    errno = EINVAL;
+    return;
+  }
+
+  /* Simply clear the "interruptible" flag. */
+  nstrm->strm_flags &= ~PR_NETIO_SESS_INTR;
+}
+
 void pr_netio_set_poll_interval(pr_netio_stream_t *nstrm, unsigned int secs) {
 
   if (!nstrm) {
@@ -505,6 +557,20 @@ int pr_netio_poll(pr_netio_stream_t *nstrm) {
 
         /* Some other error occured */
         nstrm->strm_errno = errno;
+
+        /* If this is the control stream, and the error indicates a
+         * broken pipe (i.e. the client went away), AND there is a data
+         * transfer is progress, abort the transfer.
+         */
+        if (errno == EPIPE &&
+            nstrm->strm_type == PR_NETIO_STRM_CTRL &&
+            (session.sf_flags & SF_XFER)) {
+          pr_trace_msg(trace_channel, 5,
+            "received EPIPE on control connection, setting 'aborted' "
+            "session flag");
+          session.sf_flags |= SF_ABORT;
+        }
+
         return -1;
 
       case 0:
@@ -512,6 +578,16 @@ int pr_netio_poll(pr_netio_stream_t *nstrm) {
         if (nstrm->strm_flags & PR_NETIO_SESS_ABORT) {
           nstrm->strm_flags &= ~PR_NETIO_SESS_ABORT;
           return 1;
+        }
+
+        /* If the stream has been marked as "interruptible", AND the
+         * poll interval is zero seconds (meaning a true poll, not blocking),
+         * then return here.
+         */
+        if ((nstrm->strm_flags & PR_NETIO_SESS_INTR) &&
+            nstrm->strm_interval == 0) {
+          errno = EOF;
+          return -1;
         }
 
         continue;
@@ -608,10 +684,6 @@ int pr_netio_write(pr_netio_stream_t *nstrm, char *buf, size_t buflen) {
         /* We have to potentially restart here as well, in case we get EINTR. */
         do {
           pr_signals_handle(); 
-
-          if (XFER_ABORTED)
-            break;
-
           run_schedule();
 
           switch (nstrm->strm_type) {
@@ -621,6 +693,9 @@ int pr_netio_write(pr_netio_stream_t *nstrm, char *buf, size_t buflen) {
                 break;
 
             case PR_NETIO_STRM_DATA:
+              if (XFER_ABORTED)
+                break;
+
               bwritten = data_netio ? (data_netio->write)(nstrm, buf, buflen) :
                 (core_data_netio->write)(nstrm, buf, buflen);
               break;
@@ -756,9 +831,6 @@ int pr_netio_read(pr_netio_stream_t *nstrm, char *buf, size_t buflen,
         do {
           pr_signals_handle();
 
-          if (XFER_ABORTED)
-            break;
-
           run_schedule();
 
           switch (nstrm->strm_type) {
@@ -768,6 +840,9 @@ int pr_netio_read(pr_netio_stream_t *nstrm, char *buf, size_t buflen,
                 break;
 
             case PR_NETIO_STRM_DATA:
+              if (XFER_ABORTED)
+                break;
+
               bread = data_netio ? (data_netio->read)(nstrm, buf, buflen) :
                 (core_data_netio->read)(nstrm, buf, buflen);
               break;
@@ -794,6 +869,12 @@ int pr_netio_read(pr_netio_stream_t *nstrm, char *buf, size_t buflen,
 
     /* EOF? */
     if (bread == 0) {
+      if (nstrm->strm_type == PR_NETIO_STRM_CTRL) {
+        pr_trace_msg(trace_channel, 7,
+          "read %d bytes from control stream fd %d, handling as EOF", bread,
+          nstrm->strm_fd);
+      }
+
       nstrm->strm_errno = 0;
       break;
     }
@@ -905,19 +986,23 @@ char *pr_netio_gets(char *buf, size_t buflen, pr_netio_stream_t *nstrm) {
   return buf;
 }
 
+static int telnet_mode = 0;
+
 char *pr_netio_telnet_gets(char *buf, size_t buflen,
     pr_netio_stream_t *in_nstrm, pr_netio_stream_t *out_nstrm) {
-
   char *bp = buf;
   unsigned char cp;
-  static unsigned char mode = 0;
-  int toread;
+  int toread, handle_iac = TRUE, saw_newline = FALSE;
   pr_buffer_t *pbuf = NULL;
 
   if (buflen == 0) {
     errno = EINVAL;
     return NULL;
   }
+
+#ifdef PR_USE_NLS
+  handle_iac = pr_encode_supports_telnet_iac();
+#endif /* PR_USE_NLS */
 
   buflen--;
 
@@ -940,8 +1025,9 @@ char *pr_netio_telnet_gets(char *buf, size_t buflen,
           *bp = '\0';
           return buf;
 
-        } else
+        } else {
           return NULL;
+        }
       }
 
       pbuf->remaining = pbuf->buflen - toread;
@@ -954,45 +1040,64 @@ char *pr_netio_telnet_gets(char *buf, size_t buflen,
       cp = *pbuf->current++;
       pbuf->remaining++;
 
-      switch (mode) {
-        case IAC:
-          switch (cp) {
-            case WILL:
-            case WONT:
-            case DO:
-            case DONT:
-              mode = cp;
-              continue;
+      if (handle_iac == TRUE) {
+        switch (telnet_mode) {
+          case TELNET_IAC:
+            switch (cp) {
+              case TELNET_WILL:
+              case TELNET_WONT:
+              case TELNET_DO:
+              case TELNET_DONT:
+              case TELNET_IP:
+              case TELNET_DM:
 
-            case IAC:
-              mode = 0;
-              break;
+                /* Why do we do this crazy thing where we set the "telnet mode"
+                 * to be the action, and let the while loop, on the next pass,
+                 * handle that action?  It's because we don't know, right now,
+                 * whether there actually a "next byte" in the input buffer.
+                 * There _should_ be -- but we can't be sure.  And that next
+                 * byte is needed for properly responding with WONT/DONT
+                 * responses.
+                 */
+                telnet_mode = cp;
+                continue;
 
-            default:
-              /* Ignore */
-              mode = 0;
-              continue;
-          }
-          break;
+              default:
+                /* In this case, we know that the previous byte was TELNET_IAC,
+                 * but the current byte is not a value we care about.  So
+                 * write the TELNET_IAC into the output buffer, break out of
+                 * of the switch, and let that handle the writing of the
+                 * current byte into the output buffer.
+                 */
+                *bp++ = TELNET_IAC;
+                buflen--;
 
-        case WILL:
-        case WONT:
-          pr_netio_printf(out_nstrm, "%c%c%c", IAC, DONT, cp);
-          mode = 0;
-          continue;
+                telnet_mode = 0;
+                break;
+            }
+            break;
 
-        case DO:
-        case DONT:
-          pr_netio_printf(out_nstrm, "%c%c%c", IAC, WONT, cp);
-          mode = 0;
-          continue;
-
-        default:
-          if (cp == IAC) {
-            mode = cp;
+          case TELNET_WILL:
+          case TELNET_WONT:
+            pr_netio_printf(out_nstrm, "%c%c%c", TELNET_IAC, TELNET_DONT, cp);
+            telnet_mode = 0;
             continue;
-          }
-          break;
+
+          case TELNET_DO:
+          case TELNET_DONT:
+            pr_netio_printf(out_nstrm, "%c%c%c", TELNET_IAC, TELNET_WONT, cp);
+            telnet_mode = 0;
+            continue;
+
+          case TELNET_IP:
+          case TELNET_DM:
+          default:
+            if (cp == TELNET_IAC) {
+              telnet_mode = cp;
+              continue;
+            }
+            break;
+        }
       }
 
       *bp++ = cp;
@@ -1004,6 +1109,8 @@ char *pr_netio_telnet_gets(char *buf, size_t buflen,
       toread--;
       *bp++ = *pbuf->current++;
       pbuf->remaining++;
+
+      saw_newline = TRUE;
       break;
     }
 
@@ -1011,6 +1118,25 @@ char *pr_netio_telnet_gets(char *buf, size_t buflen,
       pbuf->current = NULL;
   }
 
+  if (!saw_newline) {
+    /* If we haven't seen a newline, then assume the client is deliberately
+     * sending a too-long command, trying to exploit buffer sizes and make
+     * the server make some possibly bad assumptions.
+     */
+
+    properly_terminated_prev_command = FALSE;
+    errno = E2BIG;
+    return NULL;
+  }
+
+  if (!properly_terminated_prev_command) {
+    properly_terminated_prev_command = TRUE;
+    pr_log_pri(PR_LOG_NOTICE, "client sent too-long command, ignoring");
+    errno = E2BIG;
+    return NULL;
+  }
+
+  properly_terminated_prev_command = TRUE;
   *bp = '\0';
   return buf;
 }
@@ -1076,6 +1202,8 @@ int pr_unregister_netio(int strm_types) {
   return 0;
 }
 
+extern pid_t mpid;
+
 pr_netio_t *pr_alloc_netio(pool *parent_pool) {
   pr_netio_t *netio = NULL;
   pool *netio_pool = NULL;
@@ -1086,6 +1214,22 @@ pr_netio_t *pr_alloc_netio(pool *parent_pool) {
   }
 
   netio_pool = make_sub_pool(parent_pool);
+
+  /* If this is the daemon process, we are allocating a sub-pool from the
+   * permanent_pool.  You might wonder why the daemon process needs netio
+   * objects.  It doesn't, really -- but it's for use by all of the session
+   * processes that will be forked.  They will be able to reuse the memory
+   * already allocated for the main ctrl/data/other netios, as is.
+   *
+   * This being the case, we should label the sub-pool accordingly.
+   */
+  if (mpid == getpid()) {
+    pr_pool_tag(netio_pool, "Shared Netio Pool");
+
+  } else {
+    pr_pool_tag(netio_pool, "netio pool");
+  }
+
   netio = pcalloc(netio_pool, sizeof(pr_netio_t));
   netio->pool = netio_pool;
 

@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: proftpd-dfsg_1.3.1-9_sv\n"
 "Report-Msgid-Bugs-To: proftpd-dfsg@packages.debian.org\n"
-"POT-Creation-Date: 2008-04-10 16:37+0200\n"
+"POT-Creation-Date: 2009-09-01 22:31+0200\n"
 "PO-Revision-Date: 2008-06-21 11:53+0200\n"
 "Last-Translator: Martin Bagge <martin.bagge@bthstudent.se>\n"
 "Language-Team: swedish <debian-l10n-swedish@lists.debian.org>\n"
@@ -18,37 +18,43 @@ msgstr ""
 
 #. Type: select
 #. Choices
-#: ../proftpd.templates:2001
+#: ../proftpd-basic.templates:2001
 msgid "from inetd"
 msgstr "genom inetd"
 
 #. Type: select
 #. Choices
-#: ../proftpd.templates:2001
+#: ../proftpd-basic.templates:2001
 msgid "standalone"
 msgstr "ensamstående"
 
 #. Type: select
 #. Description
-#: ../proftpd.templates:2002
+#: ../proftpd-basic.templates:2002
 msgid "Run proftpd:"
 msgstr "Kör proftd:"
 
 #. Type: select
 #. Description
-#: ../proftpd.templates:2002
+#: ../proftpd-basic.templates:2002
 msgid ""
 "ProFTPd can be run either as a service from inetd, or as a standalone "
 "server. Each choice has its own benefits. With only a few FTP connections "
 "per day, it is probably better to run ProFTPd from inetd in order to save "
 "resources."
-msgstr "ProFTPd kan köras som tjänst genom inetd eller som ensamstående tjänst. De båda alternativen har olika fördelar och nackdelar. Med ett fåtal FTP-anslutningar om dagen så är det förmodligen ett bättre val att köra ProFTPd genom inetd för att spara resurser."
+msgstr ""
+"ProFTPd kan köras som tjänst genom inetd eller som ensamstående tjänst. De "
+"båda alternativen har olika fördelar och nackdelar. Med ett fåtal FTP-"
+"anslutningar om dagen så är det förmodligen ett bättre val att köra ProFTPd "
+"genom inetd för att spara resurser."
 
 #. Type: select
 #. Description
-#: ../proftpd.templates:2002
+#: ../proftpd-basic.templates:2002
 msgid ""
 "On the other hand, with higher traffic, ProFTPd should run as a standalone "
 "server to avoid spawning a new process for each incoming connection."
-msgstr "Å andra sidan så bör ProFTPd köras som ensamstående tjänst om du räknar med högtrafik, då slipper du problem med att det skapas en ny process för varje inkommande anslutning."
-
+msgstr ""
+"Å andra sidan så bör ProFTPd köras som ensamstående tjänst om du räknar med "
+"högtrafik, då slipper du problem med att det skapas en ny process för varje "
+"inkommande anslutning."

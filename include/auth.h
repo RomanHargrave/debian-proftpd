@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2004-2007 The ProFTPD Project team
+ * Copyright (c) 2004-2009 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,7 +24,7 @@
 
 /* ProFTPD Auth API
  *
- * $Id: auth.h,v 1.5 2007/04/17 21:33:40 castaglia Exp $
+ * $Id: auth.h,v 1.13 2009/09/08 20:34:03 castaglia Exp $
  */
 
 #ifndef PR_AUTH_H
@@ -70,6 +70,7 @@ struct passwd *pr_auth_getpwuid(pool *, uid_t);
 struct group *pr_auth_getgrnam(pool *, const char *);
 struct group *pr_auth_getgrgid(pool *, gid_t);
 int pr_auth_authenticate(pool *, const char *, const char *);
+int pr_auth_authorize(pool *, const char *);
 int pr_auth_check(pool *, const char *, const char *, const char *);
 const char *pr_auth_uid2name(pool *, uid_t);
 const char *pr_auth_gid2name(pool *, gid_t);
@@ -84,6 +85,45 @@ int pr_auth_requires_pass(pool *, const char *);
  * an anonymous login, NULL is returned.
  */
 config_rec *pr_auth_get_anon_config(pool *p, char **, char **, char **);
+
+/* Wrapper function around the chroot(2) system call, handles setting of
+ * appropriate environment variables if necessary.
+ */
+int pr_auth_chroot(const char *);
+
+/* Check the /etc/ftpusers file, as per the UseFtpUsers directive, to see
+ * if the given user is allowed.  Returns TRUE if the user is banned by
+ * /etc/ftpusers, FALSE if not banned, and -1 if there was an error.
+ */
+int pr_auth_banned_by_ftpusers(xaset_t *, const char *);
+
+/* Check the /etc/shells file, as per the RequireValidShell directive, to
+ * ensure that the given shell is valid.  Returns TRUE if the user has
+ * a valid shell, FALSE if an invalid shell, and -1 if there was an error.
+ */
+int pr_auth_is_valid_shell(xaset_t *, const char *);
+
+/* Add to the list of authenticating-only modules (e.g. PAM). */
+int pr_auth_add_auth_only_module(const char *);
+
+/* Remove the named module from the list of authenticating-only modules. */
+int pr_auth_remove_auth_only_module(const char *);
+
+/* Clear the authenticating-only module list, e.g. when authentication has
+ * completed.
+ */
+int pr_auth_clear_auth_only_modules(void);
+
+/* Enable caching of certain data within the Auth API. */
+int pr_auth_cache_set(int, unsigned int);
+#define PR_AUTH_CACHE_FL_UID2NAME	0x00001
+#define PR_AUTH_CACHE_FL_GID2NAME	0x00002
+#define PR_AUTH_CACHE_FL_AUTH_MODULE	0x00004
+
+/* Wrapper function for retrieving the user's home directory.  This handles
+ * any possible RewriteHome configuration.
+ */
+char *pr_auth_get_home(pool *, char *pw_dir);
 
 /* For internal use only. */
 int init_auth(void);

@@ -112,6 +112,22 @@ do_update () {
     fi
 }
 
+disable_script () {
+	file=$1
+	if [ -x ${file} ]; then
+			cp ${file} ${file}.disabled
+			cat >${file}.disabled <<EOF
+#!/bin/sh
+# This script has been disabled at upgrade time
+
+exit 0
+
+EOF
+			cat ${file} >>${file}.disabled
+			rm -f ${file}
+	fi
+}
+
 DONTSTART=0
 
 . /usr/share/debconf/confmodule
@@ -124,7 +140,7 @@ if [ "$1" = "configure" ]; then
     fi
     
     # use current configuration files or generate new ones from scratch
-    for name in proftpd modules sql ldap tls
+    for name in proftpd modules sql ldap tls virtuals
     do
       if [ ! -f $ETC_DIR/$name.conf ]; then
           cp  /usr/share/proftpd/templates/$name.conf $ETC_DIR/$name.conf.proftpd-new
@@ -156,12 +172,17 @@ if [ "$1" = "configure" ]; then
     scoreboard
     include_modules
 
+	# disable old cron jobs if needed
+	disable_script /etc/cron.monthly/proftpd
+	disable_script /etc/cron.monthly/proftpd-basic
+
     # propose maintainer changes to user
     do_update /etc/proftpd/proftpd.conf
     do_update /etc/proftpd/modules.conf
     do_update /etc/proftpd/tls.conf
     do_update /etc/proftpd/sql.conf
     do_update /etc/proftpd/ldap.conf
+    do_update /etc/proftpd/virtuals.conf
 
     # Proftpd could not close all of its fd nicely
     db_stop
@@ -175,7 +196,7 @@ if [ -e "/etc/init.d/proftpd" ]; then
     update-rc.d proftpd defaults 50 >/dev/null
     if [ $DONTSTART -eq 0 ] ; then
         set +e 
-	/usr/sbin/proftpd -t >/dev/null 2>&1
+	    proftpd -t >/dev/null 2>&1
     	if [ $? = 0 ]; then
 		set -e
 		invoke-rc.d proftpd start

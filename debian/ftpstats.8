@@ -63,20 +63,18 @@ Report on outgoing traffic only (downloads).
 .BR \-D "domain"
 Report only on traffic from
 .IR domain
-.  This option leads to problems with the local domain:  e.g. test.com is
+.  
+This option leads to problems with the local domain:  e.g. test.com is
 encountered under test and not recognized under com, -D com will give you only
 stats about com excluding test.com!  Use -A com for correct results.
-
 .TP
 .BR \-A "address"
 Report only on traffic from addresses whose end matches
 .IR address
 .  e.g. -A test.domain.com will report on address ending with test.domain.com
-
 .TP
 .BR \-l "depth"
 Depth of path detail for sections
-
 .TP
 .BR \-s "section"
 Section to report on.  e.g. -s /pub will report only on paths under /pub

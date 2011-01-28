@@ -30,7 +30,7 @@ configuration file.  When run in standalone mode without the
 option, the main
 .B proftpd
 daemon writes its process ID to
-.B /var/run/run/proftpd.pid
+.B /usr/local/var/proftpd.pid
 to make it easy to know which process to SIGHUP.
 .SH OPTIONS
 .TP 12
@@ -66,7 +66,7 @@ output is sent to stderr.
 .BI \-c,\--config " config\-file"
 Specifies an alternate \fIconfig\-file\fP to be parsed at startup, rather
 than the default configuration file.  The default configuration file is
-.B /etc/proftpd/proftpd.conf
+.B /usr/local/etc/proftpd.conf
 .br
 .TP
 .BI \-N,\--nocollision
@@ -74,6 +74,9 @@ Disables address/port collision checking.
 .TP
 .BI \-V,\--settings
 Displays various compile-time settings and exits.
+.TP
+.BI \-S,\--serveraddr
+Specifies an IP address for the host machine, avoiding an DNS lookup of the hostname
 .TP
 .BI \-t,\--configtest
 Read the configuration file, report any syntax errors, and exit.
@@ -97,23 +100,23 @@ This is enabled by default, if the \fB--enable-ipv6\fP configure option is
 used.
 .SH FILES
 .PD 0
-.B /usr/sbin/proftpd
+.B /usr/local/sbin/proftpd
 .br
-.B /etc/proftpd/proftpd.conf
+.B /usr/local/etc/proftpd.conf
 .br
-.B /usr/bin/ftpwho
+.B /usr/local/bin/ftpwho
 .br
-.B /usr/bin/ftpcount
+.B /usr/local/bin/ftpcount
 .br
-.B /usr/bin/ftptop
+.B /usr/local/bin/ftptop
 .br
-.B /usr/sbin/ftpshut
+.B /usr/local/sbin/ftpshut
 .br
 .B /var/log/xferlog
 .br
-.B /var/run/run/proftpd.pid
+.B /usr/local/var/proftpd.pid
 .br
-.B /var/run/run/proftpd.scoreboard
+.B /usr/local/var/proftpd.scoreboard
 .PD
 .SH AUTHORS
 .PP

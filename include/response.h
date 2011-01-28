@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2001, 2002, 2003 The ProFTPD Project team
+ * Copyright (c) 2001-2008 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@
  */
 
 /* Command response routines
- * $Id: response.h,v 1.3 2003/01/02 18:25:18 castaglia Exp $
+ * $Id: response.h,v 1.6 2008/05/06 17:42:48 castaglia Exp $
  */
 
 #ifndef PR_RESPONSE_H
@@ -55,6 +55,8 @@ void pr_response_add_err(const char *, const char *, ...)
        ;
 #endif
 
+int pr_response_block(int);
+void pr_response_clear(pr_response_t **);
 void pr_response_flush(pr_response_t **);
 
 void pr_response_send(const char *, const char *, ...)
@@ -105,8 +107,10 @@ void pr_response_send_raw(const char *, ...)
  */
 void pr_response_register_handler(char *(*)(pool *, const char *, ...));
 
-/* Set the pool used for the response lists.
- */
+/* Get the pool currently used for response lists. */
+pool *pr_response_get_pool(void);
+
+/* Set the pool used for the response lists. */
 void pr_response_set_pool(pool *);
 
 #endif /* PR_RESPONSE_H */

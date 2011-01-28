@@ -2,7 +2,7 @@
 ## ftpasswd.cracklib.location.dpatch by Francesco Paolo Lovergine <frankie@debian.org>
 ##
 ## All lines beginning with `## DP:' are a description of the patch.
-## DP: No description.
+## DP: Debian specific change for the crack-lib dictionary location. 
 
 @DPATCH@
 diff -urNad proftpd-1.2.10+1.3.0rc5~/contrib/ftpasswd proftpd-1.2.10+1.3.0rc5/contrib/ftpasswd

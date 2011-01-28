@@ -1,49 +1,320 @@
-proftpd-dfsg (1.3.1-17lenny5) stable-security; urgency=low
+proftpd-dfsg (1.3.3a-6) unstable; urgency=high
 
-  * Security fixes: 
-        - added 3519.dpatch to fix CVE-2010-3867, backported from 1.3.3+.
-        - added 3131+3521.dpatch to fix CVE-2008-7265, backported from 1.3.2,
-          with an additional fix to solve CVE-2010-4221 which was a side
-          effect of the previous fix.
-        - added 3536.dpatch to fix a mod_sql's sql_prepare_where() function
-          which has an unbounded copy operation. This is also connected to
-          CVE-2009-0542.
+  * [SECURITY] 3536.dpatch fixes insufficient bounds checking in sql_prepare_where() 
+    function as found in mod_sql.c. 
 
- -- Francesco Paolo Lovergine <frankie@debian.org>  Thu, 13 Jan 2011 11:10:42 +0100
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Fri, 28 Jan 2011 09:54:52 +0100
 
-proftpd-dfsg (1.3.1-17lenny4) stable-security; urgency=high
+proftpd-dfsg (1.3.3a-5) unstable; urgency=high
 
-  * Security: added 3275.dpatch as taken from 1.3.2b branch to fix CVE-2009-3639.
+  * [SECURITY,PATCH] 3521.dpatch fixes Telnet IAC processing stack overflow.
+    This vulnerability allows remote attackers to execute arbitrary code on
+    vulnerable installations of ProFTPD. Authentication is not required to
+    exploit this vulnerability. It applies to >= 1.3.2rc3.
+    (closes: #602279, #602288)
 
- -- Francesco Paolo Lovergine <frankie@debian.org>  Tue, 27 Oct 2009 11:02:58 +0100
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Wed, 03 Nov 2010 10:51:05 +0100
 
-proftpd-dfsg (1.3.1-17lenny3) stable; urgency=low
+proftpd-dfsg (1.3.3a-4) unstable; urgency=high
 
+  * [SECURITY,PATCH] 3519.dpatch fixes Inappropriate directory traversal allowed by
+    mod_site_misc. This vulnerability can be used to:
+     - create a directory located outside the writable directory
+     - delete a directory located outside the writable directory
+     - create a symlink located outside the writable directory
+     - change the time of a file located outside the writable directory.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Fri, 22 Oct 2010 11:59:54 +0200
+
+proftpd-dfsg (1.3.3a-3) unstable; urgency=medium
+
+  * Fixed 3492.dpatch to drop .rej file still around.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Tue, 14 Sep 2010 15:25:29 +0200
+
+proftpd-dfsg (1.3.3a-2) unstable; urgency=medium
+
+  * A few upstream fixes taken from 1.3.3b bug fixing release. Most fixes
+    are NULL dereferences that cause segfaults at run time.
+  * New patches:
+        3481.dpatch: Problem with SFTP directory listings.
+        3483.dpatch: NULL pointer dereference handling SITE command in mod_quotatab
+        3487.dpatch: Null pointer dereference with EPRT/EPSV/PASV/PORT command
+                     during data transfer.
+        3492.dpatch: Null pointer dereference during data transfer due to
+                     RNFR/RNTO.
+        3494.dpatch: Null pointer dereference for IPv6-enabled proftpd when no
+                     DefaultServer configured.
+        3501.dpatch: <Anonymous> logins with "AuthAliasOnly on" still handled
+                     as anonymous logins.
+  * Updated pt_BR.po template.
+    (closes: #595889)
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Mon, 13 Sep 2010 15:38:52 +0200
+
+proftpd-dfsg (1.3.3a-1) unstable; urgency=low
+
+  * New upstream release and finally uploading to unstable.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Mon, 05 Jul 2010 10:35:40 +0200
+
+proftpd-dfsg (1.3.3a~20100625-2) experimental; urgency=low
+
+  * Fixed ABI version in debian/control.
+  * Moved libcap2-dev to libcap-dev.
+  * Policy bumped to 3.9.0. Removed type-handling now obsoleted.
+    (closes: #587869)
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Mon, 28 Jun 2010 12:01:08 +0200
+
+proftpd-dfsg (1.3.3a~20100625-1) experimental; urgency=low
+
+  * New upstream CVS snapshot with about 50 fixes of various bugs.
+    See upstream NEWS file for a list of fixes.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Thu, 13 May 2010 11:24:54 +0200
+
+proftpd-dfsg (1.3.3-1) experimental; urgency=low
+
+  * New upstream release, with some merges and updates of patches.
+    (closes: #577093, #560807)
+  * New modules have been enabled:
+        mod_exec
+        mod_shaper
+        mod_sftp and its friends
+        mod_sql_passwd
+  * Templates changed to add new modules support.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Mon, 19 Apr 2010 12:02:54 +0200
+
+proftpd-dfsg (1.3.2e-4) unstable; urgency=low
+
+  * Fixed inetd_check() in init file. Thanks Mats Erik Andersson.
+    (closes: #554029)
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Thu, 18 Mar 2010 11:16:29 +0100
+
+proftpd-dfsg (1.3.2e-3) unstable; urgency=low
+
+  * Removed obsolete patches still in debian/patches.
+  * Added mod_vroot to useful contributed modules by mod_vroot.dpatch.
+  * Added virtuals.conf to templates to better support vhost/vroot configs.
+  * Fixed a bit layout in ftpstats.8 contributed manpage.
+  * Updated debian/NEWS file.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Tue, 16 Mar 2010 12:38:26 +0100
+
+proftpd-dfsg (1.3.2e-2) unstable; urgency=low
+
+  * Updated from debian/*.in templates, step previously missed.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Thu, 11 Mar 2010 18:09:46 +0100
+
+proftpd-dfsg (1.3.2e-1) unstable; urgency=low
+
+  * New upstream release, with merging of {3342,3337}.dpatch.
+  * Moved $remote_fs from Should-Start/-Stop to Required-Start/-Stop as
+    suggested by lintian.
+  * Fixed spelling error in README.Debian. Thanks lintian.
+  * Reformatted time entry in NEWS file. Thanks lintian.
+  * Removed explicit path for proftpd call in postinst. Thanks lintian. 
+  * Previous changelog entry reformatted for 80 cols layout. Thanks lintian.
+  * Install proftpd-substvars without exec attribute.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Tue, 09 Mar 2010 17:06:24 +0100
+
+proftpd-dfsg (1.3.2d-2) unstable; urgency=low
+
+  * Added patch CVE-2009-3736.dpatch to fix embedded liblt 1.5.8 against 
+    CVE-2009-3736 as in backport for 1.5 liblt branch:
+    http://lists.gnu.org/archive/html/libtool/2009-11/msg00065.html. 
+    Note that proftpd use a specific directory for loading solibs so also
+    the unfixed version does not really affect proftpd per se. 
+  * Added 3337.dpatch to fix better a <Limit> corner case.
+  * Policy bumped to 3.8.4, without changes.
+  * Now requires openssl >= 0.9.8l-1 to have a working 
+    AllowClientRenegotiations.  Renegotiations is disabled in >= 0.9.8k-6, 
+    but proftpd assumes it works in all versions before 0.9.8l.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Mon, 08 Mar 2010 12:33:31 +0100
+
+proftpd-dfsg (1.3.2d-1) unstable; urgency=low
+
+  * New upstream release.
+    It should also fix a problem with renegotiations missed in 1.3.2c.
+    (closes: #558597)
+  * Fixed debian/changelog layout at 80 cols.
+  * Added 3342.dpatch: FEAT response contains LF without preceding CR.
+    (closes: #563711) 
+  * Removed the dpkg-divert check to distinguish inetd/xinetd cases.
+    (closes: #562087)
+  * Init script now check if inetd or xinetd is installed and warn the users
+    if they are not and proftpd config is in inetd mode.
+    (closes: #554029)
+  * Now proftpd-basic does no more depend on inet-superserver. Admins should
+    install inetd/xinetd and configure them when needed. Reintroduced 
+    update-inetd dependency instead.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Sat, 20 Feb 2010 23:26:22 +0100
+
+proftpd-dfsg (1.3.2c-1) unstable; urgency=low
+
+  * New upstream release, with fix of CVE-2009-3736 due to update of the
+    embedded liblt with a backported fix.
+    (closes: #553406, #555862, #559842)
+    Merged patches: 3324, 3328.
+  * Added a note about AllowClientRenegotiations option for TLS protocols in 
+    NEWS and a commented directive in tls.conf subfile.
+    (closes: #558597)
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Fri, 11 Dec 2009 09:42:48 +0100
+
+proftpd-dfsg (1.3.2b-2) unstable; urgency=low
+
+  * Now copy original config.* stuff and restore at cleaning time. This makes
+    lintian happy.
+  * Added security patch 3324.dpatch to manage SSL/TLS renegotiation. This is 
+    related to recently discovered protocol defection which could render it 
+    attackable. See also CVE-2009-3555.
+  * Added 3328.dpatch patch to manage a possible end-less loop in 
+    mod_quotatab_sql.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Tue, 10 Nov 2009 13:11:42 +0100
+
+proftpd-dfsg (1.3.2b-1) unstable; urgency=low
+
+  * New upstream release.
+    Merged patches: 3282, 3284 and 3275. Note that 3275 solved CVE-2009-3639.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Mon, 26 Oct 2009 11:48:34 +0100
+
+proftpd-dfsg (1.3.2a-2) unstable; urgency=low
+
+  * Added TLSOptions EnableDiags in tls.conf templates, as a useful
+    option to be much more verbose.
+  * Added a proftpd-substvars snippet in proftpd-dev package. It should
+    be used for providing build-time substvars for third-parties packages. 
+    The snippet should be added to local substvars and provides 
+    ${proftpd:Depends} substvar.
+  * Moved to libmysqlclient-dev build-dep for MySQL 5.1 transition and 
+    recent ack aba NMU.
+    (closes: #542905)
+  * Policy bumped to 3.8.3.
+  * Removed /var/run/proftpd among proftpd-basic.dirs/install,
+    it is anyway created in the init script since long time. 
+    This fixes the dir-or-file-in-var-run in lintian.
+  * Long due fix to POTFILES.in due to proftpd -> proftpd-basic change in 
+    binary package name. Fixed lintian warn.
+  * Fixed debian-rules-calls-debhelper-in-odd-order lintian warn.
+  * Fixed debhelper-but-no-misc-depends lintian warn.
+  * Added a long due README.source file, which also fixes
+    patch-system-but-no-source-readme lintian warning.
+  * Set -e in prerm script. Fixes maintainer-script-ignores-errors lintian warn.
+  * Added Old Changelog: token to avoid historical warns by lintian on old
+    entries of debian/changelog.
+  * Fixed exit codes for status action in init script.
+    (closes: #527879)
+  * The -dev package no more install libtool .la files.
+  * [PATCH] Added 3275.dpatch to fix NULs management in TLS cert validation.
+    If reverse DNS resolution is off, OR if client certs are not being verified,
+    OR if the DNS name in the client cert is not required, then the bug does not
+    occur.
+  * [PATCH] Added 3282.dpatch to uncache first user in mod_sql when 
+    SQLNegativeCache is on.  
   * [PATCH] Added 3284.dpatch to fix TCP_NODELAY misuse in inet.c core file.
-    It negatively impacts >= 1.3.1 versions. Backported from 1.3.2 branch.
-    See http://bugs.proftpd.org/show_bug.cgi?id=3284 for more information.
+    It negatively impacts >= 1.3.1 versions.
 
- -- Francesco Paolo Lovergine <frankie@debian.org>  Tue, 15 Sep 2009 14:36:19 +0200
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Mon, 07 Sep 2009 11:40:53 +0200
 
-proftpd-dfsg (1.3.1-17lenny2) stable; urgency=low
+proftpd-dfsg (1.3.2a-1) unstable; urgency=low
 
-  * Fixed 3173.dpatch to use pr_utf8_get_encoding() (supported in 1.3.1) instead of 
-    pr_encode_get_encoding() supported in 1.3.2. 
+  * New upstream release with a bounce of fixes.
+  * Removed obsolete patches: 3190, 3196.
+  * Removed obsolete proftpd-common conflicting.
+  * Policy bumped to 3.8.2 (no changes).
+  * Now proftpd-basic Provides: proftpd-abi-<version>, which is useful for external
+    plugins. All plugins created with external sources has to depend on the 
+    specified ABI in order to avoid breakages at upgrade time by mixing 
+    mixed versions.
+  * File debian/control is templated to depend on upstream version for ABI
+    interface automagically at build time.
+  * The cron.monthly ftpstats job has been removed and merged with logrotate.
+    (closes: #522199)
+  * Now postinst disables old monthly cron jobs at upgrade time. Added a note about
+    new logrotation scheduling policy in proftpd-basic.NEWS.
+  * Fixed proftpd-basic.NEWS file contents.
 
- -- Francesco Paolo Lovergine <frankie@debian.org>  Fri, 27 Feb 2009 21:27:09 +0100
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Fri, 17 Jul 2009 13:28:38 +0200
 
-proftpd-dfsg (1.3.1-17lenny1) stable; urgency=low
+proftpd-dfsg (1.3.2-3) unstable; urgency=medium
 
-  * Security: added 3124.dpatch patch to manage another SQL injection due to % variable
-    substitution in user/group names. This is fixed in 1.3.2. This is CVE-2009-0542.
-  * Security: added 3173fix.dpatch to use PQescapeStringConn() instead of the 
-    deprecated PQescapeString(), which does not honour the encoding. 
-    This is referred to the previous fix of #3173 aka CVE-2009-0543.
-    (closes: #516388)
-  * Added 3176.dpatch to manage correctly postgres-specific charset names introduced
-    in patch 3173.dpatch.
+  * Added proftpd-mod-sqlite and proftpd-mod-odbc to Suggests in debian/control.
+  * Removed LIBS prefixed at configuration time in debian/rules and still around 
+    after odbc.patch. My oversight...
+    (closes: #519029) 
+  * [PATCH] Added 3204.dpatch to provide a better prxs to third-parties module.
+    It properly manages DESTDIR and module $Libraries$. And also provides --help :)
+  * Removed 3188.dpatch because obsoleted by 3204.dpatch.
 
- -- Francesco Paolo Lovergine <frankie@debian.org>  Tue, 24 Feb 2009 10:55:09 +0100
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Tue, 10 Mar 2009 10:28:12 +0100
+
+proftpd-dfsg (1.3.2-2) unstable; urgency=low
+
+  * [PATCH] Now prxs.dpatch renamed 3188.dpatch to reflect assigned
+    bugzilla id.
+  * Added mod_sql_odbc, mod_sql_sqlite, mod_unique_id support with their
+    build-deps.
+  * Standard configuration changed to reflect new modules adding. 
+  * A couple of new packages added:
+  	proftpd-mod-sqlite
+        proftpd-mod-odbc
+    to distribute the two new SQL modules.
+  * [PATCH] Added odbc.dpatch to manage automagically unixodbc library
+    linking.
+  * Added some explicative notes in the configuration files about SQL
+    modules loading to make happy users.
+    (closes: #517363)
+  * Some changes in the provided README.Debian file.
+  * [PATCH] Added 3190.dpatch to fix <Limit> handling with MLSD/MLST 
+    commands.
+
+  * Default cron.monthly changed to avoid annoying mails when no data
+    are present. 
+    (closes: #517794)
+  * Added doc-base support for HTML docs in proftpd-doc. 
+    (closes: #317362)
+  * Added TJ copyright to debian/copyright as suggested by ftpmasters.
+    Also revised that file to be more complete.
+  * [PATCH] Added 3196.dpatch to fix secondary group list handling
+    in mod_quotatab.c
+  * Removed usr/share/doc/proftpd in debian/proftpd-basic.dirs stll around
+    since proftpd-basic introduction in 1.3.1 series.
+    (closes: #517974)
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Tue, 03 Mar 2009 11:19:16 +0100
+
+proftpd-dfsg (1.3.2-1) unstable; urgency=low
+
+  * New upstream release.
+    (closes: #500731, #444027)
+  * Debhelper compatibility moved to 7: revised dh_clean usage and *-stamp
+    targets.
+  * Moved to libcap2.
+    (closes: #492771)
+  * Specifies better module purposes.
+    (closes: #507644)
+  * Depends on openbsd-inetd | inet-superserver in debian/control, instead of
+    update-inetd.
+    (closes: #507311)
+  * Patchset revised by removing all patches merged upstream.
+  * Removed fake proftpd binary, used for etch -> lenny upgrades.
+  * Added proftpd-dev binary package to support external DSO modules build.
+  * Now debian/rules uses dh_installcron, dh_installpam, dh_installman instead
+    of installing by hand.
+  * Log rotation is done via logrotate.
+    (closes: #503342)
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Sun, 15 Feb 2009 11:13:51 +0100
 
 proftpd-dfsg (1.3.1-17) unstable; urgency=high
 
@@ -2146,6 +2417,8 @@ proftpd (1.1.7r2-2) unstable; urgency=low
     architectures with kernel source newer than 2.1.103.
 
  -- Johnie Ingram <johnie@debian.org>  Wed,  7 Oct 1998 10:55:38 -0400
+
+Old Changelog:
 
 proftpd (1.1.7r2-1) unstable; urgency=low, closes=26839
 

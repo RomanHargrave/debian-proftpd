@@ -2,7 +2,7 @@
  * ProFTPD: mod_sql_postgres -- Support for connecting to Postgres databases.
  * Time-stamp: <1999-10-04 03:21:21 root>
  * Copyright (c) 2001 Andrew Houghton
- * Copyright (c) 2004-2007 TJ Saunders
+ * Copyright (c) 2004-2009 TJ Saunders
  *  
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@
  * the resulting executable, without including the source code for OpenSSL in
  * the source distribution.
  *
- * $Id: mod_sql_postgres.c,v 1.32 2007/07/06 22:40:58 castaglia Exp $
+ * $Id: mod_sql_postgres.c,v 1.51 2009/10/20 01:11:18 castaglia Exp $
  */
 
 /*
@@ -34,7 +34,7 @@
  * Internal define used for debug and logging.  All backends are encouraged
  * to use the same format.
  */
-#define MOD_SQL_POSTGRES_VERSION	"mod_sql_postgres/4.03"
+#define MOD_SQL_POSTGRES_VERSION	"mod_sql_postgres/4.0.4"
 
 #define _POSTGRES_PORT "5432"
 
@@ -42,6 +42,26 @@
 #include "../contrib/mod_sql.h"
 
 #include <libpq-fe.h>
+
+/* For the pg_encoding_to_char() function, used for NLS support, we need
+ * to include the <mb/pg_wchar.h> file.  It's OK; the function has been
+ * declared in that file for a while, according to:
+ *
+ *  http://archives.postgresql.org/pgsql-bugs/2006-07/msg00125.php
+ *
+ * But it's a pain to quell all of the compiler warnings about redefined
+ * this, undefined that.  The linker finds the symbol without issue, so
+ * punt on including <mb/pg_wchar.h> file.  Instead, we'll copy the
+ * function declaration here.
+ */
+#ifdef PR_USE_NLS
+extern const char *pg_encoding_to_char(int encoding);
+
+/* And this is the mod_sql_postgres-specific function mapping iconv
+ * locales to Postgres encodings.
+ */
+static const char *get_postgres_encoding(const char *encoding);
+#endif
 
 /* 
  * timer-handling code adds the need for a couple of forward declarations
@@ -142,7 +162,7 @@ static void *_sql_add_connection(pool *p, char *name, db_conn_t *conn)
     return NULL;
   }
 
-  entry = (conn_entry_t *) pcalloc( p, sizeof( conn_entry_t ));
+  entry = (conn_entry_t *) pcalloc(p, sizeof(conn_entry_t));
   entry->name = name;
   entry->data = conn;
 
@@ -168,17 +188,16 @@ static void _sql_check_cmd(cmd_rec *cmd, char *msg) {
 }
 
 /*
- * _sql_timer_callback: when a timer goes off, this is the function
- *  that gets called.  This function makes assumptions about the 
- *  db_conn_t members.
+ * sql_timer_cb: when a timer goes off, this is the function that gets called.
+ * This function makes assumptions about the db_conn_t members.
  */
-static int _sql_timer_callback(CALLBACK_FRAME) {
+static int sql_timer_cb(CALLBACK_FRAME) {
   conn_entry_t *entry = NULL;
-  int cnt = 0;
+  int i = 0;
   cmd_rec *cmd = NULL;
  
-  for (cnt=0; cnt < conn_cache->nelts; cnt++) {
-    entry = ((conn_entry_t **) conn_cache->elts)[cnt];
+  for (i = 0; i < conn_cache->nelts; i++) {
+    entry = ((conn_entry_t **) conn_cache->elts)[i];
 
     if (entry->timer == p2) {
       sql_log(DEBUG_INFO, "timer expired for connection '%s'", entry->name);
@@ -228,8 +247,8 @@ static modret_t *_build_data(cmd_rec *cmd, db_conn_t *conn) {
   sd->rnum = (unsigned long) PQntuples(result);
   sd->fnum = (unsigned long) PQnfields(result);
 
-  data = (char **) pcalloc( cmd->tmp_pool, sizeof(char *) * 
-			    ((sd->rnum * sd->fnum) + 1) );
+  data = (char **) pcalloc(cmd->tmp_pool, sizeof(char *) * 
+			    ((sd->rnum * sd->fnum) + 1));
   
   for (row = 0; row < sd->rnum; row++) {
     for (field = 0; field < sd->fnum; field++) {
@@ -242,6 +261,86 @@ static modret_t *_build_data(cmd_rec *cmd, db_conn_t *conn) {
 
   return mod_create_data( cmd, (void *) sd );
 }
+
+#ifdef PR_USE_NLS
+static const char *get_postgres_encoding(const char *encoding) {
+
+  /* XXX Hack to deal with Postgres' incredibly broken behavior when
+   * handling the 'ASCII' encoding.  Specifically, Postgres chokes on
+   * 'ASCII', and instead insists on calling it 'SQL_ASCII' (which, of
+   * course, is not even close to being a valid encoding name according
+   * to libiconv.)
+   *
+   * Treat 'ANSI_X3.4-1968' (another common name/alias for ASCII) the
+   * same; rename it to 'SQL_ASCII' for Postgres' benefit.  And same for
+   * 'US-ASCII'.
+   */
+  if (strcasecmp(encoding, "ANSI_X3.4-1968") == 0 ||
+      strcasecmp(encoding, "ASCII") == 0 ||
+      strcasecmp(encoding, "US-ASCII") == 0) {
+    return "SQL_ASCII";
+  }
+
+  /* And other commonly used charsets for which Postgres has their own names. */
+
+  if (strcasecmp(encoding, "CP1251") == 0 ||
+      strcasecmp(encoding, "WINDOWS-1251") == 0) {
+    return "WIN1251";
+  }
+
+  if (strcasecmp(encoding, "KOI-8") == 0 ||
+      strcasecmp(encoding, "KOI8-R") == 0 ||
+      strcasecmp(encoding, "KOI8") == 0 ||
+      strcasecmp(encoding, "KOI8R") == 0) {
+    return "KOI";
+  }
+
+  if (strcasecmp(encoding, "CP866") == 0) {
+    return "WIN866";
+  }
+
+  if (strcasecmp(encoding, "ISO-8859-1") == 0) {
+    return "LATIN1";
+  }
+
+  if (strcasecmp(encoding, "ISO-8859-15") == 0) {
+    return "LATIN9";
+  }
+
+  if (strcasecmp(encoding, "EUC-CN") == 0 ||
+      strcasecmp(encoding, "EUCCN") == 0) {
+    return "EUC_CN";
+  }
+
+  if (strcasecmp(encoding, "EUC-JP") == 0 ||
+      strcasecmp(encoding, "EUCJP") == 0) {
+    return "EUC_JP";
+  }
+
+  if (strcasecmp(encoding, "EUC-KR") == 0 ||
+      strcasecmp(encoding, "EUCKR") == 0) {
+    return "EUC_KR";
+  }
+
+  if (strcasecmp(encoding, "EUC-TW") == 0 ||
+      strcasecmp(encoding, "EUCTW") == 0) {
+    return "EUC_TW";
+  }
+
+  if (strcasecmp(encoding, "SHIFT-JIS") == 0 ||
+      strcasecmp(encoding, "SHIFT_JIS") == 0) {
+    return "SJIS";
+  }
+
+  if (strcasecmp(encoding, "UTF8") == 0 ||
+      strcasecmp(encoding, "UTF-8") == 0 ||
+      strcasecmp(encoding, "UTF8-MAC") == 0) {
+    return "UTF8";
+  }
+
+  return encoding;
+}
+#endif
 
 /*
  * cmd_open: attempts to open a named connection to the database.
@@ -263,6 +362,7 @@ static modret_t *_build_data(cmd_rec *cmd, db_conn_t *conn) {
 MODRET cmd_open(cmd_rec *cmd) {
   conn_entry_t *entry = NULL;
   db_conn_t *conn = NULL;
+  const char *server_version = NULL;
 
   sql_log(DEBUG_FUNC, "%s", "entering \tpostgres cmd_open");
 
@@ -286,16 +386,77 @@ MODRET cmd_open(cmd_rec *cmd) {
   /* if we're already open (connections > 0) increment connections 
    * reset our timer if we have one, and return HANDLED 
    */
-  if ((entry->connections > 0) && 
-      (PQstatus(conn->postgres) == CONNECTION_OK)) {
-    entry->connections++;
-    if (entry->timer) 
-      pr_timer_reset(entry->timer, &sql_postgres_module);
+  if (entry->connections > 0) { 
+    if (PQstatus(conn->postgres) == CONNECTION_OK) {
+      entry->connections++;
 
-    sql_log(DEBUG_INFO, "connection '%s' count is now %d", entry->name,
-      entry->connections);
-    sql_log(DEBUG_FUNC, "%s", "exiting \tpostgres cmd_open");
-    return PR_HANDLED(cmd);
+      if (entry->timer) {
+        pr_timer_reset(entry->timer, &sql_postgres_module);
+      }
+
+      sql_log(DEBUG_INFO, "connection '%s' count is now %d", entry->name,
+        entry->connections);
+      sql_log(DEBUG_FUNC, "%s", "exiting \tpostgres cmd_open");
+      return PR_HANDLED(cmd);
+
+    } else {
+      char *reason;
+      size_t reason_len;
+
+      /* Unless we've been told not to reconnect, try to reconnect now.
+       * We only try once; if it fails, we return an error.
+       */
+      if (!(pr_sql_opts & SQL_OPT_NO_RECONNECT)) {
+        PQreset(conn->postgres);
+
+        if (PQstatus(conn->postgres) == CONNECTION_OK) {
+          entry->connections++;
+
+          if (entry->timer) {
+            pr_timer_reset(entry->timer, &sql_postgres_module);
+          }
+
+          sql_log(DEBUG_INFO, "connection '%s' count is now %d", entry->name,
+            entry->connections);
+          sql_log(DEBUG_FUNC, "%s", "exiting \tpostgres cmd_open");
+          return PR_HANDLED(cmd);
+        }
+      }
+
+      reason = PQerrorMessage(conn->postgres);
+      reason_len = strlen(reason);
+
+      /* Postgres might give us an empty string as the reason; not helpful. */
+      if (reason_len == 0) {
+        reason = "(unknown)";
+        reason_len = strlen(reason);
+      }
+
+      /* The error message returned by Postgres is usually appended with
+       * a newline.  Let's prettify it by removing the newline.  Note
+       * that yes, we are overwriting the pointer given to us by Postgres,
+       * but it's OK.  The Postgres docs say that we're not supposed to
+       * free the memory associated with the returned string anyway.
+       */
+      reason = pstrdup(session.pool, reason);
+
+      if (reason[reason_len-1] == '\n') {
+        reason[reason_len-1] = '\0';
+        reason_len--;
+      }
+
+      sql_log(DEBUG_INFO, "lost connection to database: %s", reason);
+
+      entry->connections = 0;
+      if (entry->timer) {
+        pr_timer_remove(entry->timer, &sql_postgres_module);
+        entry->timer = 0;
+      }
+
+      sql_log(DEBUG_FUNC, "%s", "exiting \tpostgres cmd_open");
+      return PR_ERROR_MSG(cmd, MOD_SQL_POSTGRES_VERSION,
+        "lost connection to database");
+    }
   }
 
   /* make sure we have a new conn struct */
@@ -307,17 +468,56 @@ MODRET cmd_open(cmd_rec *cmd) {
     return _build_error( cmd, conn );
   }
 
+#if defined(PG_VERSION_STR)
+  sql_log(DEBUG_FUNC, "Postgres client: %s", PG_VERSION_STR);
+#endif
+
+  server_version = PQparameterStatus(conn->postgres, "server_version");
+  if (server_version != NULL) {
+    sql_log(DEBUG_FUNC, "Postgres server version: %s", server_version);
+  }
+
+#ifdef PR_USE_NLS
+  if (pr_encode_get_encoding() != NULL) {
+    const char *encoding;
+
+    encoding = get_postgres_encoding(pr_encode_get_encoding());
+
+    /* Configure the connection for the current local character set. */
+    if (PQsetClientEncoding(conn->postgres, encoding) < 0) {
+      /* if it didn't work, return an error */
+      sql_log(DEBUG_FUNC, "%s", "exiting \tpostgres cmd_open");
+      return _build_error(cmd, conn);
+    }
+
+    sql_log(DEBUG_FUNC, "Postgres connection character set now '%s' "
+      "(from '%s')", pg_encoding_to_char(PQclientEncoding(conn->postgres)),
+      pr_encode_get_encoding());
+  }
+#endif /* !PR_USE_NLS */
+
   /* bump connections */
   entry->connections++;
 
-  /* set up our timer if necessary */
-  if (entry->ttl > 0) {
+  if (pr_sql_conn_policy == SQL_CONN_POLICY_PERSESSION) {
+    /* If the connection policy is PERSESSION... */
+    if (entry->connections == 1) {
+      /* ...and we are actually opening the first connection to the database;
+       * we want to make sure this connection stays open, after this first use
+       * (as per Bug#3290).  To do this, we re-bump the connection count.
+       */
+      entry->connections++;
+    } 
+ 
+  } else if (entry->ttl > 0) { 
+    /* Set up our timer if necessary */
+
     entry->timer = pr_timer_add(entry->ttl, -1, &sql_postgres_module,
-      _sql_timer_callback);
+      sql_timer_cb, "postgres connection ttl");
     sql_log(DEBUG_INFO, "connection '%s' - %d second timer started",
       entry->name, entry->ttl);
 
-    /* timed connections get re-bumped so they don't go away when cmd_close
+    /* Timed connections get re-bumped so they don't go away when cmd_close
      * is called.
      */
     entry->connections++;
@@ -474,7 +674,7 @@ MODRET cmd_defineconnection(cmd_rec *cmd) {
     return PR_ERROR_MSG(cmd, MOD_SQL_POSTGRES_VERSION, "uninitialized module");
   }
 
-  conn = (db_conn_t *) palloc(conn_pool, sizeof(db_conn_t));
+  conn = (db_conn_t *) pcalloc(conn_pool, sizeof(db_conn_t));
 
   name = pstrdup(conn_pool, cmd->argv[0]);
   conn->user = pstrdup(conn_pool, cmd->argv[1]);
@@ -527,10 +727,15 @@ MODRET cmd_defineconnection(cmd_rec *cmd) {
       "named connection already exists");
   }
 
-  entry->ttl = (cmd->argc == 5) ? 
-    (int) strtol(cmd->argv[4], (char **)NULL, 10) : 0;
-  if (entry->ttl < 0) 
-    entry->ttl = 0;
+  if (cmd->argc == 5) { 
+    entry->ttl = (int) strtol(cmd->argv[4], (char **) NULL, 10);
+    if (entry->ttl >= 1) {
+      pr_sql_conn_policy = SQL_CONN_POLICY_TIMER;
+ 
+    } else {
+      entry->ttl = 0;
+    }
+  }
 
   entry->timer = 0;
   entry->connections = 0;
@@ -1102,8 +1307,14 @@ MODRET cmd_query(cmd_rec *cmd) {
 MODRET cmd_escapestring(cmd_rec * cmd) {
   conn_entry_t *entry = NULL;
   db_conn_t *conn = NULL;
+  modret_t *cmr = NULL;
   char *unescaped = NULL;
   char *escaped = NULL;
+  cmd_rec *close_cmd;
+  size_t unescaped_len = 0;
+#ifdef PG_VERSION_NUM
+  int pgerr = 0;
+#endif
 
   sql_log(DEBUG_FUNC, "%s", "entering \tpostgres cmd_escapestring");
 
@@ -1124,14 +1335,38 @@ MODRET cmd_escapestring(cmd_rec * cmd) {
 
   conn = (db_conn_t *) entry->data;
 
-  /* Note: the PQescapeString() function appeared in the C API as of
-   * Postgres-7.2.
-   */
-  unescaped = cmd->argv[1];
-  escaped = (char *) pcalloc(cmd->tmp_pool, sizeof(char) *
-    (strlen(unescaped) * 2) + 1);
+  /* Make sure the connection is open. */
+  cmr = cmd_open(cmd);
+  if (MODRET_ERROR(cmr)) {
+    sql_log(DEBUG_FUNC, "%s", "exiting \tpostgres cmd_escapestring");
+    return cmr;
+  }
 
-  PQescapeString(escaped, unescaped, strlen(unescaped));
+  /* Note: I think PQescapeStringConn() appears in the C API as of
+   * Postgres-7.3, but I'm not sure.  The PQescapeString() function appeared
+   * in the C API as of Postgres-7.2.  The PG_VERSION_NUM macro appeared
+   * as of Postgres-8.2, hence why that is used as the proxy indicator of
+   * whether to use PQescapeString() or PQescapeStringConn().
+   */
+
+  unescaped = cmd->argv[1];
+  unescaped_len = strlen(unescaped);
+  escaped = (char *) pcalloc(cmd->tmp_pool, sizeof(char) *
+    (unescaped_len * 2) + 1);
+
+#ifdef PG_VERSION_NUM
+  PQescapeStringConn(conn->postgres, escaped, unescaped, unescaped_len, &pgerr);
+  if (pgerr != 0) {
+    sql_log(DEBUG_FUNC, "%s", "exiting \tpostgres cmd_escapestring");
+    return _build_error(cmd, conn);
+  }
+#else
+  PQescapeString(escaped, unescaped, unescaped_len);
+#endif
+
+  close_cmd = _sql_make_cmd(cmd->tmp_pool, 1, entry->name);
+  cmd_close(close_cmd);
+  SQL_FREE_CMD(close_cmd);
 
   sql_log(DEBUG_FUNC, "%s", "exiting \tpostgres cmd_escapestring");
   return mod_create_data(cmd, (void *) escaped);
@@ -1182,11 +1417,14 @@ MODRET cmd_checkauth(cmd_rec * cmd) {
 
   conn = (db_conn_t *) entry->data;
 
+  sql_log(DEBUG_WARN, MOD_SQL_POSTGRES_VERSION
+    ": Postgres does not support the 'Backend' SQLAuthType");
+
   sql_log(DEBUG_FUNC, "%s", "exiting \tpostgres cmd_checkauth");
 
   /* PostgreSQL doesn't provide this functionality */
-
-  return PR_ERROR(cmd);
+  return PR_ERROR_MSG(cmd, MOD_SQL_POSTGRES_VERSION,
+    "Postgres does not support the 'Backend' SQLAuthType");
 }
 
 /*
@@ -1214,8 +1452,8 @@ MODRET cmd_identify(cmd_rec * cmd) {
 
   _sql_check_cmd(cmd, "cmd_identify");
 
-  sd = (sql_data_t *) pcalloc( cmd->tmp_pool, sizeof(sql_data_t));
-  sd->data = (char **) pcalloc( cmd->tmp_pool, sizeof(char *) * 2);
+  sd = (sql_data_t *) pcalloc(cmd->tmp_pool, sizeof(sql_data_t));
+  sd->data = (char **) pcalloc(cmd->tmp_pool, sizeof(char *) * 2);
 
   sd->rnum = 1;
   sd->fnum = 2;
@@ -1232,8 +1470,11 @@ MODRET cmd_prepare(cmd_rec *cmd) {
   }
 
   conn_pool = (pool *) cmd->argv[0];
-  conn_cache = make_array((pool *) cmd->argv[0], DEF_CONN_POOL_SIZE,
-    sizeof(conn_entry_t));
+
+  if (conn_cache == NULL) {
+    conn_cache = make_array((pool *) cmd->argv[0], DEF_CONN_POOL_SIZE,
+      sizeof(conn_entry_t *));
+  }
 
   return mod_create_data(cmd, NULL);
 }
@@ -1317,9 +1558,15 @@ static int sql_postgres_init(void) {
 }
 
 static int sql_postgres_sess_init(void) {
-  conn_pool = make_sub_pool(session.pool);
-  conn_cache = make_array(make_sub_pool(session.pool), DEF_CONN_POOL_SIZE,
-    sizeof(conn_entry_t));
+  if (conn_pool == NULL) {
+    conn_pool = make_sub_pool(session.pool);
+    pr_pool_tag(conn_pool, "Postgres connection pool");
+  }
+
+  if (conn_cache == NULL) {
+    conn_cache = make_array(make_sub_pool(session.pool), DEF_CONN_POOL_SIZE,
+      sizeof(conn_entry_t *));
+  }
 
   return 0;
 }

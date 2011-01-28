@@ -1,7 +1,7 @@
 /*
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
- * Copyright (c) 2001-2007 The ProFTPD Project team
+ * Copyright (c) 2001-2010 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
 
 /*
  * Timer system, based on alarm() and SIGALRM
- * $Id: timers.c,v 1.26 2007/09/30 23:38:34 castaglia Exp $
+ * $Id: timers.c,v 1.32 2010/02/09 20:08:09 castaglia Exp $
  */
 
 #include "conf.h"
@@ -45,12 +45,14 @@ struct timer {
   module *mod;                  /* Module owning this timer */
   callback_t callback;          /* Function to callback */
   char remove;                  /* Internal use */
+
+  const char *desc;		/* Description of timer, provided by caller */
 };
 
 static int _current_timeout = 0;
 static int _total_time = 0;
 static int _sleep_sem = 0;
-static int alarms_blocked = 0,alarm_pending = 0;
+static int alarms_blocked = 0, alarm_pending = 0;
 static xaset_t *timers = NULL;
 static xaset_t *recycled = NULL;
 static xaset_t *free_timers = NULL;
@@ -58,6 +60,8 @@ static int _indispatch = 0;
 static int dynamic_timerno = 1024;
 static unsigned int nalarms = 0;
 static time_t _alarmed_time = 0;
+
+static pool *timer_pool = NULL;
 
 static int timer_cmp(struct timer *t1, struct timer *t2) {
   if (t1->count < t2->count)
@@ -78,7 +82,7 @@ static int process_timers(int elapsed) {
   struct timer *t = NULL, *next = NULL;
 
   if (!recycled)
-    recycled = xaset_create(NULL, NULL);
+    recycled = xaset_create(timer_pool, NULL);
 
   if (!elapsed &&
       !recycled->xas_list) {
@@ -97,7 +101,7 @@ static int process_timers(int elapsed) {
   _indispatch++;
 
   if (elapsed) {
-    for (t = (struct timer *) timers->xas_list; t; t=next) {
+    for (t = (struct timer *) timers->xas_list; t; t = next) {
       /* If this timer has already been handled, skip */
       next = t->next;
 
@@ -110,9 +114,11 @@ static int process_timers(int elapsed) {
         /* This timer's interval has elapsed, so trigger its callback. */
 
         pr_trace_msg("timer", 4,
-          "%ld seconds for timer ID %d (for module '%s') elapsed, "
-          "invoking callback (%p)", t->interval, t->timerno,
-          t->mod ? t->mod->name : "[none]", t->callback);
+          "%ld %s for timer ID %d ('%s', for module '%s') elapsed, invoking "
+          "callback (%p)", t->interval,
+          t->interval != 1 ? "seconds" : "second", t->timerno,
+          t->desc ? t->desc : "<unknown>",
+          t->mod ? t->mod->name : "<none>", t->callback);
 
         if (t->callback(t->interval, t->timerno, t->interval - t->count,
             t->mod) == 0) {
@@ -127,8 +133,8 @@ static int process_timers(int elapsed) {
           /* A non-zero return value from a timer callback signals that
            * the timer should be reused/restarted.
            */
-          pr_trace_msg("timer", 6, "restarting timer ID %d, as per callback",
-            t->timerno);
+          pr_trace_msg("timer", 6, "restarting timer ID %d ('%s'), as per "
+            "callback", t->timerno, t->desc ? t->desc : "<unknown>");
 
           xaset_remove(timers, (xasetmember_t *) t);
           t->count = t->interval;
@@ -237,19 +243,27 @@ void handle_alarm(void) {
 int pr_timer_reset(int timerno, module *mod) {
   struct timer *t = NULL;
 
-  if (_indispatch)
+  if (!timers) {
+    errno = EPERM;
     return -1;
+  }
+
+  if (_indispatch) {
+    errno = EINTR;
+    return -1;
+  }
 
   pr_alarms_block();
 
   if (!recycled)
-    recycled = xaset_create(NULL, NULL);
+    recycled = xaset_create(timer_pool, NULL);
 
-  for (t = (struct timer *) timers->xas_list; t; t=t->next)
-    if (t->timerno == timerno && (t->mod == mod || mod == ANY_MODULE)) {
+  for (t = (struct timer *) timers->xas_list; t; t = t->next) {
+    if (t->timerno == timerno &&
+        (t->mod == mod || mod == ANY_MODULE)) {
       t->count = t->interval;
-      xaset_remove(timers, (xasetmember_t*)t);
-      xaset_insert(recycled, (xasetmember_t*)t);
+      xaset_remove(timers, (xasetmember_t *) t);
+      xaset_insert(recycled, (xasetmember_t *) t);
       nalarms++;
 
       /* The handle_alarm() function also readjusts the timers lists
@@ -259,8 +273,15 @@ int pr_timer_reset(int timerno, module *mod) {
       handle_alarm();
       break;
     }
+  }
 
   pr_alarms_unblock();
+
+  if (t) {
+    pr_trace_msg("timer", 7, "reset timer ID %d ('%s', for module '%s')",
+      t->timerno, t->desc, t->mod ? t->mod->name : "[none]");
+    return t->timerno;
+  }
 
   return (t ? t->timerno : 0);
 }
@@ -274,14 +295,15 @@ int pr_timer_remove(int timerno, module *mod) {
 
   pr_alarms_block();
 
-  for (t = (struct timer *) timers->xas_list; t; t = t->next)
-    if (t->timerno == timerno && (t->mod == mod || mod == ANY_MODULE)) {
+  for (t = (struct timer *) timers->xas_list; t; t = t->next) {
+    if (t->timerno == timerno &&
+        (t->mod == mod || mod == ANY_MODULE)) {
       if (_indispatch) {
         t->remove++;
 
       } else {
-        xaset_remove(timers, (xasetmember_t*)t);
-        xaset_insert(free_timers, (xasetmember_t*)t);
+        xaset_remove(timers, (xasetmember_t *) t);
+        xaset_insert(free_timers, (xasetmember_t *) t);
 	nalarms++;
 
         /* The handle_alarm() function also readjusts the timers lists
@@ -292,28 +314,33 @@ int pr_timer_remove(int timerno, module *mod) {
       }
       break;
     }
+  }
 
   pr_alarms_unblock();
 
   if (t) {
-    pr_trace_msg("timer", 7, "removed timer ID %d (for module '%s')",
-      t->timerno, t->mod ? t->mod->name : "[none]");
+    pr_trace_msg("timer", 7, "removed timer ID %d ('%s', for module '%s')",
+      t->timerno, t->desc, t->mod ? t->mod->name : "[none]");
     return t->timerno;
   }
 
-  return 0;
+  errno = ENOENT;
+  return -1;
 }
 
-int pr_timer_add(int seconds, int timerno, module *mod, callback_t cb) {
+int pr_timer_add(int seconds, int timerno, module *mod, callback_t cb,
+    const char *desc) {
   struct timer *t = NULL;
 
-  if (seconds < 0) {
+  if (seconds <= 0 ||
+      cb == NULL ||
+      desc == NULL) {
     errno = EINVAL;
     return -1;
   }
 
   if (!timers)
-    timers = xaset_create(NULL, (XASET_COMPARE) timer_cmp);
+    timers = xaset_create(timer_pool, (XASET_COMPARE) timer_cmp);
 
   /* Check to see that, if specified, the timerno is not already in use. */
   if (timerno != -1) {
@@ -326,21 +353,24 @@ int pr_timer_add(int seconds, int timerno, module *mod, callback_t cb) {
   }
 
   if (!free_timers)
-    free_timers = xaset_create(NULL, NULL);
+    free_timers = xaset_create(timer_pool, NULL);
 
   /* Try to use an old timer first */
   pr_alarms_block();
   t = (struct timer *) free_timers->xas_list;
-  if (t != NULL)
+  if (t != NULL) {
     xaset_remove(free_timers, (xasetmember_t *) t);
 
-  else
-    /* XXX The Timer API uses the permanent pool when it should be using
-     * its own subpool.
-     */
+  } else {
+
+    if (timer_pool == NULL) {
+      timer_pool = make_sub_pool(permanent_pool);
+      pr_pool_tag(timer_pool, "Timer Pool");
+    }
 
     /* Must allocate a new one */
-    t = palloc(permanent_pool, sizeof(struct timer));
+    t = palloc(timer_pool, sizeof(struct timer));
+  }
 
   if (timerno == -1) {
     /* Dynamic timer */
@@ -354,6 +384,7 @@ int pr_timer_add(int seconds, int timerno, module *mod, callback_t cb) {
   t->callback = cb;
   t->mod = mod;
   t->remove = 0;
+  t->desc = desc;
 
   /* If called while _indispatch, add to the recycled list to prevent
    * list corruption
@@ -361,7 +392,7 @@ int pr_timer_add(int seconds, int timerno, module *mod, callback_t cb) {
 
   if (_indispatch) {
     if (!recycled)
-      recycled = xaset_create(NULL, NULL);
+      recycled = xaset_create(timer_pool, NULL);
     xaset_insert(recycled, (xasetmember_t *) t);
 
   } else {
@@ -378,9 +409,10 @@ int pr_timer_add(int seconds, int timerno, module *mod, callback_t cb) {
 
   pr_alarms_unblock();
 
-  pr_trace_msg("timer", 7, "added timer ID %d (for module '%s'), "
-    "triggering in %ld seconds", t->timerno, t->mod ? t->mod->name : "[none]",
-    t->interval);
+  pr_trace_msg("timer", 7, "added timer ID %d ('%s', for module '%s'), "
+    "triggering in %ld %s", t->timerno, t->desc,
+    t->mod ? t->mod->name : "[none]", t->interval,
+    t->interval != 1 ? "seconds" : "second");
   return timerno;
 }
 
@@ -419,7 +451,7 @@ int pr_timer_sleep(int seconds) {
     return -1;
   }
 
-  timerno = pr_timer_add(seconds, -1, NULL, sleep_cb);
+  timerno = pr_timer_add(seconds, -1, NULL, sleep_cb, "sleep");
   if (timerno == -1)
     return -1;
 
@@ -445,5 +477,12 @@ void timers_init(void) {
   recycled = NULL;
   free_timers = NULL;
 
- return;
+  /* Reset the timer pool. */
+  if (timer_pool)
+    destroy_pool(timer_pool);
+
+  timer_pool = make_sub_pool(permanent_pool);
+  pr_pool_tag(timer_pool, "Timer Pool");
+
+  return;
 }

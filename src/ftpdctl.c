@@ -1,8 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 1997, 1998 Public Flood Software
- * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2007 The ProFTPD Project team
+ * Copyright (c) 2001-2009 The ProFTPD Project team
  *  
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,11 +23,11 @@
  */
 
 /* ProFTPD Controls command-line client
- *
- * $Id: ftpdctl.c,v 1.8 2007/02/15 16:46:43 castaglia Exp $
+ * $Id: ftpdctl.c,v 1.15 2009/04/07 15:42:47 castaglia Exp $
  */
 
 #include "conf.h"
+#include "privs.h"
 
 #include <signal.h>
 
@@ -48,14 +46,30 @@ void *get_param_ptr(xaset_t *set, const char *name, int recurse) {
   return NULL;
 }
 
-char *pr_inet_validate(char *buf) {
-  return NULL;
-}
-
 void pr_alarms_block(void) {
 }
 
 void pr_alarms_unblock(void) {
+}
+
+gid_t pr_auth_name2gid(pool *p, const char *name) {
+  return (gid_t) -1;
+}
+
+uid_t pr_auth_name2uid(pool *p, const char *name) {
+  return (uid_t) -1;
+}
+
+int pr_fs_get_usable_fd(int fd) {
+  return -1;
+}
+
+int pr_privs_root(const char *file, int lineno) {
+  return 0;
+}
+
+int pr_privs_relinquish(const char *file, int lineno) {
+  return 0;
 }
 
 void pr_signals_block(void) {
@@ -67,6 +81,46 @@ void pr_signals_unblock(void) {
 void pr_signals_handle(void) {
 }
 
+pr_table_t *pr_table_alloc(pool *p, int flags) {
+  errno = EPERM;
+  return NULL;
+}
+
+int pr_table_add(pr_table_t *tab, const char *k, void *v, size_t sz) {
+  errno = EPERM;
+  return -1;
+}
+
+int pr_table_count(pr_table_t *tab) {
+  errno = EPERM;
+  return -1;
+}
+
+int pr_table_empty(pr_table_t *tab) {
+  errno = EPERM;
+  return -1;
+}
+
+int pr_table_exists(pr_table_t *tab, const char *k) {
+  errno = EPERM;
+  return -1;
+}
+
+int pr_table_free(pr_table_t *tab) {
+  errno = EPERM;
+  return -1;
+}
+
+void *pr_table_get(pr_table_t *tab, const char *k, size_t *sz) {
+  errno = EPERM;
+  return NULL;
+}
+
+int pr_table_set(pr_table_t *tab, const char *k, void *v, size_t sz) {
+  errno = EPERM;
+  return -1;
+}
+
 struct tm *pr_localtime(pool *p, const time_t *t) {
   return localtime(t);
 }
@@ -74,23 +128,6 @@ struct tm *pr_localtime(pool *p, const time_t *t) {
 int pr_trace_msg(const char *channel, int level, const char *fmt, ...) {
   errno = ENOSYS;
   return -1;
-}
-
-char *sstrcat(char *dest, const char *src, size_t n) {
-  register char *d;
-
-  if (!dest || !src || n == 0) {
-    errno = EINVAL;
-    return NULL;
-  }
-
-  for (d = dest; *d && n > 1; d++, n--) ;
-
-  while (n-- > 1 && *src)
-    *d++ = *src++;
-
-  *d = 0;
-  return dest;
 }
 
 char *sstrncpy(char *dest, const char *src, size_t n) {

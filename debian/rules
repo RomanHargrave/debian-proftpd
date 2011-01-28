@@ -1,13 +1,13 @@
 #!/usr/bin/make -f
 
 PACKAGE=proftpd-basic
+PACKAGE_DEV=proftpd-dev
 NAME=proftpd
+VERSION=$(shell grep PROFTPD_VERSION_TEXT $(CURDIR)/include/version.h|cut -d\" -f2)
 
 #
 # HAVE_OPENSSL is required by mod_sql.c. 
 # See #233031 for details. 
-#
-# FIXME: To be checked for 1.3.0+
 # 
 PROFTPD_FLAGS := -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64 -DHAVE_OPENSSL -DUSE_LDAP_TLS
 CFLAGS := -O2 $(PROFTPD_FLAGS) 
@@ -27,20 +27,21 @@ include /usr/share/dpatch/dpatch.make
 
 #
 # dpkg-arch rules
-# FIXME: To be checked for 1.3.0+
 # 
 ifeq (,$(DEB_BUILD_GNU_TYPE))
   include debian/scripts/dpkg-arch.mk
 endif
 
-DSOMODS1 = mod_site_misc:mod_load:mod_ban:mod_quotatab:mod_sql:mod_sql_mysql:mod_sql_postgres:mod_dynmasq:
+# Note: use --localstatedir=/var/run/proftpd for > 1.3.2
+DSOMODS1 = mod_unique_id:mod_site_misc:mod_load:mod_ban:mod_quotatab:mod_sql:mod_sql_mysql:mod_sql_postgres:mod_sql_sqlite:mod_sql_odbc:mod_dynmasq:
 DSOMODS2 = mod_quotatab_sql:mod_ldap:mod_quotatab_ldap:mod_ratio:mod_tls:mod_rewrite:mod_radius:mod_wrap:mod_wrap2:mod_wrap2_file:
-DSOMODS3 = mod_wrap2_sql:mod_quotatab_file:mod_quotatab_radius:mod_facl:mod_ctrls_admin:mod_ifsession
+DSOMODS3 = mod_wrap2_sql:mod_quotatab_file:mod_quotatab_radius:mod_facl:mod_ctrls_admin:mod_vroot:
+DSOMODS4 = mod_exec:mod_sftp:mod_sftp_pam:mod_sftp_sql:mod_shaper:mod_sql_passwd:mod_ifsession
 CONF_ARGS := --prefix=/usr \
 	     --with-includes=$(shell pg_config --includedir):$(shell mysql_config --include|sed -e 's/-I//') \
 	     --mandir=/usr/share/man --sysconfdir=/etc/$(NAME) --localstatedir=/var/run --libexecdir=/usr/lib/$(NAME) \
 	     --enable-sendfile --enable-facl --enable-dso --enable-autoshadow --enable-ctrls --with-modules=mod_readme \
-	     --enable-ipv6 --enable-nls
+	     --enable-ipv6 --enable-nls 
 #	     --enable-devel=stacktrace 
 
 ifeq ($(DEB_BUILD_GNU_TYPE), $(DEB_HOST_GNU_TYPE))
@@ -48,6 +49,12 @@ ifeq ($(DEB_BUILD_GNU_TYPE), $(DEB_HOST_GNU_TYPE))
 else
   CONF_ARGS += --build $(DEB_BUILD_GNU_TYPE) --host $(DEB_HOST_GNU_TYPE)
 endif
+
+debian/control: debian/control.in
+	sed -e 's/@VERSION@/$(VERSION)/' $< >$@
+
+debian/proftpd-substvars: debian/proftpd-substvars.in
+	sed -e 's/@VERSION@/$(VERSION)/' $< >$@
 	
 build: configure-stamp build-stamp
 build-stamp: 
@@ -55,39 +62,48 @@ build-stamp:
 	
 	$(MAKE) CC="$(CC)" CFLAGS="$(CFLAGS)" all
 	
-	touch build-stamp 
+	touch $@
 
-install: build-stamp
+install: build
 	dh_testdir
-	dh_clean -k
+	dh_prep
 	
 	$(MAKE) DESTDIR=$(CURDIR)/debian/tmp install
+	mv $(CURDIR)/debian/tmp/usr/share/locale/it_IT $(CURDIR)/debian/tmp/usr/share/locale/it
+	mv $(CURDIR)/debian/tmp/usr/share/locale/ru_RU $(CURDIR)/debian/tmp/usr/share/locale/ru
 
 configure: configure-stamp
 configure-stamp: patch-stamp
+	dh_testdir
 	
-	./configure $(CONF_ARGS) --with-shared=$(DSOMODS1)$(DSOMODS2)$(DSOMODS3)
+	# Use current autotools helpers
+	-test -r /usr/share/misc/config.sub && \
+		mv ./config.sub ./config.sub.original && \
+		cp -f /usr/share/misc/config.sub ./config.sub
+	-test -r /usr/share/misc/config.guess && \
+		mv ./config.guess ./config.guess.original && \
+		cp -f /usr/share/misc/config.guess ./config.guess
 	
-	touch configure-stamp
+	./configure $(CONF_ARGS) --with-shared=$(DSOMODS1)$(DSOMODS2)$(DSOMODS3)$(DSOMODS4)
+	
+	touch $@
 
-clean: myclean unpatch
+clean: debian/control debian/proftpd-substvars myclean unpatch
 myclean:
 	dh_testdir
 	dh_clean
 	
-	$(MAKE) distclean || true
+	[ ! -f $(CURDIR)/Makefile ] || $(MAKE) distclean 
 	
-	-test -r /usr/share/misc/config.sub && \
-		cp -f /usr/share/misc/config.sub ./config.sub
-	-test -r /usr/share/misc/config.guess && \
-		cp -f /usr/share/misc/config.guess ./config.guess
+	# Reset upstream autotools helpers
+	[ ! -f config.sub.original ] || mv -f ./config.sub.original ./config.sub 
+	[ ! -f config.guess.original ] || mv -f ./config.guess.original ./config.guess
 	
-	rm -f build-stamp configure-stamp install-stamp patch-stamp
-	rm -f stamp-build stamp-configure debian/files.saved debian/files
+	rm -f debian/files.saved debian/files
 	rm -f $$(find . -type l) $$(find . -name "*~" -o -name "*.o")
 	rm -f $(NAME) config.cache config.log lib/*.a ftpshut Make.rules
 	rm -rf debian/$(PACKAGE) debian/$(NAME)-doc
-	rm -rf debian/files* debian/*substvars* debian/*.gz core
+	rm -rf debian/files* debian/*.gz core
 	rm -f $$(find * -name "*.orig") modules/mod_ratio.c
 	rm -f contrib/dist/rpm/proftpd.spec
 	rm -rf $$(find $(CURDIR) -name .libs)
@@ -105,7 +121,7 @@ binary-indep: checkroot build
 	dh_installdirs -i 
 	dh_install -i 
 	dh_installdocs -i 
-	dh_installchangelogs -i ./ChangeLog
+	dh_installchangelogs -i ChangeLog
 	dh_installexamples -i 
 	
 	dh_compress -i
@@ -118,36 +134,33 @@ binary-indep: checkroot build
 
 binary-arch: checkroot build install
 	dh_installdirs -a
-	dh_install -a --sourcedir=debian/tmp
+	dh_install -a 
 	dh_installdocs -a
 	dh_installchangelogs -a ChangeLog
+	dh_installman -a
+	dh_installlogrotate -a
+	dh_installpam -a --name=$(NAME)
 	
 	# removes proftpd.conf installed by upstream
 	rm -f debian/$(PACKAGE)/etc/$(NAME)/$(NAME).conf
-	# removes .la and .a files currently not useful
-	rm -f debian/$(PACKAGE)/usr/lib/$(NAME)/mod_*.la debian/$(PACKAGE)/usr/lib/$(NAME)/mod_*.a
 	
 	install -m 644 debian/templates/*.conf debian/$(PACKAGE)/usr/share/$(NAME)/templates
 	install -m 644 debian/templates/welcome.msg debian/$(PACKAGE)/usr/share/$(NAME)/templates/welcome.msg 
 	install -m 644 debian/templates/ftpusers debian/$(PACKAGE)/etc 
 	install -m 755 debian/$(PACKAGE).init debian/$(PACKAGE)/etc/init.d/$(NAME) 
-	install -m 644 debian/$(NAME).pam debian/$(PACKAGE)/etc/pam.d/$(NAME) 
 	install -m 644 debian/templates/default debian/$(PACKAGE)/etc/default/$(NAME) 
-	install debian/ftpusers.5 debian/$(PACKAGE)/usr/share/man/man5/ftpusers.5
-	install debian/ftpasswd.8 debian/$(PACKAGE)/usr/share/man/man8/ftpasswd.8
-	install debian/ftpstats.8 debian/$(PACKAGE)/usr/share/man/man8
 	install contrib/xferstats.holger-preiss debian/$(PACKAGE)/usr/sbin/ftpstats
 	install -m 755 contrib/ftpasswd debian/$(PACKAGE)/usr/sbin/ftpasswd
 	install -m 755 contrib/ftpquota debian/$(PACKAGE)/usr/sbin/ftpquota
-	install -m 755 debian/$(NAME).cron.monthly debian/$(PACKAGE)/etc/cron.monthly/$(NAME)
 	install -m 755 debian/proftpd-gencert debian/$(PACKAGE)/usr/sbin/proftpd-gencert
-
+	install -m 644 debian/proftpd-substvars debian/$(PACKAGE_DEV)/usr/share/$(NAME)/proftpd-substvars
+	
 	dh_installdebconf -a
 	dh_compress -a
 	dh_fixperms -a
-	dh_installdeb -a
 	dh_makeshlibs -a
 	dh_shlibdeps -a -l$(CURDIR)/debian/tmp/usr/lib/$(NAME)
+	dh_installdeb -a
 	dh_perl -a
 	dh_gencontrol -a 
 	dh_strip -a

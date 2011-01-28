@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2003 The ProFTPD Project team
+ * Copyright (c) 2003-2009 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@
  */
 
 /* ProFTPD xferlog(5) logging support.
- * $Id: xferlog.c,v 1.3 2005/06/14 01:23:45 castaglia Exp $
+ * $Id: xferlog.c,v 1.6 2009/11/05 17:46:55 castaglia Exp $
  */
 
 #include "conf.h"
@@ -51,6 +51,11 @@ int xferlog_open(const char *path) {
   if (xferlogfd == -1) {
     pr_log_debug(DEBUG6, "opening TransferLog '%s'", path);
     pr_log_openfile(path, &xferlogfd, PR_LOG_XFER_MODE);
+
+    if (xferlogfd < 0) {
+      pr_log_pri(PR_LOG_NOTICE, "unable to open TransferLog '%s': %s",
+        path, strerror(errno));
+    }
   }
 
   return xferlogfd;
@@ -59,8 +64,10 @@ int xferlog_open(const char *path) {
 int xferlog_write(long xfertime, const char *remhost, off_t fsize, char *fname,
     char xfertype, char direction, char access_mode, char *user,
     char abort_flag) {
-
+  const char *xfer_proto;
   char buf[LOGBUFFER_SIZE] = {'\0'}, fbuf[LOGBUFFER_SIZE] = {'\0'};
+  int have_ident = FALSE;
+  char *rfc1413_ident = NULL;
   register unsigned int i = 0;
 
   if (xferlogfd == -1 || !remhost || !user || !fname)
@@ -72,8 +79,28 @@ int xferlog_write(long xfertime, const char *remhost, off_t fsize, char *fname,
   }
   fbuf[i] = '\0';
 
+  rfc1413_ident = pr_table_get(session.notes, "mod_ident.rfc1413-ident", NULL);
+  if (rfc1413_ident) {
+    have_ident = TRUE;
+
+    /* If the retrieved identity is "UNKNOWN", then change the string to be
+     * "*", since "*" is to be logged in the xferlog, as per the doc, when
+     * the authenticated user ID is not available.
+     */
+    if (strcmp(rfc1413_ident, "UNKNOWN") == 0)
+      rfc1413_ident = "*";
+
+  } else {
+    /* If an authenticated user ID is not available, log "*", as per the
+     * xferlog man page/spec.
+     */
+    rfc1413_ident = "*";
+  }
+
+  xfer_proto = pr_session_get_protocol(0);
+
   snprintf(buf, sizeof(buf),
-    "%s %ld %s %" PR_LU " %s %c _ %c %c %s ftp %c %s %c\n",
+    "%s %ld %s %" PR_LU " %s %c _ %c %c %s %s %c %s %c\n",
       pr_strtime(time(NULL)),
       xfertime,
       remhost,
@@ -83,9 +110,9 @@ int xferlog_write(long xfertime, const char *remhost, off_t fsize, char *fname,
       direction,
       access_mode,
       user,
-      session.ident_lookups == TRUE ? '1' : '0',
-      (session.ident_lookups == TRUE && strcmp(session.ident_user,
-        "UNKNOWN")) ? session.ident_user : "*",
+      xfer_proto,
+      have_ident ? '1' : '0',
+      rfc1413_ident,
       abort_flag);
 
   buf[sizeof(buf)-1] = '\0';

@@ -2,7 +2,7 @@
 ## change_pam_name.dpatch by Francesco Paolo Lovergine <frankie@debian.org>
 ##
 ## All lines beginning with `## DP:' are a description of the patch.
-## DP: No description.
+## DP: Debian specific change ftp -> proftpd in PAM configuration.
 
 @DPATCH@
 diff -urNad --exclude=CVS --exclude=.svn ./modules/mod_auth_pam.c /tmp/dpep-work.jZHh8Y/proftpd-1.2.10+1.3.0rc1-1/modules/mod_auth_pam.c

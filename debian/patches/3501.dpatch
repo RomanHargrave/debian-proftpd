@@ -1,0 +1,42 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## 3501.dpatch by Francesco Paolo Lovergine <frankie@debian.org>
+##
+## All lines beginning with `## DP:' are a description of the patch.
+## DP: No description.
+
+@DPATCH@
+diff -urNad '--exclude=CVS' '--exclude=.svn' '--exclude=.git' '--exclude=.arch' '--exclude=.hg' '--exclude=_darcs' '--exclude=.bzr' proftpd-dfsg~/src/auth.c proftpd-dfsg/src/auth.c
+--- proftpd-dfsg~/src/auth.c	2010-09-13 15:38:16.000000000 +0200
++++ proftpd-dfsg/src/auth.c	2010-09-14 10:47:16.000000000 +0200
+@@ -1204,14 +1204,18 @@
+   }
+ 
+   if (!is_alias) {
+-    auth_alias_only = get_param_ptr(anon_c ? anon_c->subset : main_server->conf,
++    /* Yes, we do want to be using c, not anon_c, here.  Otherwise, we
++     * risk a regression of Bug#3501.
++     */
++
++    auth_alias_only = get_param_ptr(c ? c->subset : main_server->conf,
+       "AuthAliasOnly", FALSE);
+ 
+     if (auth_alias_only &&
+         *auth_alias_only == TRUE) {
+-      if (anon_c &&
+-          anon_c->config_type == CONF_ANON) {
+-        anon_c = NULL;
++      if (c &&
++          c->config_type == CONF_ANON) {
++        c = NULL;
+ 
+       } else {
+         *login_name = NULL;
+@@ -1224,7 +1228,7 @@
+           *auth_alias_only == TRUE)
+         *login_name = NULL;
+ 
+-      if ((!login_name || !anon_c) &&
++      if ((!login_name || !c) &&
+           anon_name) {
+         *anon_name = NULL;
+       }

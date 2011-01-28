@@ -1,0 +1,42 @@
+proftpd-dfsg (1.3.2e-3) unstable; urgency=low
+
+    This version adds the useful contributed module mod_vroot, which is still not
+    part of the standard modules. It can be used for providing shared
+    directories under chrooted environments, among other useful features.
+    A new template 'virtuals.conf' is provided also to keep things
+    ordered about vhosts/vroots and show some examples.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Tue, 16 Mar 2010 12:13:00 +0100
+
+proftpd-dfsg (1.3.2b-2) unstable; urgency=low
+
+    This version stops client-initiated TLS renegotiations by default. This is
+    a side effect of fixing CVE-2009-3555 in OpenSSL protocol. Unfortunately
+    that could break some clients until a better approach is adopted to fix
+    this protocol issue globally. In order to avoid connection losses in 
+    those cases a new directive has been adopted:
+
+    TLSOption AllowClientRenegotiations
+
+    which can be added to tls.conf. It is currently commented out in Debian
+    provided configuration as in default ProFTPD setting. 
+    See also http://bugs.proftpd.org/show_bug.cgi?id=3324 for more information.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Fri, 11 Dec 2009 10:00:02 +0100
+proftpd-dfsg (1.3.2e-3) unstable; urgency=low
+
+    This version stops client-initiated TLS renegotiations by default. This is
+    a side effect of fixing CVE-2009-3555 in OpenSSL protocol. Unfortunately
+    that could break some clients until a better approach is adopted to fix
+    this protocol issue globally. In order to avoid connection losses in 
+    those cases a new directive has been adopted:
+
+    TLSOption AllowClientRenegotiations
+
+    which can be added to tls.conf. It is currently commented out in Debian
+    provided configuration as in default ProFTPD setting. 
+    See also http://bugs.proftpd.org/show_bug.cgi?id=3324 for more information.
+
+  
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Tue, 16 Mar 2010 12:13:00 +0100

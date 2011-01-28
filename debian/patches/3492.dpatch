@@ -1,0 +1,29 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## 3492.dpatch by Francesco Paolo Lovergine <frankie@debian.org>
+##
+## All lines beginning with `## DP:' are a description of the patch.
+## DP: No description.
+
+@DPATCH@
+diff -urNad '--exclude=CVS' '--exclude=.svn' '--exclude=.git' '--exclude=.arch' '--exclude=.hg' '--exclude=_darcs' '--exclude=.bzr' proftpd-dfsg~/src/data.c proftpd-dfsg/src/data.c
+--- proftpd-dfsg~/src/data.c	2010-09-14 10:46:50.000000000 +0200
++++ proftpd-dfsg/src/data.c	2010-09-14 10:46:50.000000000 +0200
+@@ -899,6 +899,9 @@
+        * they will also interfere with the current data transfer.  In doing
+        * so, we break RFC compliance a little; RFC959 does not allow a
+        * response code of 450 for those commands (although it should).
++       *
++       * We also forbid RNFR and RNTO, which use session.xfer to store
++       * the pathname of the file to be renamed.
+        */
+       if (strcmp(cmd->argv[0], C_APPE) == 0 ||
+           strcmp(cmd->argv[0], C_LIST) == 0 ||
+@@ -907,6 +910,8 @@
+           strcmp(cmd->argv[0], C_RETR) == 0 ||
+           strcmp(cmd->argv[0], C_STOR) == 0 ||
+           strcmp(cmd->argv[0], C_STOU) == 0 ||
++          strcmp(cmd->argv[0], C_RNFR) == 0 ||
++          strcmp(cmd->argv[0], C_RNTO) == 0 ||
+           strcmp(cmd->argv[0], C_PORT) == 0 ||
+           strcmp(cmd->argv[0], C_EPRT) == 0 ||
+           strcmp(cmd->argv[0], C_PASV) == 0 ||

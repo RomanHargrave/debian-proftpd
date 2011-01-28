@@ -1,68 +1,72 @@
-# SOME DESCRIPTIVE TITLE.
-# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
-# This file is distributed under the same license as the PACKAGE package.
-# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+# Debconf translations for proftpd-dfsg.
+# Copyright (C) 2010 THE proftpd-dfsg'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the proftpd-dfsg package.
+# Flamarion Jorge <jorge.flamarion@gmail.com>, 2010.
 #
 #    Translators, please read /usr/share/doc/po-debconf/README-trans
 #         or http://www.debian.org/intl/l10n/po-debconf/README-trans
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: proftpd\n"
+"Project-Id-Version: proftpd-dfsg\n"
 "Report-Msgid-Bugs-To: proftpd-dfsg@packages.debian.org\n"
-"POT-Creation-Date: 2008-04-10 16:37+0200\n"
-"PO-Revision-Date: 2004-08-07 16:55-0300\n"
-"Last-Translator: André Luís Lopes <andrelop@debian.org>\n"
-"Language-Team: Debian-BR Project <debian-l10n-portuguese@lists.debian.org>\n"
+"POT-Creation-Date: 2009-09-01 22:31+0200\n"
+"PO-Revision-Date: 2010-09-04 13:47-0300\n"
+"Last-Translator: Flamarion Jorge <jorge.flamarion@gmail.com>\n"
+"Language-Team: Brazilian Portuguese <debian-l10n-portuguese@lists.debian."
+"org>\n"
 "MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=ISO-8859-1\n"
+"Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+"pt_BR utf-8\n"
 
 #. Type: select
 #. Choices
-#: ../proftpd.templates:2001
+#: ../proftpd-basic.templates:2001
 msgid "from inetd"
-msgstr ""
+msgstr "a partir do inetd"
 
 #. Type: select
 #. Choices
-#: ../proftpd.templates:2001
-#, fuzzy
+#: ../proftpd-basic.templates:2001
 #| msgid "inetd, standalone"
 msgid "standalone"
-msgstr "inetd, standalone"
+msgstr "autÃ´nomo"
 
 #. Type: select
 #. Description
-#: ../proftpd.templates:2002
+#: ../proftpd-basic.templates:2002
 msgid "Run proftpd:"
-msgstr ""
+msgstr "Executar o proftpd:"
 
 #. Type: select
 #. Description
-#: ../proftpd.templates:2002
-#, fuzzy
+#: ../proftpd-basic.templates:2002
 msgid ""
 "ProFTPd can be run either as a service from inetd, or as a standalone "
 "server. Each choice has its own benefits. With only a few FTP connections "
 "per day, it is probably better to run ProFTPd from inetd in order to save "
 "resources."
 msgstr ""
-"O Proftpd pode ser executado como um serviço do inetd ou como um servidor "
-"standalone. Cada método tem seus próprios benefícios. Se você recebe poucas "
-"conexões ftp por dia, pode não ser compensador em termos de consumo de "
-"recursos manter o proftpd em execução o tempo todo."
+"O ProFTPd pode ser executado como um serviÃ§o a partir do inetd ou como um "
+"servidor autÃ´nomo. Cada escolha tem seus prÃ³prios benefÃ­cios. Com apenas "
+"algumas conexÃµes FTP por dia, provavelmente Ã© melhor executar o ProFTPd a "
+"partir do inetd para economizar recursos."
 
 #. Type: select
 #. Description
-#: ../proftpd.templates:2002
+#: ../proftpd-basic.templates:2002
 msgid ""
 "On the other hand, with higher traffic, ProFTPd should run as a standalone "
 "server to avoid spawning a new process for each incoming connection."
 msgstr ""
+"Por outro lado, com um alto trÃ¡fego, o ProFTPd deveria executar como um "
+"servidor autÃ´nomo para evitar a criaÃ§Ã£o de um novo processo para cada "
+"conexÃ£o de entrada."
 
 #~ msgid "Warning on syntax changes in ProFTPd configuration."
-#~ msgstr "Aviso sobre a sintaxe de mudanças na configuração do ProFTPd."
+#~ msgstr "Aviso sobre a sintaxe de mudanas na configurao do ProFTPd."
 
 #, fuzzy
 #~ msgid ""
@@ -71,10 +75,10 @@ msgstr ""
 #~ "directives. Please, consult documentation and how-tos available in "
 #~ "proftpd-doc and change /etc/proftpd/proftpd.conf as needed."
 #~ msgstr ""
-#~ "Você está atualizando a aprtir de versão anterior à versão 1.2.8. "
-#~ "Provavelmente você precisará revisar sua confgiuração anterior para que a "
-#~ "mesma seja compatível com as diretivas atuais. Por favor, consulte a "
-#~ "documentação disponível no pacote proftpd-doc e modifique o arquivo /etc/"
+#~ "Voc est atualizando a aprtir de verso anterior  verso 1.2.8. "
+#~ "Provavelmente voc precisar revisar sua confgiurao anterior para que a "
+#~ "mesma seja compatvel com as diretivas atuais. Por favor, consulte a "
+#~ "documentao disponvel no pacote proftpd-doc e modifique o arquivo /etc/"
 #~ "proftpd.conf de acordo com a mesma."
 
 #, fuzzy
@@ -84,10 +88,10 @@ msgstr ""
 #~ "yourself. ProFTPd could also be unable to use the resulting  "
 #~ "configuration, and it would not restart after upgrading."
 #~ msgstr ""
-#~ "Infelizmente, é quase impossível converter sua configuração antiga "
-#~ "automaticamente, salvo alguns detalhes elementares. Voce terá que fazer "
-#~ "isso manualmente. O ProFTPd poderá também não ser capaz de usar a "
-#~ "configuração resultante e não conseguir reiniciar após a atualização."
+#~ "Infelizmente,  quase impossvel converter sua configurao antiga "
+#~ "automaticamente, salvo alguns detalhes elementares. Voce ter que fazer "
+#~ "isso manualmente. O ProFTPd poder tambm no ser capaz de usar a configurao "
+#~ "resultante e no conseguir reiniciar aps a atualizao."
 
 #~ msgid "Run proftpd from inetd or standalone?"
 #~ msgstr "Executar o proftpd em modo inetd ou standalone ?"
@@ -99,21 +103,21 @@ msgstr ""
 #~ "connection is opened, a new process is spawned)."
 #~ msgstr ""
 #~ "Por outro lado, caso seu site ftp seja visitado frequentemente, o inetd "
-#~ "não é uma boa escolha, devido a um novo processo ser iniciado a cada vez "
-#~ "que uma conexão é iniciada."
+#~ "no  uma boa escolha, devido a um novo processo ser iniciado a cada vez "
+#~ "que uma conexo  iniciada."
 
 #~ msgid "Enable anonymous access?"
-#~ msgstr "Habilitar acesso anônimo?"
+#~ msgstr "Habilitar acesso annimo?"
 
 #~ msgid ""
 #~ "Enabling anonymous access grants access to your ftp site by any user, "
 #~ "without being a system user.  This is probably not a good idea for "
 #~ "paranoid sysadmins.  Only enable if you know what it does."
 #~ msgstr ""
-#~ "Habilitar acesso anônimo garante que qualquer usuário, mesmo não sendo "
-#~ "usuário do sistema, acesse seu site ftp. Essa provavelmente não é uma boa "
-#~ "para administradores de sistemas paranóicos. Somente habilite essa opção "
-#~ "se voce realmente sabe o que isso pode acarretar."
+#~ "Habilitar acesso annimo garante que qualquer usurio, mesmo no sendo "
+#~ "usurio do sistema, acesse seu site ftp. Essa provavelmente no  uma boa "
+#~ "para administradores de sistemas paranicos. Somente habilite essa opo se "
+#~ "voce realmente sabe o que isso pode acarretar."
 
 #~ msgid "Using SQL with ProFTPd."
 #~ msgstr "Usando SQL com ProFTPd."
@@ -124,23 +128,23 @@ msgstr ""
 #~ "Many new ones were introduced, and old ones aren't recognized."
 #~ msgstr ""
 #~ "Algumas diretrizes SQL antigas foram encontradas em /etc/proftpd.conf. "
-#~ "Essa versão do proftpd não reconhece muitas das opções de configuração "
-#~ "antigas relacionadas à SQL. Muitas novas diretrizes foram incluídas e "
-#~ "antigas opções não são reconhecidas."
+#~ "Essa verso do proftpd no reconhece muitas das opes de configurao antigas "
+#~ "relacionadas  SQL. Muitas novas diretrizes foram includas e antigas opes "
+#~ "no so reconhecidas."
 
 #~ msgid ""
 #~ "Luckily, it is well documented.  Therefore I refer you to the "
 #~ "documentation in /usr/share/doc/proftpd/README.mod_sql.  I will not start "
 #~ "proftpd; do that yourself when you edited the configuration."
 #~ msgstr ""
-#~ "Porém, este processo é bem documentado.  Entretanto é aconselhado a "
-#~ "leitura da documentação presente em /usr/share/doc/proftpd/README."
-#~ "mod_sql. O proftpd não será iniciado; faça isso manualmente depois de "
-#~ "editar as configurações."
+#~ "Porm, este processo  bem documentado.  Entretanto  aconselhado a leitura "
+#~ "da documentao presente em /usr/share/doc/proftpd/README.mod_sql. O "
+#~ "proftpd no ser iniciado; faa isso manualmente depois de editar as "
+#~ "configuraes."
 
 #, fuzzy
 #~ msgid "Edit configuration file ${file}?"
-#~ msgstr " Editar arquivo de configuração /etc/proftpd.conf ?"
+#~ msgstr " Editar arquivo de configurao /etc/proftpd.conf ?"
 
 #, fuzzy
 #~ msgid ""
@@ -148,9 +152,9 @@ msgstr ""
 #~ "means that I shall ask you some questions about the way to start proftpd "
 #~ "and anonymous access."
 #~ msgstr ""
-#~ "Nenhuma versão anterior do pacote proftpd com suporte debconf foi "
+#~ "Nenhuma verso anterior do pacote proftpd com suporte debconf foi "
 #~ "instalada em seu sistema. Isso significa que eu devo lhe fazer algumas "
-#~ "perguntas sobre a maneira de iniciar o proftpd e sobre acesso anônimo."
+#~ "perguntas sobre a maneira de iniciar o proftpd e sobre acesso annimo."
 
 #, fuzzy
 #~ msgid ""
@@ -159,15 +163,15 @@ msgstr ""
 #~ "yes if you did not change much.  You will have a chance to review the "
 #~ "changes later on."
 #~ msgstr ""
-#~ "Porém, uma vez que você possuía o proftpd instalado anteriormente, é "
-#~ "preciso saber se você permite que o arquivo /etc/proftpd.conf seja "
-#~ "editado para relizar algumas mudanças. Somente responda sim se você não "
-#~ "muda muito sua configuração."
+#~ "Porm, uma vez que voc possua o proftpd instalado anteriormente,  preciso "
+#~ "saber se voc permite que o arquivo /etc/proftpd.conf seja editado para "
+#~ "relizar algumas mudanas. Somente responda sim se voc no muda muito sua "
+#~ "configurao."
 
 #, fuzzy
 #~ msgid ""
 #~ "If you answer `no' here, I will not ask questions that may require me to "
 #~ "edit the file."
 #~ msgstr ""
-#~ "Caso você responda `não' aqui, questões que requeiram a edição desse "
-#~ "arquivo não serão perguntadas."
+#~ "Caso voc responda `no' aqui, questes que requeiram a edio desse arquivo "
+#~ "no sero perguntadas."

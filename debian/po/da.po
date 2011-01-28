@@ -15,7 +15,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: proftpd 1.2.9-16\n"
 "Report-Msgid-Bugs-To: proftpd-dfsg@packages.debian.org\n"
-"POT-Creation-Date: 2008-04-10 16:37+0200\n"
+"POT-Creation-Date: 2009-09-01 22:31+0200\n"
 "PO-Revision-Date: 2004-10-13 18:53+0200\n"
 "Last-Translator: Morten Brix Pedersen <morten@wtf.dk>\n"
 "Language-Team: Danish <dansk@klid.dk>\n"
@@ -25,13 +25,13 @@ msgstr ""
 
 #. Type: select
 #. Choices
-#: ../proftpd.templates:2001
+#: ../proftpd-basic.templates:2001
 msgid "from inetd"
 msgstr ""
 
 #. Type: select
 #. Choices
-#: ../proftpd.templates:2001
+#: ../proftpd-basic.templates:2001
 #, fuzzy
 #| msgid "inetd, standalone"
 msgid "standalone"
@@ -39,13 +39,13 @@ msgstr "inetd, alene"
 
 #. Type: select
 #. Description
-#: ../proftpd.templates:2002
+#: ../proftpd-basic.templates:2002
 msgid "Run proftpd:"
 msgstr ""
 
 #. Type: select
 #. Description
-#: ../proftpd.templates:2002
+#: ../proftpd-basic.templates:2002
 #, fuzzy
 msgid ""
 "ProFTPd can be run either as a service from inetd, or as a standalone "
@@ -60,7 +60,7 @@ msgstr ""
 
 #. Type: select
 #. Description
-#: ../proftpd.templates:2002
+#: ../proftpd-basic.templates:2002
 msgid ""
 "On the other hand, with higher traffic, ProFTPd should run as a standalone "
 "server to avoid spawning a new process for each incoming connection."

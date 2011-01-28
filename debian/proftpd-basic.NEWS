@@ -1,4 +1,34 @@
-proftpd (1.3.1-12) unstable; urgency=low
+proftpd-dfsg (1.3.2e-1) unstable; urgency=low
+
+    A new contributed module mod_vroot has been added to the provided modules pool.
+    Note that it is *still* experimental, so use it at your own risk.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Mon Apr 19 13:13:45 CEST 2010
+    
+proftpd-dfsg (1.3.2a-1) unstable; urgency=low
+
+    The traditional monthly cron job to collect statistics has been removed
+    and ftpstats is now run at logrotate execution as a post rotation job. 
+    You can safely remove the /etc/cron.monthly/proftpd{-basic}.disabled
+    script(s) after upgrading and customize the /etc/logrotate.d/proftpd-basic 
+    instead as you prefer. Note that until release 1.3.2-1 the log rotation was
+    also performed without using logrotate, and it has been introduced to be
+    more homogeneous with other services.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Fri, 17 Jul 2009 13:21:01 +0200
+
+proftpd-dfsg (1.3.2-1) unstable; urgency=low
+
+    Starting from 1.3.2 ProFTPD supports external DSO modules development.
+    External modules can be built using proftpd-dev package and its utilities
+    and files, prxs and pkg-config specifically. If you'd like some contributed 
+    modules were distributed, but they are not distributed with the main 
+    package, feel free to ask with a RFP and I will evaluate if the module is 
+    in shape and potentially useful for that.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Sun, 17 Feb 2009 11:19:44 +0100
+
+proftpd-dfsg (1.3.1-12) unstable; urgency=low
 
     Starting from this version, exotic authentication modules have been
     splitted into different binary packages to reduce the number of 
@@ -8,7 +38,7 @@ proftpd (1.3.1-12) unstable; urgency=low
 
  -- Francesco Paolo Lovergine <frankie@debian.org>  Thu, 19 Jun 2008 15:24:22 +0200
 
-proftpd (1.3.1-10) unstable; urgency=low
+proftpd-dfsg (1.3.1-10) unstable; urgency=low
 
      A new tiny `proftpd-gencert` script is now provided to create SSL/TLS 
      self-signed certificate. The resulting key and certificate can be
@@ -16,7 +46,7 @@ proftpd (1.3.1-10) unstable; urgency=low
 
  -- Francesco Paolo Lovergine <frankie@debian.org>  Mon, 19 May 2008 18:03:49 +0200
 
-proftpd (1.3.1-4) unstable; urgency=low
+proftpd-dfsg (1.3.1-4) unstable; urgency=low
 
      Starting from this version a few example set of directives used 
      for exotic authentications are splitted out in a few separate 
@@ -27,7 +57,7 @@ proftpd (1.3.1-4) unstable; urgency=low
 
  -- Francesco Paolo Lovergine <frankie@debian.org>  Thu, 03 Jan 2008 17:35:56 +0100
 
-proftpd (1.3.0-1) unstable; urgency=low
+proftpd-dfsg (1.3.0-1) unstable; urgency=low
 
      Starting from 1.3.0 proftpd support  DSO and debian packaging moved
      to  a single  package  style, in  respect  with the  multi-binaries

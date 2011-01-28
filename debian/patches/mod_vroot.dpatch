@@ -1,0 +1,1283 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## mod_vroot.dpatch by Francesco Paolo Lovergine <frankie@debian.org>
+##
+## All lines beginning with `## DP:' are a description of the patch.
+## DP: No description.
+
+@DPATCH@
+diff -urNad '--exclude=CVS' '--exclude=.svn' '--exclude=.git' '--exclude=.arch' '--exclude=.hg' '--exclude=_darcs' '--exclude=.bzr' proftpd-dfsg~/contrib/mod_vroot.c proftpd-dfsg/contrib/mod_vroot.c
+--- proftpd-dfsg~/contrib/mod_vroot.c	1970-01-01 01:00:00.000000000 +0100
++++ proftpd-dfsg/contrib/mod_vroot.c	2010-03-16 11:00:04.000000000 +0100
+@@ -0,0 +1,1056 @@
++/*
++ * ProFTPD: mod_vroot -- a module implementing a virtual chroot capability
++ *                       via the FSIO API
++ *
++ * Copyright (c) 2002-2009 TJ Saunders
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
++ *
++ * As a special exemption, TJ Saunders and other respective copyright holders
++ * give permission to link this program with OpenSSL, and distribute the
++ * resulting executable, without including the source code for OpenSSL in the
++ * source distribution.
++ *
++ * This is mod_vroot, contrib software for proftpd 1.2 and above.
++ * For more information contact TJ Saunders <tj@castaglia.org>.
++ *
++ * $Id: mod_vroot.c,v 1.19 2009/03/19 23:43:59 tj Exp tj $
++ */
++
++#include "conf.h"
++#include "privs.h"
++
++#define MOD_VROOT_VERSION 	"mod_vroot/0.8.5"
++
++/* Make sure the version of proftpd is as necessary. */
++#if PROFTPD_VERSION_NUMBER < 0x0001030201
++# error "ProFTPD 1.3.2rc1 or later required"
++#endif
++
++static const char *vroot_log = NULL;
++static int vroot_logfd = -1;
++
++static char vroot_cwd[PR_TUNABLE_PATH_MAX + 1];
++static char vroot_base[PR_TUNABLE_PATH_MAX + 1];
++static size_t vroot_baselen = 0;
++static unsigned char vroot_engine = FALSE;
++
++static pool *vroot_alias_pool = NULL;
++static pr_table_t *vroot_alias_tab = NULL;
++
++static unsigned int vroot_opts = 0;
++#define	VROOT_OPT_ALLOW_SYMLINKS	0x0001
++
++/* Support routines note: some of these support functions are borrowed from
++ * pure-ftpd.
++ */
++
++static void strmove(register char *dst, register const char *src) {
++  if (!dst || !src)
++    return;
++
++  while (*src != 0) {
++    *dst++ = *src++;
++  }
++
++  *dst = 0;
++}
++
++static void vroot_clean_path(char *path) {
++  char *p;
++
++  if (path == NULL || *path == 0)
++      return;
++
++  while ((p = strstr(path, "//")) != NULL)
++    strmove(p, p + 1);
++
++  while ((p = strstr(path, "/./")) != NULL)
++    strmove(p, p + 2);
++
++  while (strncmp(path, "../", 3) == 0)
++    path += 3;
++
++  p = strstr(path, "/../");
++  if (p != NULL) {
++    if (p == path) {
++      while (strncmp(path, "/../", 4) == 0)
++        strmove(path, path + 3);
++
++      p = strstr(path, "/../");
++    }
++
++    while (p != NULL) {
++      char *next_elem = p + 4;
++
++      if (p != path && *p == '/') 
++        p--;
++
++      while (p != path && *p != '/')
++        p--;
++
++      if (*p == '/')
++        p++;
++
++      strmove(p, next_elem);
++      p = strstr(path, "/../");
++    }
++  }
++
++  p = path;
++
++  if (*p == '.') {
++    p++;
++
++    if (*p == '\0')
++      return;
++
++    if (*p == '/') {
++      while (*p == '/') 
++        p++;
++
++      strmove(path, p);
++    }
++  }
++}
++
++static int vroot_lookup_path(char *path, size_t pathlen, const char *dir) {
++  char buf[PR_TUNABLE_PATH_MAX + 1], *bufp = NULL;
++
++  memset(buf, '\0', sizeof(buf));
++  memset(path, '\0', pathlen);
++
++  if (strcmp(dir, ".") != 0)
++    sstrncpy(buf, dir, sizeof(buf));
++  else
++    sstrncpy(buf, pr_fs_getcwd(), sizeof(buf));
++
++  vroot_clean_path(buf);
++
++  bufp = buf;
++
++  if (strncmp(bufp, vroot_base, vroot_baselen) == 0) {
++    bufp += vroot_baselen;
++  }
++
++  loop:
++  if (bufp[0] == '.' &&
++      bufp[1] == '.' &&
++      (bufp[2] == '\0' ||
++       bufp[2] == '/')) {
++    char *tmp = NULL;
++
++    tmp = strrchr(path, '/');
++    if (tmp != NULL)
++      *tmp = '\0';
++    else
++      *path = '\0';
++
++    if (strncmp(path, vroot_base, vroot_baselen) == 0 ||
++         path[vroot_baselen] != '/') {
++      snprintf(path, pathlen, "%s/", vroot_base);
++    }
++
++    if (bufp[0] == '.' &&
++        bufp[1] == '.' &&
++        bufp[2] == '/') {
++      bufp += 3;
++      goto loop;
++    }
++
++  } else if (*bufp == '/') {
++    snprintf(path, pathlen, "%s/", vroot_base);
++
++    bufp += 1;
++    goto loop;
++
++  } else if (*bufp != '\0') {
++    size_t buflen, tmplen;
++
++    if (strstr(bufp, "..") != NULL) {
++      errno = EPERM;
++      return -1;
++    }
++
++    buflen = strlen(bufp) + 1;
++    tmplen = strlen(path);
++
++    if (tmplen + buflen >= pathlen) {
++      errno = ENAMETOOLONG;
++      return -1;
++    }
++
++    path[tmplen] = '/';
++    memcpy(path + tmplen + 1, bufp, buflen);
++  }
++
++  /* Clean any unnecessary characters added by the above processing. */
++  vroot_clean_path(path);
++
++  return 0;
++}
++
++/* For handling VRootAlias configs. */
++
++static int vroot_alias_do_unlink(const void *key, size_t keysz, void *value,
++    size_t valuesz, void *user_data) {
++  int res;
++  const char *path;
++
++  /* The key is the absolute path. */
++  path = key;
++
++  (void) pr_log_writefile(vroot_logfd, MOD_VROOT_VERSION,
++    "removing VRootAlias '%s' symlink", path);
++  res = unlink(path);
++  if (res < 0) {
++    (void) pr_log_writefile(vroot_logfd, MOD_VROOT_VERSION,
++      "error unlinking '%s': %s", path, strerror(errno));
++  }
++
++  return 0;
++}
++
++static int is_vroot_alias(const char *path) {
++  if (pr_table_get(vroot_alias_tab, path, 0) != NULL) {
++    return 0;
++  }
++
++  errno = ENOENT;
++  return -1;
++}
++
++static int handle_vroot_alias(void) {
++  config_rec *c;
++
++  /* Handle any VRootAlias settings. */
++
++  c = find_config(main_server->conf, CONF_PARAM, "VRootAlias", FALSE);
++  while (c) {
++    char src_path[PR_TUNABLE_PATH_MAX+1], dst_path[PR_TUNABLE_PATH_MAX+1],
++      vpath[PR_TUNABLE_PATH_MAX+1];
++    int res;
++
++    pr_signals_handle();
++
++    /* XXX Note that by using vroot_lookup_path(), we assume a POST_CMD
++     * invocation.  Looks like VRootAlias might end up being incompatible
++     * with VRootServerRoot.
++     */
++
++    vroot_lookup_path(vpath, sizeof(vpath), c->argv[0]);
++    
++    memset(dst_path, '\0', sizeof(dst_path));
++    sstrcat(dst_path, vroot_base, sizeof(dst_path));
++    sstrcat(dst_path, "/", sizeof(dst_path));
++    sstrcat(dst_path, c->argv[0], sizeof(dst_path));
++    vroot_clean_path(dst_path);
++
++    memset(src_path, '\0', sizeof(src_path));
++    sstrncpy(src_path, c->argv[1], sizeof(src_path));
++    vroot_clean_path(src_path);
++
++    /* Do NOT use pr_fsio_symlink() for this, since that ends up in one of our
++     * callbacks.  Use symlink(2) directly.  Ignore EEXIST.
++     */
++    res = symlink(src_path, dst_path);
++    if (res < 0 &&
++        errno != EEXIST) {
++      (void) pr_log_writefile(vroot_logfd, MOD_VROOT_VERSION,
++        "unable to symlink '%s' to '%s': %s", src_path, dst_path,
++        strerror(errno));
++
++    } else {
++      if (vroot_alias_pool == NULL) {
++        vroot_alias_pool = make_sub_pool(session.pool);
++        pr_pool_tag(vroot_alias_pool, "VRoot Alias Pool");
++
++        vroot_alias_tab = pr_table_alloc(vroot_alias_pool, 0);
++      }
++
++      if (pr_table_add(vroot_alias_tab, pstrdup(vroot_alias_pool, vpath),
++          pstrdup(vroot_alias_pool, src_path), 0) < 0) {
++        (void) pr_log_writefile(vroot_logfd, MOD_VROOT_VERSION,
++          "error stashing VRootAlias '%s': %s", dst_path, strerror(errno));
++      }
++    }
++
++    c = find_config_next(c, c->next, CONF_PARAM, "VRootAlias", FALSE);
++  }
++
++  return 0;
++}
++
++/* FS callbacks
++ */
++
++static int vroot_stat(pr_fs_t *fs, const char *path, struct stat *st) {
++  char vpath[PR_TUNABLE_PATH_MAX + 1];
++
++  if (session.curr_phase == LOG_CMD ||
++      session.curr_phase == LOG_CMD_ERR ||
++      (session.sf_flags & SF_ABORT) ||
++      *vroot_base == '\0') {
++    /* NOTE: once stackable FS modules are supported, have this fall through
++     * to the next module in the stack.
++     */
++    return stat(path, st);
++  }
++
++  if (vroot_lookup_path(vpath, sizeof(vpath), path) < 0)
++    return -1;
++
++  return stat(vpath, st);
++}
++
++static int vroot_lstat(pr_fs_t *fs, const char *path, struct stat *st) {
++  char vpath[PR_TUNABLE_PATH_MAX + 1];
++
++  if (session.curr_phase == LOG_CMD ||
++      session.curr_phase == LOG_CMD_ERR ||
++      (session.sf_flags & SF_ABORT) ||
++      *vroot_base == '\0') {
++    /* NOTE: once stackable FS modules are supported, have this fall through
++     * to the next module in the stack.
++     */
++    return lstat(path, st);
++  }
++
++  if (vroot_lookup_path(vpath, sizeof(vpath), path) < 0)
++    return -1;
++
++
++  if ((vroot_opts & VROOT_OPT_ALLOW_SYMLINKS) ||
++      is_vroot_alias(path) == 0) {
++    if (lstat(vpath, st) < 0) {
++      return -1;
++    }
++
++    return stat(vpath, st);
++  }
++
++  return lstat(vpath, st);
++}
++
++static int vroot_rename(pr_fs_t *fs, const char *rnfm, const char *rnto) {
++  char vpath1[PR_TUNABLE_PATH_MAX + 1], vpath2[PR_TUNABLE_PATH_MAX + 1];
++
++  if (session.curr_phase == LOG_CMD ||
++      session.curr_phase == LOG_CMD_ERR ||
++      (session.sf_flags & SF_ABORT) ||
++      *vroot_base == '\0') {
++    /* NOTE: once stackable FS modules are supported, have this fall through
++     * to the next module in the stack.
++     */
++    return rename(rnfm, rnto);
++  }
++
++  if (vroot_lookup_path(vpath1, sizeof(vpath1), rnfm) < 0 ||
++      vroot_lookup_path(vpath2, sizeof(vpath2), rnto) < 0)
++    return -1;
++
++  return rename(vpath1, vpath2);
++}
++
++static int vroot_unlink(pr_fs_t *fs, const char *path) {
++  char vpath[PR_TUNABLE_PATH_MAX + 1];
++
++  if (session.curr_phase == LOG_CMD ||
++      session.curr_phase == LOG_CMD_ERR ||
++      (session.sf_flags & SF_ABORT) ||
++      *vroot_base == '\0') {
++    /* NOTE: once stackable FS modules are supported, have this fall through
++     * to the next module in the stack.
++     */
++    return unlink(path);
++  }
++
++  if (vroot_lookup_path(vpath, sizeof(vpath), path) < 0)
++    return -1;
++
++  return unlink(vpath);
++}
++
++static int vroot_open(pr_fh_t *fh, const char *path, int flags) {
++  char vpath[PR_TUNABLE_PATH_MAX + 1];
++
++  if (session.curr_phase == LOG_CMD ||
++      session.curr_phase == LOG_CMD_ERR ||
++      (session.sf_flags & SF_ABORT) ||
++      *vroot_base == '\0') {
++    /* NOTE: once stackable FS modules are supported, have this fall through
++     * to the next module in the stack.
++     */
++    return open(path, flags, PR_OPEN_MODE);
++  }
++
++  if (vroot_lookup_path(vpath, sizeof(vpath), path) < 0)
++    return -1;
++
++  return open(vpath, flags, PR_OPEN_MODE);
++}
++
++static int vroot_creat(pr_fh_t *fh, const char *path, mode_t mode) {
++  char vpath[PR_TUNABLE_PATH_MAX + 1];
++
++  if (session.curr_phase == LOG_CMD ||
++      session.curr_phase == LOG_CMD_ERR ||
++      (session.sf_flags & SF_ABORT) ||
++      *vroot_base == '\0') {
++    /* NOTE: once stackable FS modules are supported, have this fall through
++     * to the next module in the stack.
++     */
++    return creat(path, mode);
++  }
++
++  if (vroot_lookup_path(vpath, sizeof(vpath), path) < 0)
++    return -1;
++
++  return creat(vpath, mode);
++}
++
++static int vroot_link(pr_fs_t *fs, const char *path1, const char *path2) {
++  char vpath1[PR_TUNABLE_PATH_MAX + 1], vpath2[PR_TUNABLE_PATH_MAX + 1];
++
++  if (session.curr_phase == LOG_CMD ||
++      session.curr_phase == LOG_CMD_ERR ||
++      (session.sf_flags & SF_ABORT) ||
++      *vroot_base == '\0') {
++    /* NOTE: once stackable FS modules are supported, have this fall through
++     * to the next module in the stack.
++     */
++    return link(path1, path2);
++  }
++
++  if (vroot_lookup_path(vpath1, sizeof(vpath1), path1) < 0 ||
++      vroot_lookup_path(vpath2, sizeof(vpath2), path2) < 0)
++    return -1;
++
++  return link(vpath1, vpath2);
++}
++
++static int vroot_symlink(pr_fs_t *fs, const char *path1, const char *path2) {
++  char vpath1[PR_TUNABLE_PATH_MAX + 1], vpath2[PR_TUNABLE_PATH_MAX + 1];
++
++  if (session.curr_phase == LOG_CMD ||
++      session.curr_phase == LOG_CMD_ERR ||
++      (session.sf_flags & SF_ABORT) ||
++      *vroot_base == '\0') {
++    /* NOTE: once stackable FS modules are supported, have this fall through
++     * to the next module in the stack.
++     */
++    return symlink(path1, path2);
++  }
++
++  if (vroot_lookup_path(vpath1, sizeof(vpath1), path1) < 0 ||
++      vroot_lookup_path(vpath2, sizeof(vpath2), path2) < 0)
++    return -1;
++
++  return symlink(vpath1, vpath2);
++}
++
++static int vroot_readlink(pr_fs_t *fs, const char *path, char *buf,
++    size_t max) {
++  char vpath[PR_TUNABLE_PATH_MAX + 1];
++
++  if (session.curr_phase == LOG_CMD ||
++      session.curr_phase == LOG_CMD_ERR ||
++      (session.sf_flags & SF_ABORT) ||
++      *vroot_base == '\0') {
++    /* NOTE: once stackable FS modules are supported, have this fall through
++     * to the next module in the stack.
++     */
++    return readlink(path, buf, max);
++  }
++
++  if (vroot_lookup_path(vpath, sizeof(vpath), path) < 0)
++    return -1;
++
++  return readlink(vpath, buf, max);
++}
++
++static int vroot_truncate(pr_fs_t *fs, const char *path, off_t length) {
++  char vpath[PR_TUNABLE_PATH_MAX + 1];
++
++  if (session.curr_phase == LOG_CMD ||
++      session.curr_phase == LOG_CMD_ERR ||
++      (session.sf_flags & SF_ABORT) ||
++      *vroot_base == '\0') {
++    /* NOTE: once stackable FS modules are supported, have this fall through
++     * to the next module in the stack.
++     */
++    return truncate(path, length);
++  }
++
++  if (vroot_lookup_path(vpath, sizeof(vpath), path) < 0)
++    return -1;
++
++  return truncate(vpath, length);
++}
++
++static int vroot_chmod(pr_fs_t *fs, const char *path, mode_t mode) {
++  char vpath[PR_TUNABLE_PATH_MAX + 1];
++
++  if (session.curr_phase == LOG_CMD ||
++      session.curr_phase == LOG_CMD_ERR ||
++      (session.sf_flags & SF_ABORT) ||
++      *vroot_base == '\0') {
++    /* NOTE: once stackable FS modules are supported, have this fall through
++     * to the next module in the stack.
++     */
++    return chmod(path, mode);
++  }
++
++  if (vroot_lookup_path(vpath, sizeof(vpath), path) < 0)
++    return -1;
++
++  return chmod(vpath, mode);
++}
++
++static int vroot_chown(pr_fs_t *fs, const char *path, uid_t uid, gid_t gid) {
++  char vpath[PR_TUNABLE_PATH_MAX + 1];
++
++  if (session.curr_phase == LOG_CMD ||
++      session.curr_phase == LOG_CMD_ERR ||
++      (session.sf_flags & SF_ABORT) ||
++      *vroot_base == '\0') {
++    /* NOTE: once stackable FS modules are supported, have this fall through
++     * to the next module in the stack.
++     */
++    return chown(path, uid, gid);
++  }
++
++  if (vroot_lookup_path(vpath, sizeof(vpath), path) < 0)
++    return -1;
++
++  return chown(vpath, uid, gid);
++}
++
++static int vroot_chroot(pr_fs_t *fs, const char *path) {
++  char *chroot_path = "/", *tmp = NULL;
++  config_rec *c;
++
++  if (!path ||
++      *path == '\0') {
++    errno = EINVAL;
++    return -1;
++  }
++
++  memset(vroot_base, '\0', sizeof(vroot_base));
++
++  if (path[0] == '/' &&
++      path[1] == '\0') {
++    /* chrooting to '/', nothing needs to be done. */
++    return 0;
++  }
++
++  c = find_config(main_server->conf, CONF_PARAM, "VRootServerRoot", FALSE);
++  if (c) {
++    char *server_root;
++
++    server_root = c->argv[0];
++
++    /* Now, make sure that the given path is below the configured
++     * VRootServerRoot.  If so, then we perform a real chroot to the
++     * VRootServerRoot directory, then use vroots from there.
++     */ 
++
++    if (strncmp(path, server_root, strlen(server_root)) == 0) {
++      (void) pr_log_writefile(vroot_logfd, MOD_VROOT_VERSION,
++        "chroot path '%s' within VRootServerRoot '%s', "
++        "chrooting to VRootServerRoot", path, server_root);
++
++      if (chroot(server_root) < 0) {
++        (void) pr_log_writefile(vroot_logfd, MOD_VROOT_VERSION,
++          "error chrooting to VRootServerRoot '%s': %s", server_root,
++          strerror(errno));
++        return -1;
++      }
++
++      pr_fs_clean_path(path + strlen(server_root), vroot_base,
++        sizeof(vroot_base));
++      chroot_path = server_root;
++
++    } else {
++      (void) pr_log_writefile(vroot_logfd, MOD_VROOT_VERSION,
++        "chroot path '%s' is not within VRootServerRoot '%s', "
++        "not chrooting to VRootServerRoot", path, server_root);
++      pr_fs_clean_path(path, vroot_base, sizeof(vroot_base));
++    }
++
++  } else {
++    pr_fs_clean_path(path, vroot_base, sizeof(vroot_base));
++  }
++
++  tmp = vroot_base;
++
++  /* Advance to the end of the path. */
++  while (*tmp != '\0') {
++    tmp++;
++  }
++
++  for (;;) {
++    tmp--;
++
++    if (tmp == vroot_base ||
++        *tmp != '/') {
++      break;
++    }
++
++    *tmp = '\0';
++  }
++
++  vroot_baselen = strlen(vroot_base);
++  if (vroot_baselen >= sizeof(vroot_cwd)) {
++    errno = ENAMETOOLONG;
++    return -1;
++  }
++
++  session.chroot_path = chroot_path;
++  return 0;
++}
++
++static int vroot_chdir(pr_fs_t *fs, const char *path) {
++  char vpath[PR_TUNABLE_PATH_MAX + 1], *vpathp = NULL;
++
++  if (session.curr_phase == LOG_CMD ||
++      session.curr_phase == LOG_CMD_ERR ||
++      (session.sf_flags & SF_ABORT) ||
++      *vroot_base == '\0') {
++    /* NOTE: once stackable FS modules are supported, have this fall through
++     * to the next module in the stack.
++     */
++    return chdir(path);
++  }
++
++  if (vroot_lookup_path(vpath, sizeof(vpath), path) < 0)
++    return -1;
++
++  if (chdir(vpath) < 0)
++    return -1;
++
++  vpathp = vpath;
++
++  if (strncmp(vpathp, vroot_base, vroot_baselen) == 0)
++    vpathp += vroot_baselen;
++
++  pr_fs_setcwd(vpathp);
++  return 0;
++}
++
++static void *vroot_opendir(pr_fs_t *fs, const char *path) {
++  char vpath[PR_TUNABLE_PATH_MAX + 1];
++  int res;
++  struct stat st;
++
++  if (session.curr_phase == LOG_CMD ||
++      session.curr_phase == LOG_CMD_ERR ||
++      (session.sf_flags & SF_ABORT) ||
++      *vroot_base == '\0') {
++    /* NOTE: once stackable FS modules are supported, have this fall through
++     * to the next module in the stack.
++     */
++    return opendir(path);
++  }
++
++  if (vroot_lookup_path(vpath, sizeof(vpath), path) < 0)
++    return NULL;
++
++  /* Check if the looked-up vpath is a symlink; we may need to resolve any
++   * links ourselves, rather than assuming that the system opendir(3) can
++   * handle it.
++   */
++
++  res = vroot_lstat(fs, vpath, &st);
++  while (res == 0 &&
++         S_ISLNK(st.st_mode)) {
++    char data[PR_TUNABLE_PATH_MAX + 1];
++
++    pr_signals_handle();
++
++    memset(data, '\0', sizeof(data));
++    res = vroot_readlink(fs, vpath, data, sizeof(data)-1);
++    if (res < 0)
++      break;
++
++    data[res] = '\0';
++
++    sstrncpy(vpath, data, sizeof(vpath));
++    res = vroot_lstat(fs, vpath, &st);
++  }
++
++  return opendir(vpath);
++}
++
++static int vroot_mkdir(pr_fs_t *fs, const char *path, mode_t mode) {
++  char vpath[PR_TUNABLE_PATH_MAX + 1];
++
++  if (session.curr_phase == LOG_CMD ||
++      session.curr_phase == LOG_CMD_ERR ||
++      (session.sf_flags & SF_ABORT) ||
++      *vroot_base == '\0') {
++    /* NOTE: once stackable FS modules are supported, have this fall through
++     * to the next module in the stack.
++     */
++    return mkdir(path, mode);
++  }
++
++  if (vroot_lookup_path(vpath, sizeof(vpath), path) < 0)
++    return -1;
++
++  return mkdir(vpath, mode);
++}
++
++static int vroot_rmdir(pr_fs_t *fs, const char *path) {
++  char vpath[PR_TUNABLE_PATH_MAX + 1];
++
++  if (session.curr_phase == LOG_CMD ||
++      session.curr_phase == LOG_CMD_ERR ||
++      (session.sf_flags & SF_ABORT) ||
++      *vroot_base == '\0') {
++    /* NOTE: once stackable FS modules are supported, have this fall through
++     * to the next module in the stack.
++     */
++    return rmdir(path);
++  }
++
++  if (vroot_lookup_path(vpath, sizeof(vpath), path) < 0)
++    return -1;
++
++  return rmdir(vpath);
++}
++
++/* Configuration handlers
++ */
++
++/* usage: VRootAlias dst-path src-path */
++MODRET set_vrootalias(cmd_rec *cmd) {
++  CHECK_ARGS(cmd, 2);
++  CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
++
++  if (pr_fs_valid_path(cmd->argv[2]) < 0) {
++    CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "source path '", cmd->argv[2],
++      "' is not an absolute path", NULL));
++  }
++
++  add_config_param_str(cmd->argv[0], 2, cmd->argv[1], cmd->argv[2]);
++  return PR_HANDLED(cmd);
++}
++
++/* usage: VRootEngine on|off */
++MODRET set_vrootengine(cmd_rec *cmd) {
++  int bool = -1;
++  config_rec *c = NULL;
++
++  CHECK_ARGS(cmd, 1);
++  CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
++
++  bool = get_boolean(cmd, 1);
++  if (bool == -1)
++    CONF_ERROR(cmd, "expected Boolean parameter");
++
++  c = add_config_param(cmd->argv[0], 1, NULL);
++  c->argv[0] = pcalloc(c->pool, sizeof(unsigned char));
++  *((unsigned char *) c->argv[0]) = bool;
++
++  return PR_HANDLED(cmd);
++}
++
++/* usage: VRootLog path|"none" */
++MODRET set_vrootlog(cmd_rec *cmd) {
++  CHECK_ARGS(cmd, 1);
++  CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
++
++  if (pr_fs_valid_path(cmd->argv[1]) < 0)
++    CONF_ERROR(cmd, "must be an absolute path");
++
++  (void) add_config_param_str(cmd->argv[0], 1, cmd->argv[1]);
++  return PR_HANDLED(cmd);
++}
++
++/* usage: VRootOptions opt1 opt2 ... optN */
++MODRET set_vrootoptions(cmd_rec *cmd) {
++  config_rec *c = NULL;
++  register unsigned int i;
++  unsigned int opts = 0U;
++
++  if (cmd->argc-1 == 0)
++    CONF_ERROR(cmd, "wrong number of parameters");
++
++  CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
++
++  c = add_config_param(cmd->argv[0], 1, NULL);
++  for (i = 1; i < cmd->argc; i++) {
++    if (strcmp(cmd->argv[i], "allowSymlinks") == 0) {
++      opts |= VROOT_OPT_ALLOW_SYMLINKS;
++
++    } else {
++      CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, ": unknown VRootOption: '",
++        cmd->argv[i], "'", NULL));
++    }
++  }
++
++  c->argv[0] = pcalloc(c->pool, sizeof(unsigned int));
++  *((unsigned int *) c->argv[0]) = opts;
++
++  return PR_HANDLED(cmd);
++}
++
++/* usage: VRootServerRoot path */
++MODRET set_vrootserverroot(cmd_rec *cmd) {
++  struct stat st;
++  config_rec *c;
++  size_t pathlen;
++
++  CHECK_ARGS(cmd, 1);
++  CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
++
++  if (pr_fs_valid_path(cmd->argv[1]) < 0)
++    CONF_ERROR(cmd, "must be an absolute path");
++
++  if (stat(cmd->argv[1], &st) < 0) {
++    CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "error checking '", cmd->argv[1],
++      "': ", strerror(errno), NULL));
++  }
++
++  if (!S_ISDIR(st.st_mode)) {
++    CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "'", cmd->argv[1],
++      "' is not a directory", NULL));
++  }
++
++  c = add_config_param(cmd->argv[0], 1, NULL);
++
++  /* Make sure the configured path has a trailing path separater ('/').
++   * This is important.
++   */
++ 
++  pathlen = strlen(cmd->argv[1]);
++  if (cmd->argv[1][pathlen - 1] != '/') {
++    c->argv[0] = pstrcat(c->pool, cmd->argv[1], "/", NULL);
++
++  } else {
++    c->argv[0] = pstrdup(c->pool, cmd->argv[1]);
++  }
++
++  return PR_HANDLED(cmd);
++}
++
++/* Command handlers
++ */
++
++MODRET vroot_pre_pass(cmd_rec *cmd) {
++  pr_fs_t *fs = NULL;
++  unsigned char *use_vroot = NULL;
++
++  use_vroot = get_param_ptr(main_server->conf, "VRootEngine", FALSE); 
++
++  if (!use_vroot ||
++      *use_vroot == FALSE) {
++    vroot_engine = FALSE;
++    return PR_DECLINED(cmd);
++  }
++
++  /* First, make sure that we have not already registered our FS object. */
++  fs = pr_unmount_fs("/", "vroot");
++  if (fs) {
++    destroy_pool(fs->fs_pool);
++  }
++
++  fs = pr_register_fs(main_server->pool, "vroot", "/");
++  if (fs == NULL) {
++    pr_log_debug(DEBUG3, MOD_VROOT_VERSION ": error registering fs: %s",
++      strerror(errno));
++    return PR_DECLINED(cmd);
++  }
++
++  pr_log_debug(DEBUG5, MOD_VROOT_VERSION ": vroot registered");
++
++  /* Add the module's custom FS callbacks here. This module does not
++   * provide callbacks for the following (as they are unnecessary):
++   * close(), read(), write(), lseek(), readdir(), and closedir().
++   */
++  fs->stat = vroot_stat;
++  fs->lstat = vroot_lstat;
++  fs->rename = vroot_rename;
++  fs->unlink = vroot_unlink;
++  fs->open = vroot_open;
++  fs->creat = vroot_creat;
++  fs->link = vroot_link;
++  fs->readlink = vroot_readlink;
++  fs->symlink = vroot_symlink;
++  fs->truncate = vroot_truncate;
++  fs->chmod = vroot_chmod;
++  fs->chown = vroot_chown;
++  fs->chdir = vroot_chdir;
++  fs->chroot = vroot_chroot;
++  fs->opendir = vroot_opendir;
++  fs->mkdir = vroot_mkdir;
++  fs->rmdir = vroot_rmdir;
++
++  vroot_engine = TRUE;
++  return PR_DECLINED(cmd);
++}
++
++MODRET vroot_post_pass(cmd_rec *cmd) {
++  if (vroot_engine) {
++
++    /* If not chrooted, unregister vroot. */
++    if (!session.chroot_path) {
++      if (pr_unregister_fs("/") < 0) {
++        pr_log_debug(DEBUG2, MOD_VROOT_VERSION
++          ": error unregistering vroot: %s", strerror(errno));
++
++      } else {
++        pr_log_debug(DEBUG5, MOD_VROOT_VERSION ": vroot unregistered");
++        pr_fs_setcwd(pr_fs_getvwd());
++        pr_fs_clear_cache();
++      }
++
++    } else {
++      config_rec *c;
++
++      /* Otherwise, lookup and process any VRootOptions. */
++      c = find_config(main_server->conf, CONF_PARAM, "VRootOptions", FALSE);
++      if (c) {
++        vroot_opts = *((unsigned int *) c->argv[0]);
++      }
++
++      /* XXX This needs to be in the PRE_CMD PASS handler, as when
++       * VRootServer is used, so that a real chroot(2) occurs.
++       */
++      handle_vroot_alias();
++
++    }
++  }
++
++  return PR_DECLINED(cmd);
++}
++
++MODRET vroot_post_pass_err(cmd_rec *cmd) {
++  if (vroot_engine) {
++
++    /* If not chrooted, unregister vroot. */
++    if (!session.chroot_path) {
++      if (pr_unregister_fs("/") < 0)
++        pr_log_debug(DEBUG2, MOD_VROOT_VERSION
++          ": error unregistering vroot: %s", strerror(errno));
++      else
++        pr_log_debug(DEBUG5, MOD_VROOT_VERSION
++          ": vroot unregistered");
++    }
++
++    /* Remove any VRootAlias symlinks. */
++    if (vroot_alias_tab) {
++      pr_table_do(vroot_alias_tab, vroot_alias_do_unlink, NULL, 0);
++      pr_table_empty(vroot_alias_tab);
++      destroy_pool(vroot_alias_pool);
++      vroot_alias_pool = NULL;
++      vroot_alias_tab = NULL;
++    }
++  }
++
++  return PR_DECLINED(cmd);
++}
++
++/* Initialization routines
++ */
++
++static int vroot_sess_init(void) {
++  config_rec *c;
++
++  c = find_config(main_server->conf, CONF_PARAM, "VRootLog", FALSE);
++  if (c) {
++    vroot_log = c->argv[0];
++  }
++
++  if (vroot_log &&
++      strcasecmp(vroot_log, "none") != 0) {
++    int res;
++
++    PRIVS_ROOT
++    res = pr_log_openfile(vroot_log, &vroot_logfd, 0660);
++    PRIVS_RELINQUISH
++
++    switch (res) {
++      case 0:
++        break;
++
++      case -1:
++        pr_log_debug(DEBUG1, MOD_VROOT_VERSION
++          ": unable to open VRootLog '%s': %s", vroot_log, strerror(errno));
++        break;
++
++      case PR_LOG_SYMLINK:
++        pr_log_debug(DEBUG1, MOD_VROOT_VERSION
++          ": unable to open VRootLog '%s': %s", vroot_log, "is a symlink");
++        break;
++
++      case PR_LOG_WRITABLE_DIR:
++        pr_log_debug(DEBUG1, MOD_VROOT_VERSION
++          ": unable to open VRootLog '%s': %s", vroot_log,
++          "parent directory is world-writable");
++        break;
++    }
++  }
++
++  return 0;
++}
++
++/* Module API tables
++ */
++
++static conftable vroot_conftab[] = {
++  { "VRootAlias",	set_vrootalias,		NULL },
++  { "VRootEngine",	set_vrootengine,	NULL },
++  { "VRootLog",		set_vrootlog,		NULL },
++  { "VRootOptions",	set_vrootoptions,	NULL },
++  { "VRootServerRoot",	set_vrootserverroot,	NULL },
++  { NULL }
++};
++
++static cmdtable vroot_cmdtab[] = {
++  { PRE_CMD,		C_PASS,	G_NONE,	vroot_pre_pass, FALSE, FALSE },
++  { POST_CMD,		C_PASS,	G_NONE,	vroot_post_pass, FALSE, FALSE },
++  { POST_CMD_ERR,	C_PASS,	G_NONE,	vroot_post_pass_err, FALSE, FALSE },
++  { 0, NULL }
++};
++
++module vroot_module = {
++  NULL, NULL,
++
++  /* Module API version 2.0 */
++  0x20,
++
++  /* Module name */
++  "vroot",
++
++  /* Module configuration handler table */
++  vroot_conftab,
++
++  /* Module command handler table */
++  vroot_cmdtab,
++
++  /* Module authentication handler table */
++  NULL,
++
++  /* Module initialization function */
++  NULL,
++
++  /* Session initialization function */
++  vroot_sess_init,
++
++  /* Module version */
++  MOD_VROOT_VERSION
++};
+diff -urNad '--exclude=CVS' '--exclude=.svn' '--exclude=.git' '--exclude=.arch' '--exclude=.hg' '--exclude=_darcs' '--exclude=.bzr' proftpd-dfsg~/doc/contrib/mod_vroot.html proftpd-dfsg/doc/contrib/mod_vroot.html
+--- proftpd-dfsg~/doc/contrib/mod_vroot.html	1970-01-01 01:00:00.000000000 +0100
++++ proftpd-dfsg/doc/contrib/mod_vroot.html	2010-03-16 11:00:13.000000000 +0100
+@@ -0,0 +1,212 @@
++<!-- $Id: mod_vroot.html,v 1.9 2009/03/19 23:44:19 tj Exp tj $ -->
++<!-- $Source: /home/tj/proftpd/modules/doc/RCS/mod_vroot.html,v $ -->
++
++<html>
++<head>
++<title>ProFTPD module mod_vroot</title>
++</head>
++
++<body bgcolor=white>
++
++<hr>
++<center>
++<h2><b>ProFTPD module <code>mod_vroot</code></b></h2>
++</center>
++<hr><br>
++
++This module is contained in the <code>mod_vroot.c</code> file for
++ProFTPD 1.3.<i>x</i>, and is not compiled by default.  Installation
++instructions are discussed <a href="#Installation">here</a>.
++
++<p>
++The purpose of this module to is to implement a virtual chroot capability
++that does not require root privileges.  The <code>mod_vroot</code> module
++provides this capability by using ProFTPD's FS API, available as of 1.2.8rc1.
++
++<p>
++The most current version of <code>mod_vroot</code> can be found at:
++<pre>
++  <a href="http://www.castaglia.org/proftpd/">http://www.castaglia.org/proftpd/</a>
++</pre>
++
++<h2>Author</h2>
++<p>
++Please contact TJ Saunders &lt;tj <i>at</i> castaglia.org&gt; with any
++questions, concerns, or suggestions regarding this module.
++
++<h2>Thanks</h2>
++<p>
++<i>2003-08-26</i>: Thanks to Oskar Liljeblad for the elegant patch that added
++symlink support.
++
++<h2>Directives</h2>
++<ul>
++  <li><a href="#VRootAlias">VRootAlias</a>
++  <li><a href="#VRootEngine">VRootEngine</a>
++  <li><a href="#VRootLog">VRootLog</a>
++  <li><a href="#VRootOptions">VRootOptions</a>
++  <li><a href="#VRootServerRoot">VRootServerRoot</a>
++</ul>
++
++<hr>
++<h2><a name="VRootAlias">VRootAlias</a></h2>
++<strong>Syntax:</strong> VRootAlias <em>dst-path src-path</em><br>
++<strong>Default:</strong> None<br>
++<strong>Context:</strong> server config, <code>&lt;VirtualHost&gt;</code>, <code>&lt;Global&gt;</code><br>
++<strong>Module:</strong> mod_vroot<br>
++<strong>Compatibility:</strong> 1.3.2 and later
++
++<p>
++The <code>VRootAlias</code> directive is used to create an "alias" of a
++directory outside of the chroot area into the chroot.  The <em>dst-path</em>
++parameter is a <b>relative</b> path, relative to the chroot area (<i>i.e.</i>
++the directory in which the session starts).  The <em>src-path</em> parameter,
++on the other hand, is an <b>absolute</b> path, and may be to a file or
++directory.
++
++<p>
++For example, you might map a shared upload directory into a user's home
++directory using:
++<pre>
++  &lt;IfModule mod_vroot.c&gt;
++    VRootEngine on
++
++    DefaultRoot ~
++    VRootAlias upload /var/ftp/upload
++  &lt;/IfModule&gt;
++</pre>
++This will automatically create an "upload" directory to appear in the
++chroot area (in this case, the user's home directory).
++
++<p>
++Note that this directive will <b>not</b> work if the
++<code>VRootServerRoot</code> is used.
++
++<p>
++<hr>
++<h2><a name="VRootEngine">VRootEngine</a></h2>
++<strong>Syntax:</strong> VRootEngine <em>on|off</em><br>
++<strong>Default:</strong> None<br>
++<strong>Context:</strong> server config, <code>&lt;VirtualHost&gt;</code>, <code>&lt;Global&gt;</code><br>
++<strong>Module:</strong> mod_vroot<br>
++<strong>Compatibility:</strong> 1.2.8rc1 and later
++
++<p>
++The <code>VRootEngine</code> directive enables the virtual chroot engine
++implemented by <code>mod_vroot</code>.  If enabled, the virtual chroot will
++be used in place of the operating system's <code>chroot(2)</code>.  This
++directive affects any <code>DefaultRoot</code> directives and any
++<code>&lt;Anonymous&gt;</code> contexts within the server context in which
++the <code>VRootEngine</code> directive appears.
++
++<p>
++<hr>
++<h2><a name="VRootLog">VRootLog</a></h2>
++<strong>Syntax:</strong> VRootLog <em>file</em><br>
++<strong>Default:</strong> None<br>
++<strong>Context:</strong> server config, <code>&lt;VirtualHost&gt;</code>, <code>&lt;Global&gt;</code><br>
++<strong>Module:</strong> mod_vroot<br>
++<strong>Compatibility:</strong> 1.3.0rc1 and later
++
++<p>
++The <code>VRootLog</code> directive is used to specify a log file for
++<code>mod_vroot</code>'s reporting on a per-server basis.  The <em>file</em>
++parameter given must be the full path to the file to use for logging.
++
++<p>
++<hr>
++<h2><a name="VRootOptions">VRootOptions</a></h2>
++<strong>Syntax:</strong> VRootOptions <em>opt1 ...</em><br>
++<strong>Default:</strong> None<br>
++<strong>Context:</strong> &quot;server config&quot; <code>&lt;VirtualHost&gt;</code>, <code>&lt;Global&gt;</code><br>
++<strong>Module:</strong> mod_vroot<br>
++<strong>Compatibility:</strong> 1.2.9rc2 and later
++
++<p>
++The <code>VRootOptions</code> directive is used to configure various optional
++behavior of <code>mod_vroot</code>.
++
++<p>
++Example:
++<pre>
++  VRootOptions allowSymlinks
++</pre>
++
++<p>
++The currently implemented options are:
++<ul>
++  <li><code>allowSymlinks</code><br>
++    Normally, any symlinks that point outside of the vroot area simply do
++    not work.  When the <code>allowSymlinks</code> option is enabled, these
++    symlinks will be allowed.  Note that by enabling symlinks, the efficacy
++    of the vroot &quot;jail&quot; is reduced.
++</ul>
++
++<p>
++<hr>
++<h2><a name="VRootServerRoot">VRootServerRoot</a></h2>
++<strong>Syntax:</strong> VRootServerRoot <em>path</em><br>
++<strong>Default:</strong> None<br>
++<strong>Context:</strong> &quot;server config&quot; <code>&lt;VirtualHost&gt;</code>, <code>&lt;Global&gt;</code><br>
++<strong>Module:</strong> mod_vroot<br>
++<strong>Compatibility:</strong> 1.3.2rc1 and later
++
++<p>
++The <code>VRootServerRoot</code> directive is used to configure a directory
++to which the <code>mod_vroot</code> module will perform a <i>real</i> chroot.
++The idea is that each <code>&lt;VirtualHost&gt;</code> can have its own
++directory to which a real <code>chroot(2)</code> system call is made;
++the user-specific home directories will be virtual roots underneath this
++directory.  Thus some measure of security, via the <code>chroot(2)</code>
++system call, is provided by the kernel, while still allowing symlinked shared
++folders among users of this <code>&lt;VirtualHost&gt;</code>.
++
++<p>
++For example:
++<pre>
++  &lt;VirtualHost a.b.c.d&gt;
++    VRootEngine on
++    VRootServerRoot /etc/ftpd/a.b.c.d/
++    VRootOptions allowSymlinks
++    DefaultRoot ~
++    ...
++
++  &lt;/VirtualHost&gt;
++</pre>
++
++<p>
++See also: <a href="#VRootOptions"><code>VRootOptions</code></a>
++
++<p>
++<hr><br>
++<h2><a name="Installation">Installation</a></h2>
++After unpacking and patching the latest proftpd-1.3.<i>x</i> source code, copy
++the <code>mod_vroot.c</code> file into:
++<pre>
++  <i>proftpd-dir</i>/contrib/
++</pre>
++Then follow the normal steps for using third-party modules in proftpd:
++<pre>
++  ./configure --with-modules=mod_vroot
++  make
++  make install
++</pre>
++
++<p>
++<hr><br>
++
++Author: <i>$Author: tj $</i><br>
++Last Updated: <i>$Date: 2009/03/19 23:44:19 $</i><br>
++
++<br><hr>
++
++<font size=2><b><i>
++&copy; Copyright 2000-2009 TJ Saunders<br>
++ All Rights Reserved<br>
++</i></b></font>
++
++<hr><br>
++
++</body>
++</html>
++

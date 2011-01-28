@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2003-2006 The ProFTPD Project team
+ * Copyright (c) 2003-2009 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@
  */
 
 /* Network address API
- * $Id: netaddr.h,v 1.20 2006/09/29 16:38:15 castaglia Exp $
+ * $Id: netaddr.h,v 1.23 2009/02/12 22:32:01 castaglia Exp $
  */
 
 #ifndef PR_NETADDR_H
@@ -339,6 +339,15 @@ const char *pr_netaddr_get_ipstr(pr_netaddr_t *);
  */
 const char *pr_netaddr_get_localaddr_str(pool *);
 
+/* Sets the name of the local host, overriding the name that would have
+ * been returned by gethostname(2).
+ *
+ * This function is used to avoid using DNS lookups on the gethostname(2)
+ * name in order to determine the IP address to use for the default
+ * 'server config' vhost.
+ */
+int pr_netaddr_set_localaddr_str(const char *);
+
 unsigned int pr_netaddr_get_addrno(const pr_netaddr_t *);
 
 /* Returns TRUE if the given pr_netaddr_t contains a loopback address,
@@ -369,5 +378,14 @@ pr_netaddr_t *pr_netaddr_get_sess_local_addr(void);
 pr_netaddr_t *pr_netaddr_get_sess_remote_addr(void);
 const char *pr_netaddr_get_sess_remote_name(void);
 void pr_netaddr_set_sess_addrs(void);
+
+/* Clears the cache of netaddr objects. */
+void pr_netaddr_clear_cache(void);
+
+/* Validates the DNS name returned. */
+char *pr_netaddr_validate_dns_str(char *);
+
+/* Internal use only. */
+void init_netaddr(void);
 
 #endif /* PR_NETADDR_H */

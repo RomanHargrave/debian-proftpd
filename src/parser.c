@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2004-2007 The ProFTPD Project team
+ * Copyright (c) 2004-2009 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -22,9 +22,8 @@
  * for OpenSSL in the source distribution.
  */
 
-/*
- * Configuration parser
- * $Id: parser.c,v 1.16 2007/03/28 03:49:33 castaglia Exp $
+/* Configuration parser
+ * $Id: parser.c,v 1.19 2009/03/05 06:01:51 castaglia Exp $
  */
 
 #include "conf.h"
@@ -94,11 +93,6 @@ static struct config_src *add_config_source(pr_fh_t *fh) {
   }
 
   return cs;
-}
-
-static void add_server_ctxt(server_rec *s) {
-  parser_curr_server = (server_rec **) push_array(parser_servstack);
-  *parser_curr_server = s;
 }
 
 static char *get_config_word(pool *p, char *word) {
@@ -276,6 +270,7 @@ unsigned int pr_parser_get_lineno(void) {
 int pr_parser_parse_file(pool *p, const char *path, config_rec *start,
     int flags) {
   pr_fh_t *fh;
+  struct stat st;
   struct config_src *cs;
   cmd_rec *cmd;
   pool *tmp_pool;
@@ -301,6 +296,11 @@ int pr_parser_parse_file(pool *p, const char *path, config_rec *start,
     destroy_pool(tmp_pool);
     return -1;
   }
+
+  /* Stat the opened file to determine the optimal buffer size for IO. */
+  memset(&st, 0, sizeof(st));
+  pr_fsio_fstat(fh, &st);
+  fh->fh_iosz = st.st_blksize;
 
   /* Push the configuration information onto the stack of configuration
    * sources.
@@ -334,7 +334,7 @@ int pr_parser_parse_file(pool *p, const char *path, config_rec *start,
           "dispatching directive '%s' to module mod_%s", conftab->directive,
           conftab->m->name);
 
-        mr = call_module(conftab->m, conftab->handler, cmd);
+        mr = pr_module_call(conftab->m, conftab->handler, cmd);
         if (mr != NULL) {
           if (MODRET_ISERROR(mr)) {
 
@@ -387,7 +387,7 @@ int pr_parser_parse_file(pool *p, const char *path, config_rec *start,
 }
 
 cmd_rec *pr_parser_parse_line(pool *p) {
-  char buf[PR_TUNABLE_BUFFER_SIZE] = {'\0'}, *word = NULL;
+  char buf[PR_TUNABLE_BUFFER_SIZE], *word = NULL;
   cmd_rec *cmd = NULL;
   pool *sub_pool = NULL;
   array_header *arr = NULL;
@@ -396,6 +396,8 @@ cmd_rec *pr_parser_parse_line(pool *p) {
     errno = EINVAL;
     return NULL;
   }
+
+  memset(buf, '\0', sizeof(buf));
 
   while (pr_parser_read_line(buf, sizeof(buf)-1) != NULL) {
     char *bufp = buf;
@@ -615,12 +617,15 @@ server_rec *pr_parser_server_ctxt_open(const char *addrstr) {
    */
   xaset_insert_end(*parser_server_list, (xasetmember_t *) s);
   s->set = *parser_server_list;
-  if (addrstr)
+  if (addrstr) {
     s->ServerAddress = pstrdup(s->pool, addrstr);
+  }
 
   /* Default server port */
   s->ServerPort = pr_inet_getservport(s->pool, "ftp", "tcp");
 
-  add_server_ctxt(s);
+  parser_curr_server = (server_rec **) push_array(parser_servstack);
+  *parser_curr_server = s;
+
   return s;
 }

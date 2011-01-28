@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2003-2006 The ProFTPD Project team
+ * Copyright (c) 2003-2008 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@
  */
 
 /* Home-on-demand support
- * $Id: mkhome.c,v 1.10 2006/12/28 17:52:52 castaglia Exp $
+ * $Id: mkhome.c,v 1.12 2008/12/07 03:29:55 castaglia Exp $
  */
 
 #include "conf.h"
@@ -89,6 +89,18 @@ static int create_path(pool *p, const char *path, const char *user,
   }
 
   pr_event_generate("core.create-home", user);
+
+  /* The special-case values of -1 for dir UID/GID mean that the destination
+   * UID/GID should be used for the parent directories.
+   */
+
+  if (dir_uid == (uid_t) -1) {
+    dir_uid = dst_uid;
+  }
+
+  if (dir_gid == (gid_t) -1) {
+    dir_gid = dst_gid;
+  }
 
   pr_log_debug(DEBUG3, "creating home directory '%s' for user '%s'", path,
     user);
@@ -166,14 +178,17 @@ static int copy_dir(pool *p, const char *src_dir, const char *dst_dir,
 
   while ((dent = readdir(dh)) != NULL) {
     struct stat st;
-    char *src_path = pdircat(p, src_dir, dent->d_name, NULL);
-    char *dst_path = pdircat(p, dst_dir, dent->d_name, NULL);
+    char *src_path, *dst_path;
 
     pr_signals_handle();
 
     /* Skip "." and ".." */
-    if (strcmp(dent->d_name, ".") == 0 || strcmp(dent->d_name, "..") == 0)
+    if (strcmp(dent->d_name, ".") == 0 ||
+        strcmp(dent->d_name, "..") == 0)
       continue;
+
+    src_path = pdircat(p, src_dir, dent->d_name, NULL);
+    dst_path = pdircat(p, dst_dir, dent->d_name, NULL);
 
     if (pr_fsio_lstat(src_path, &st) < 0) {
       pr_log_debug(DEBUG3, "CreateHome: unable to stat '%s' (%s), skipping",

@@ -2,7 +2,7 @@
 ## xferstats.holger-preiss.dpatch by Francesco Paolo Lovergine <frankie@debian.org>
 ##
 ## All lines beginning with `## DP:' are a description of the patch.
-## DP: No description.
+## DP: Fixes format in xferstats, this patch should go upstream.
 
 @DPATCH@
 diff -urNad trunk~/contrib/xferstats.holger-preiss trunk/contrib/xferstats.holger-preiss

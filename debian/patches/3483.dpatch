@@ -1,0 +1,46 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## 3483.dpatch by Francesco Paolo Lovergine <frankie@debian.org>
+##
+## All lines beginning with `## DP:' are a description of the patch.
+## DP: No description.
+
+@DPATCH@
+diff -urNad '--exclude=CVS' '--exclude=.svn' '--exclude=.git' '--exclude=.arch' '--exclude=.hg' '--exclude=_darcs' '--exclude=.bzr' proftpd-dfsg~/contrib/mod_quotatab.c proftpd-dfsg/contrib/mod_quotatab.c
+--- proftpd-dfsg~/contrib/mod_quotatab.c	2010-09-13 15:38:16.000000000 +0200
++++ proftpd-dfsg/contrib/mod_quotatab.c	2010-09-14 10:46:10.000000000 +0200
+@@ -3278,6 +3278,11 @@
+ }
+ 
+ MODRET quotatab_pre_site(cmd_rec *cmd) {
++
++  /* Make sure it's a valid SITE command */
++  if (cmd->argc < 2)
++    return PR_DECLINED(cmd);
++
+   if (strcasecmp(cmd->argv[1], "COPY") == 0) {
+     cmd_rec *copy_cmd;
+ 
+@@ -3390,6 +3395,11 @@
+ }
+ 
+ MODRET quotatab_post_site(cmd_rec *cmd) {
++
++  /* Make sure it's a valid SITE command */
++  if (cmd->argc < 2)
++    return PR_DECLINED(cmd);
++
+   if (strcasecmp(cmd->argv[1], "COPY") == 0) {
+     cmd_rec *copy_cmd;
+ 
+@@ -3402,6 +3412,11 @@
+ }
+ 
+ MODRET quotatab_post_site_err(cmd_rec *cmd) {
++
++  /* Make sure it's a valid SITE command */
++  if (cmd->argc < 2)
++    return PR_DECLINED(cmd);
++
+   if (strcasecmp(cmd->argv[1], "COPY") == 0) {
+     cmd_rec *copy_cmd;
+ 
