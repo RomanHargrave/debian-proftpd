@@ -27,7 +27,7 @@
  * SUCH DAMAGE.
  */
 
-/* $Id: pr-syslog.c,v 1.20 2007/02/15 17:54:58 castaglia Exp $
+/* $Id: pr-syslog.c,v 1.23 2009/10/23 16:28:00 castaglia Exp $
  */
 
 #include "conf.h"
@@ -49,6 +49,60 @@ static int log_mask = 0xff;
 #ifdef HAVE___PROGNAME
 extern char *__progname;
 #endif /* HAVE___PROGNAME */
+
+#if defined(SOLARIS2_9) || defined(SOLARIS2_10)
+/* These tables are used for populating the stupid Solaris 9/10 syslog
+ * "header".
+ */
+
+struct {
+  int facility;
+  const char *name;
+
+} syslog_facility_names[] = {
+  { LOG_AUTHPRIV,	"auth" },
+#ifdef HAVE_LOG_FTP
+  { LOG_FTP,		"ftp" },
+#endif
+#ifdef HAVE_LOG_CRON
+  { LOG_CRON,		"cron" },
+#endif
+  { LOG_DAEMON,		"daemon" },
+  { LOG_KERN,		"kern" },
+  { LOG_LOCAL0,		"local0" },
+  { LOG_LOCAL1,		"local1" },
+  { LOG_LOCAL2,		"local2" },
+  { LOG_LOCAL3,		"local3" },
+  { LOG_LOCAL4,		"local4" },
+  { LOG_LOCAL5,		"local5" },
+  { LOG_LOCAL6,		"local6" },
+  { LOG_LOCAL7,		"local7" },
+  { LOG_LPR,		"lpr" },
+  { LOG_MAIL,		"mail" },
+  { LOG_NEWS,		"news" },
+  { LOG_USER,		"user" },
+  { LOG_UUCP,		"uucp" },
+  { 0,			NULL }
+};
+
+struct {
+  int level;
+  const char *name;
+
+} syslog_level_names[] = {
+  { PR_LOG_EMERG,	"emerg" },
+  { PR_LOG_ALERT,	"alert" },
+  { PR_LOG_CRIT,	"crit" },
+  { PR_LOG_ERR,		"error" },
+  { PR_LOG_ERR,		"error" },
+  { PR_LOG_WARNING,	"warn" },
+  { PR_LOG_NOTICE,	"notice" },
+  { PR_LOG_INFO,	"info" },
+  { PR_LOG_DEBUG,	"debug" },
+  { 0,			NULL }
+};
+
+#endif /* Solaris 9 or 10 */
 
 static void pr_vsyslog(int sockfd, int pri, register const char *fmt,
     va_list ap) {
@@ -143,6 +197,50 @@ static void pr_vsyslog(int sockfd, int pri, register const char *fmt,
     buflen = strlen(logbuf);
   }
 
+#if defined(SOLARIS2_9) || defined(SOLARIS2_10)
+  /* Add in the (IMHO stupid and nonportable) syslog "header" that was added
+   * to the Solaris 9/10 libc syslog(3) function.  Some sites apparently
+   * think that trying to use this header to generate reports of logging
+   * is a Good Idea; I'll have the last laugh when those sites try to move
+   * to a different platform with different syslog logging.
+   *
+   * The header to be added looks like:
+   *
+   *  "[ID %lu %s.%s]"
+   *
+   * where the ID is generated using STRLOG_MAKE_MSGID(), a macro defined
+   * in <sys/strlog.h>, and the following two strings are the syslog
+   * facility and level, respectively.
+   */
+
+  if (buflen < sizeof(logbuf)) {
+    register unsigned int i;
+    uint32_t msgid;
+    const char *facility_name = "unknown", *level_name = "unknown";
+
+    STRLOG_MAKE_MSGID(fmt, msgid);
+
+    for (i = 0; syslog_facility_names[i].name; i++) {
+      if (syslog_facility_names[i].facility == log_facility) {
+        facility_name = syslog_facility_names[i].name;
+        break;
+      }
+    }
+
+    for (i = 0; syslog_level_names[i].name; i++) {
+      if (syslog_level_names[i].level == (pri & LOG_PRIMASK)) {
+        level_name = syslog_level_names[i].name;
+        break;
+      }
+    }
+
+    snprintf(&(logbuf[buflen]), sizeof(logbuf) - buflen, "[ID %lu %s.%s] ",
+      (unsigned long) msgid, facility_name, level_name);
+    logbuf[sizeof(logbuf)-1] = '\0';
+    buflen = strlen(logbuf);
+  }
+#endif /* Solaris 9 or 10 */
+
   /* Restore errno for %m format.  */
   errno = saved_errno;
 
@@ -209,14 +307,42 @@ int pr_openlog(const char *ident, int opts, int facility) {
 
 #ifndef HAVE_DEV_LOG_STREAMS
   while (1) {
+    socklen_t addrlen = 0;
+
     if (sockfd == -1) {
       syslog_addr.sa_family = AF_UNIX;
+
+# if defined(DARWIN8) || defined(DARWIN9)
+      /* On Mac OSX, the sockaddr.sa_data field is 14 bytes.  It is possible
+       * that PR_PATH_LOG exceeds that field length (which would truncate
+       * the field, and ensure that proftpd cannot log via syslog).
+       *
+       * So, if we're on a Mac OSX, check the sa_data field size against
+       * PR_PATH_LOG.  The man pages for Mac OSX say that sa_data can actually
+       * hold more data than 14 bytes, so...
+       */
+      if (sizeof(syslog_addr.sa_data) >= (strlen(PR_PATH_LOG) + 1)) {
+        strncpy(syslog_addr.sa_data, PR_PATH_LOG, sizeof(syslog_addr.sa_data));
+        syslog_addr.sa_data[sizeof(syslog_addr.sa_data)-1] = '\0';
+        addrlen = sizeof(syslog_addr);
+
+      } else {
+        strncpy(syslog_addr.sa_data, PR_PATH_LOG, strlen(PR_PATH_LOG) + 1);
+        addrlen = sizeof(syslog_addr) +
+          ((strlen(PR_PATH_LOG) + 1) - sizeof(syslog_addr.sa_data));
+      }
+# else
       strncpy(syslog_addr.sa_data, PR_PATH_LOG, sizeof(syslog_addr.sa_data));
       syslog_addr.sa_data[sizeof(syslog_addr.sa_data)-1] = '\0';
+      addrlen = sizeof(syslog_addr);
+# endif /* !Mac OSX */
 
       if (log_opts & LOG_NDELAY) {
-        if ((sockfd = socket(AF_UNIX, sock_type, 0)) == -1)
+        sockfd = socket(AF_UNIX, sock_type, 0);
+        if (sockfd < 0) {
           return -1;
+        }
+
         fcntl(sockfd, F_SETFD, 1);
       }
     }
@@ -224,7 +350,7 @@ int pr_openlog(const char *ident, int opts, int facility) {
     if (sockfd != -1) {
       int old_errno = errno;
 
-      if (connect(sockfd, &syslog_addr, sizeof(syslog_addr)) == -1) {
+      if (connect(sockfd, &syslog_addr, addrlen) == -1) {
         int saved_errno = errno;
         close(sockfd);
         sockfd = -1;

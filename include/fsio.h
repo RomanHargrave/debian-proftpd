@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2006 The ProFTPD Project
+ * Copyright (c) 2001-2009 The ProFTPD Project
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,7 +26,7 @@
 
 /* ProFTPD virtual/modular filesystem support.
  *
- * $Id: fsio.h,v 1.15 2007/01/11 04:05:07 castaglia Exp $
+ * $Id: fsio.h,v 1.24 2009/11/05 17:46:54 castaglia Exp $
  */
 
 #ifndef PR_FSIO_H
@@ -62,6 +62,7 @@
 #define FSIO_FILE_CHMOD		(1 << 13)
 #define FSIO_FILE_CHOWN		(1 << 14)
 #define FSIO_FILE_ACCESS	(1 << 15)
+#define FSIO_FILE_UTIMES	(1 << 23)
 
 /* Macro that defines the most common file ops */
 #define FSIO_FILE_COMMON	(FSIO_FILE_OPEN|FSIO_FILE_READ|FSIO_FILE_WRITE|\
@@ -125,9 +126,13 @@ struct fs_rec {
   int (*ftruncate)(pr_fh_t *, int, off_t);
   int (*truncate)(pr_fs_t *, const char *, off_t);
   int (*chmod)(pr_fs_t *, const char *, mode_t);
+  int (*fchmod)(pr_fh_t *, int, mode_t);
   int (*chown)(pr_fs_t *, const char *, uid_t, gid_t);
+  int (*fchown)(pr_fh_t *, int, uid_t, gid_t);
   int (*access)(pr_fs_t *, const char *, int, uid_t, gid_t, array_header *);
   int (*faccess)(pr_fh_t *, int, uid_t, gid_t, array_header *);
+  int (*utimes)(pr_fs_t *, const char *, struct timeval *);
+  int (*futimes)(pr_fh_t *, int, struct timeval *);
 
   /* For actual operations on the directory (or subdirs)
    * we cast the return from opendir to DIR* in src/fs.c, so
@@ -141,6 +146,29 @@ struct fs_rec {
   struct dirent *(*readdir)(pr_fs_t *, void *);
   int (*mkdir)(pr_fs_t *, const char *, mode_t);
   int (*rmdir)(pr_fs_t *, const char *);
+
+  /* This flag determines whether this FS handler allows cross-FS hardlinks,
+   * either from this FS to another FS, or from another FS to this FS.
+   *
+   * If the flag is set to FALSE by the FS registrant, then a hardlink
+   * across FS handlers will fail, with errno set to EXDEV.  The caller
+   * will then have to handle the EXDEV error appropriately.
+   */
+  int allow_xdev_link;
+
+  /* This flag determines whether this FS handler allows cross-FS renames,
+   * either from this FS to another FS, or from another FS to this FS.
+   *
+   * If the flag is set to FALSE by the FS registrant, then a rename
+   * across FS handlers will fail, with errno set to EXDEV.  The caller
+   * will then have to handle the EXDEV error appropriately.
+   *
+   * In the core engine, a RNFR/RNTO sequence which encounters an EXDEV
+   * error will cause a copy/delete of the file.  This can be more IO
+   * intensive than expected, and lead to longer times for the RNTO
+   * command to complete.
+   */
+  int allow_xdev_rename;
 };
 
 struct fh_rec {
@@ -159,6 +187,9 @@ struct fh_rec {
 
   /* For buffer I/O on this file, should anything choose to use it. */
   pr_buffer_t *fh_buf;
+
+  /* Hint of the optimal buffer size for IO on this file. */
+  size_t fh_iosz;
 };
 
 /* Macros for that code that needs to get into the internals of pr_fs_t.
@@ -235,12 +266,16 @@ int pr_fsio_ftruncate(pr_fh_t *, off_t);
 int pr_fsio_truncate(const char *, off_t);
 int pr_fsio_truncate_canon(const char *, off_t);
 int pr_fsio_chmod(const char *, mode_t);
+int pr_fsio_fchmod(pr_fh_t *, mode_t);
 int pr_fsio_chmod_canon(const char *, mode_t);
 int pr_fsio_chown(const char *, uid_t, gid_t);
+int pr_fsio_fchown(pr_fh_t *, uid_t, gid_t);
 int pr_fsio_chown_canon(const char *, uid_t, gid_t);
 int pr_fsio_chroot(const char *);
 int pr_fsio_access(const char *, int, uid_t, gid_t, array_header *);
 int pr_fsio_faccess(pr_fh_t *, int, uid_t, gid_t, array_header *);
+int pr_fsio_utimes(const char *, struct timeval *);
+int pr_fsio_futimes(pr_fh_t *, struct timeval *);
 off_t pr_fsio_lseek(pr_fh_t *, off_t, int);
 
 /* FS-related functions */
@@ -248,6 +283,7 @@ off_t pr_fsio_lseek(pr_fh_t *, off_t, int);
 char *pr_fsio_getline(char *, int, pr_fh_t *, unsigned int *);
 char *pr_fsio_gets(char *, size_t, pr_fh_t *);
 int pr_fsio_puts(const char *, pr_fh_t *);
+int pr_fsio_set_block(pr_fh_t *);
 
 pr_fs_t *pr_register_fs(pool *, const char *, const char *);
 pr_fs_t *pr_create_fs(pool *, const char *);
@@ -280,13 +316,19 @@ int pr_fs_resolve_partial(const char *, char *, size_t, int);
 int pr_fs_resolve_path(const char *, char *, size_t, int);
 char *pr_fs_decode_path(pool *, const char *);
 char *pr_fs_encode_path(pool *, const char *);
-int pr_fs_use_utf8(int bool);
+int pr_fs_use_encoding(int bool);
 int pr_fs_valid_path(const char *);
 void pr_fs_virtual_path(const char *, char *, size_t);
 void pr_fs_clean_path(const char *, char *, size_t);
 int pr_fs_glob(const char *, int, int (*errfunc)(const char *, int), glob_t *);
 void pr_fs_globfree(glob_t *);
 void pr_resolve_fs_map(void);
+
+/* The main three fds (stdin, stdout, stderr) need to be protected, reserved
+ * for use.  This function uses dup(2) to open new fds on the given fd
+ * until the new fd is not one of the big three.
+ */
+int pr_fs_get_usable_fd(int);
 
 #if defined(HAVE_STATFS) || defined(HAVE_SYS_STATVFS_H) || \
   defined(HAVE_SYS_VFS_H)

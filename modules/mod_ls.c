@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2007 The ProFTPD Project team
+ * Copyright (c) 2001-2010 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* Directory listing module for ProFTPD.
- * $Id: mod_ls.c,v 1.149 2007/09/28 00:53:59 castaglia Exp $
+ * $Id: mod_ls.c,v 1.172.2.1 2010/06/22 16:37:28 castaglia Exp $
  */
 
 #include "conf.h"
@@ -80,6 +80,7 @@ static struct list_limit_rec list_nfiles;
 static int
     opt_a = 0,
     opt_A = 0,
+    opt_B = 0,
     opt_C = 0,
     opt_d = 0,
     opt_F = 0,
@@ -96,14 +97,14 @@ static int
 static char cwd[PR_TUNABLE_PATH_MAX+1] = "";
 
 /* Find a <Limit> block that limits the given command (which will probably
- * be LIST).  This code borrowed for src/dirtree.c's _dir_check_limit().
+ * be LIST).  This code borrowed for src/dirtree.c's dir_check_limit().
  * Note that this function is targeted specifically for ls commands (eg
  * LIST, NLST, DIRS, and ALL) that might be <Limit>'ed.
  */
-static config_rec *_find_ls_limit(char *ftp_cmd) {
+static config_rec *find_ls_limit(char *cmd_name) {
   config_rec *c = NULL, *limit_c = NULL;
 
-  if (!ftp_cmd)
+  if (!cmd_name)
     return NULL;
 
   if (!session.dir_config)
@@ -111,9 +112,9 @@ static config_rec *_find_ls_limit(char *ftp_cmd) {
 
   /* Determine whether this command is <Limit>'ed. */
   for (c = session.dir_config; c; c = c->parent) {
+    pr_signals_handle();
 
     if (c->subset) {
-
       for (limit_c = (config_rec *) (c->subset->xas_list); limit_c;
           limit_c = limit_c->next) {
 
@@ -124,17 +125,17 @@ static config_rec *_find_ls_limit(char *ftp_cmd) {
 
             /* match any of the appropriate <Limit> arguments
              */
-            if (!strcasecmp(ftp_cmd, (char *) (limit_c->argv[i])) ||
-                !strcasecmp("DIRS", (char *) (limit_c->argv[i])) ||
-                !strcasecmp("ALL", (char *) (limit_c->argv[i])))
+            if (strcasecmp(cmd_name, (char *) (limit_c->argv[i])) == 0 ||
+                strcasecmp("DIRS", (char *) (limit_c->argv[i])) == 0 ||
+                strcasecmp("ALL", (char *) (limit_c->argv[i])) == 0) {
               break;
+            }
           }
 
           if (i == limit_c->argc)
             continue;
 
-          /* Found a <Limit> directive associated with the current command
-           */
+          /* Found a <Limit> directive associated with the current command. */
           return limit_c;
         }
       }
@@ -181,10 +182,12 @@ static int ls_perms_full(pool *p, cmd_rec *cmd, const char *path, int *hidden) {
   if (!fullpath)
     fullpath = pstrdup(p, path);
 
-  if (canon)
-    res = dir_check_canon(p, cmd->argv[0], cmd->group, fullpath, hidden);
-  else
-    res = dir_check(p, cmd->argv[0], cmd->group, fullpath, hidden);
+  if (canon) {
+    res = dir_check_canon(p, cmd, cmd->group, fullpath, hidden);
+
+  } else {
+    res = dir_check(p, cmd, cmd->group, fullpath, hidden);
+  }
 
   if (session.dir_config) {
     unsigned char *tmp = get_param_ptr(session.dir_config->subset,
@@ -205,7 +208,7 @@ static int ls_perms_full(pool *p, cmd_rec *cmd, const char *path, int *hidden) {
   return res;
 }
 
-static int ls_perms(pool *p, cmd_rec *cmd, const char *path,int *hidden) {
+static int ls_perms(pool *p, cmd_rec *cmd, const char *path, int *hidden) {
   int res = 0;
   char fullpath[PR_TUNABLE_PATH_MAX + 1] = {'\0'};
   mode_t *fake_mode = NULL;
@@ -217,17 +220,19 @@ static int ls_perms(pool *p, cmd_rec *cmd, const char *path,int *hidden) {
   if (*path == '~')
     return ls_perms_full(p, cmd, path, hidden);
 
-  if (*path != '/')
+  if (*path != '/') {
     pr_fs_clean_path(pdircat(p, pr_fs_getcwd(), path, NULL), fullpath,
       PR_TUNABLE_PATH_MAX);
-  else
-    pr_fs_clean_path(path, fullpath, PR_TUNABLE_PATH_MAX);
 
-  res = dir_check(p, cmd->argv[0], cmd->group, fullpath, hidden);
+  } else {
+    pr_fs_clean_path(path, fullpath, PR_TUNABLE_PATH_MAX);
+  }
+
+  res = dir_check(p, cmd, cmd->group, fullpath, hidden);
 
   if (session.dir_config) {
     unsigned char *tmp = get_param_ptr(session.dir_config->subset,
-      "ShowSymlinks",FALSE);
+      "ShowSymlinks", FALSE);
 
     if (tmp)
       list_show_symlinks = *tmp;
@@ -244,12 +249,23 @@ static int ls_perms(pool *p, cmd_rec *cmd, const char *path,int *hidden) {
   return res;
 }
 
-/* sendline() now has an internal buffer, to help speed up LIST output. */
+/* sendline() now has an internal buffer, to help speed up LIST output.
+ * This buffer is allocated one, the first time sendline() is called.
+ * By using a runtime allocation, we can use pr_config_get_xfer_bufsz()
+ * to get the optimal buffer size for network transfers.
+ */
+static char *listbuf = NULL;
+static size_t listbufsz = 0;
+
 static int sendline(int flags, char *fmt, ...) {
-  static char listbuf[PR_TUNABLE_BUFFER_SIZE] = {'\0'};
   va_list msg;
   char buf[PR_TUNABLE_BUFFER_SIZE+1] = {'\0'};
   int res = 0;
+
+  if (listbuf == NULL) {
+    listbufsz = pr_config_get_xfer_bufsz();
+    listbuf = pcalloc(session.pool, listbufsz);
+  }
 
   if (flags & LS_SENDLINE_FL_FLUSH) {
     size_t listbuflen = strlen(listbuf);
@@ -258,11 +274,17 @@ static int sendline(int flags, char *fmt, ...) {
       res = pr_data_xfer(listbuf, listbuflen);
       if (res < 0 &&
           errno != 0) {
-        pr_log_debug(DEBUG3, "pr_data_xfer returned %d, error = %s.", res,
-          strerror(PR_NETIO_ERRNO(session.d->outstrm)));
+        int xerrno = errno;
+
+        if (session.d) {
+          xerrno = PR_NETIO_ERRNO(session.d->outstrm);
+        }
+
+        pr_log_debug(DEBUG3, "pr_data_xfer returned %d, error = %s", res,
+          strerror(xerrno));
       }
 
-      memset(listbuf, '\0', sizeof(listbuf));
+      memset(listbuf, '\0', listbufsz);
     }
 
     return res;
@@ -275,18 +297,24 @@ static int sendline(int flags, char *fmt, ...) {
   buf[sizeof(buf)-1] = '\0';
 
   /* If buf won't fit completely into listbuf, flush listbuf */
-  if (strlen(buf) >= (sizeof(listbuf) - strlen(listbuf))) {
+  if (strlen(buf) >= (listbufsz - strlen(listbuf))) {
     res = pr_data_xfer(listbuf, strlen(listbuf));
     if (res < 0 &&
         errno != 0) {
-      pr_log_debug(DEBUG3, "pr_data_xfer returned %d, error = %s.", res,
-        strerror(PR_NETIO_ERRNO(session.d->outstrm)));
+      int xerrno = errno;
+
+      if (session.d) {
+        xerrno = PR_NETIO_ERRNO(session.d->outstrm);
+      }
+
+      pr_log_debug(DEBUG3, "pr_data_xfer returned %d, error = %s", res,
+        strerror(xerrno));
     }
 
-    memset(listbuf, '\0', sizeof(listbuf));
+    memset(listbuf, '\0', listbufsz);
   }
 
-  sstrcat(listbuf, buf, sizeof(listbuf));
+  sstrcat(listbuf, buf, listbufsz);
   return res;
 }
 
@@ -327,7 +355,7 @@ static char months[12][4] =
 static int listfile(cmd_rec *cmd, pool *p, const char *name) {
   int rval = 0, len;
   time_t mtime;
-  char m[1024] = {'\0'}, l[1024] = {'\0'}, s[16] = {'\0'};
+  char m[PR_TUNABLE_PATH_MAX+1] = {'\0'}, l[PR_TUNABLE_PATH_MAX+1] = {'\0'}, s[16] = {'\0'};
   struct stat st;
   struct tm *t = NULL;
   char suffix[2];
@@ -350,7 +378,34 @@ static int listfile(cmd_rec *cmd, pool *p, const char *name) {
     p = cmd->tmp_pool;
 
   if (pr_fsio_lstat(name, &st) == 0) {
+
+    char *display_name = NULL;
+
     suffix[0] = suffix[1] = '\0';
+
+    display_name = pstrdup(p, name);
+
+#ifndef PR_USE_NLS
+    if (opt_B) {
+      register unsigned int i;
+
+      /* Check for any non-printable characters, and replace them with the
+       * octal escape sequence equivalent.
+       */
+      for (i = 0; i < strlen(display_name); i++) {
+        if (!isprint((int) display_name[i])) {
+          char replace[32];
+
+          memset(replace, '\0', sizeof(replace));
+          snprintf(replace, sizeof(replace)-1, "\\%03o", display_name[i]);
+
+          display_name = pstrndup(p, display_name, i);
+          display_name = pstrcat(p, display_name, replace,
+            &(display_name[i+1]), NULL);
+        }
+      }
+    }
+#endif /* PR_USE_NLS */
 
     if (S_ISLNK(st.st_mode) && (opt_L || !list_show_symlinks)) {
       /* Attempt to fully dereference symlink */
@@ -500,7 +555,7 @@ static int listfile(cmd_rec *cmd, pool *p, const char *name) {
             "%s %3d %-8s %-8s %s %s %2d %s %s", m, (int) st.st_nlink,
             MAP_UID(st.st_uid), MAP_GID(st.st_gid), s,
             months[t->tm_mon], t->tm_mday, timeline,
-            pr_fs_encode_path(cmd->tmp_pool, name));
+            pr_fs_encode_path(cmd->tmp_pool, display_name));
 
         } else {
 
@@ -707,7 +762,7 @@ static void sortfiles(cmd_rec *cmd) {
 }
 
 static int outputfiles(cmd_rec *cmd) {
-  int n;
+  int n, res = 0;
   struct filename *p = NULL, *q = NULL;
 
   if (opt_S || opt_t)
@@ -718,7 +773,7 @@ static int outputfiles(cmd_rec *cmd) {
 
   tail->down = NULL;
   tail = NULL;
-  colwidth = ( colwidth | 7 ) + 1;
+  colwidth = (colwidth | 7) + 1;
   if (opt_l || !opt_C)
     colwidth = 75;
 
@@ -726,48 +781,62 @@ static int outputfiles(cmd_rec *cmd) {
   if (colwidth > 75)
     colwidth = 75;
 
-  p = head;
-  p->top = 1;
-  n = (filenames + (75 / colwidth)-1) / (75 / colwidth);
-  while (n && p) {
-    p = p->down;
-    if (p)
-      p->top = 0;
-    n--;
+  if (opt_C) {
+    p = head;
+    p->top = 1;
+    n = (filenames + (75 / colwidth)-1) / (75 / colwidth);
+
+    while (n && p) {
+      pr_signals_handle();
+
+      p = p->down;
+      if (p)
+        p->top = 0;
+      n--;
+    }
+
+    q = head;
+    while (p) {
+      pr_signals_handle();
+
+      p->top = q->top;
+      q->right = p;
+      q = q->down;
+      p = p->down;
+    }
+
+    while (q) {
+      pr_signals_handle();
+
+      q->right = NULL;
+      q = q->down;
+    }
+
+    p = head;
+    while (p && p->down && !p->down->top) {
+      pr_signals_handle();
+      p = p->down;
+    }
+
+    if (p && p->down)
+      p->down = NULL;
   }
 
-  q = head;
+  p = head;
   while (p) {
-    p->top = q->top;
-    q->right = p;
-    q = q->down;
-    p = p->down;
-  }
+    pr_signals_handle();
 
-  while (q) {
-    q->right = NULL;
-    q = q->down;
-  }
-
-  p = head;
-  while (p && p->down && !p->down->top)
-    p = p->down;
-  if (p && p->down)
-    p->down = NULL;
-
-  p = head;
-  while (p) {
     q = p;
     p = p->down;
     while (q) {
       char pad[6] = {'\0'};
 
-      if (q->right) {
-        sstrncpy(pad, "\t\t\t\t\t", sizeof(pad));
-        pad[(colwidth + 7 - strlen(q->line)) / 8] = '\0';
+      if (!q->right) {
+        sstrncpy(pad, "\n", sizeof(pad));
 
       } else {
-        sstrncpy(pad, "\n", sizeof(pad));
+        sstrncpy(pad, "\t\t\t\t\t", sizeof(pad));
+        pad[(colwidth + 7 - strlen(q->line)) / 8] = '\0';
       }
 
       if (sendline(0, "%s%s", q->line, pad) < 0)
@@ -777,6 +846,9 @@ static int outputfiles(cmd_rec *cmd) {
     }
   }
 
+  if (sendline(LS_SENDLINE_FL_FLUSH, " ") < 0)
+    res = -1;
+
   destroy_pool(fpool);
   fpool = NULL;
   sort_arr = NULL;
@@ -784,10 +856,7 @@ static int outputfiles(cmd_rec *cmd) {
   colwidth = 0;
   filenames = 0;
 
-  if (sendline(LS_SENDLINE_FL_FLUSH, " ") < 0)
-    return -1;
-
-  return 0;
+  return res;
 }
 
 static void discard_output(void) {
@@ -825,7 +894,8 @@ static char **sreaddir(const char *dirname, const int sort) {
     return NULL;
   }
 
-  if ((d = pr_fsio_opendir(dirname)) == NULL)
+  d = pr_fsio_opendir(dirname);
+  if (d == NULL)
     return NULL;
 
   /* It doesn't matter if the following guesses are wrong, but it slows
@@ -837,12 +907,13 @@ static char **sreaddir(const char *dirname, const int sort) {
    */
   dsize = (st.st_size / 4) + 10;	 /* Guess number of entries in dir */
 
-  /*
-  ** The directory has been opened already, but portably accessing the file
-  ** descriptor inside the DIR struct isn't easy.  Some systems use "dd_fd" or
-  ** "__dd_fd" rather than "d_fd".  Still others work really hard at opacity.
-  */
-#if defined(HAVE_STRUCT_DIR_D_FD)
+  /* The directory has been opened already, but portably accessing the file
+   * descriptor inside the DIR struct isn't easy.  Some systems use "dd_fd" or
+   * "__dd_fd" rather than "d_fd".  Still others work really hard at opacity.
+   */
+#if defined(HAVE_DIRFD) 
+  dir_fd = dirfd(d);
+#elif defined(HAVE_STRUCT_DIR_D_FD)
   dir_fd = d->d_fd;
 #elif defined(HAVE_STRUCT_DIR_DD_FD)
   dir_fd = d->dd_fd;
@@ -851,7 +922,9 @@ static char **sreaddir(const char *dirname, const int sort) {
 #else
   dir_fd = 0;
 #endif
-  if ((ssize = get_name_max((char *) dirname, dir_fd)) < 1 ) {
+
+  ssize = get_name_max((char *) dirname, dir_fd);
+  if (ssize < 1) {
     pr_log_debug(DEBUG1, "get_name_max(%s, %d) = %d, using %d", dirname,
       dir_fd, ssize, NAME_MAX_GUESS);
     ssize = NAME_MAX_GUESS;
@@ -967,7 +1040,7 @@ static int listdir(cmd_rec *cmd, pool *workp, const char *name) {
   /* Search for relevant <Limit>'s to this LIST command.  If found,
    * check to see whether hidden files should be ignored.
    */
-  c = _find_ls_limit(cmd->argv[0]);
+  c = find_ls_limit(cmd->argv[0]);
   if (c != NULL) {
     unsigned char *ignore = get_param_ptr(c->subset, "IgnoreHidden", FALSE);
 
@@ -1161,9 +1234,21 @@ static void ls_terminate(void) {
 }
 
 static void parse_list_opts(char **opt, int *glob_flags, int handle_plus_opts) {
-  while (isspace((int) **opt)) {
+  char *ptr;
+
+  /* First, scan for options.  Any leading whitespace before options can
+   * be skipped, as long as there ARE options.
+   */
+  ptr = *opt;
+
+  while (isspace((int) *ptr)) {
     pr_signals_handle();
-    (*opt)++;
+    ptr++;
+  }
+
+  if (*ptr == '-') {
+    /* Options are found; skip past the leading whitespace. */
+    *opt = ptr;
   }
 
   /* Check for standard /bin/ls options */
@@ -1173,7 +1258,9 @@ static void parse_list_opts(char **opt, int *glob_flags, int handle_plus_opts) {
     while ((*opt)++ && isalnum((int) **opt)) {
       switch (**opt) {
         case '1':
-          opt_l = opt_C = 0;
+          if (strcmp(session.curr_cmd, C_STAT) != 0) {
+            opt_l = opt_C = 0;
+          }
           break;
 
         case 'A':
@@ -1182,6 +1269,10 @@ static void parse_list_opts(char **opt, int *glob_flags, int handle_plus_opts) {
 
         case 'a':
           opt_a = 1;
+          break;
+
+        case 'B':
+          opt_B = 1;
           break;
 
         case 'C':
@@ -1244,9 +1335,26 @@ static void parse_list_opts(char **opt, int *glob_flags, int handle_plus_opts) {
       }
     }
 
-    while (isspace((int) **opt)) {
+    ptr = *opt;
+
+    while (*ptr &&
+           isspace((int) *ptr)) {
       pr_signals_handle();
+      ptr++;
+    }
+
+    if (*ptr == '-') {
+      /* Options are found; skip past the leading whitespace. */
+      *opt = ptr;
+
+    } else if (*(*opt + 1) == ' ') {
+      /* If the next character is a blank space, advance just one character. */
       (*opt)++;
+      break;
+
+    } else {
+      *opt = ptr;
+      break;
     }
   }
 
@@ -1269,6 +1377,10 @@ static void parse_list_opts(char **opt, int *glob_flags, int handle_plus_opts) {
 
         case 'a':
           opt_a = 0;
+          break;
+
+        case 'B':
+          opt_B = 0;
           break;
 
         case 'C':
@@ -1319,11 +1431,64 @@ static void parse_list_opts(char **opt, int *glob_flags, int handle_plus_opts) {
       }
     }
 
-    while (isspace((int) **opt)) {
+    ptr = *opt;
+
+    while (*ptr &&
+           isspace((int) *ptr)) {
       pr_signals_handle();
+      ptr++;
+    }
+
+    if (*ptr == '+') {
+      /* Options are found; skip past the leading whitespace. */
+      *opt = ptr;
+
+    } else if (*(*opt + 1) == ' ') {
+      /* If the next character is a blank space, advance just one character. */
       (*opt)++;
+      break;
+
+    } else {
+      *opt = ptr;
+      break;
     }
   }
+}
+
+/* Only look for and parse options if there are more than two arguments.
+ * This will avoid trying to handle the file/path in a command like:
+ *
+ *  LIST -filename
+ *
+ * as if it were options.
+ *
+ * Returns TRUE if the given command has options that should be parsed,
+ * FALSE otherwise.
+ */
+static int have_options(cmd_rec *cmd, const char *arg) {
+  struct stat st;
+  int res;
+
+  /* If we have more than 2 arguments, then we definitely have parseable
+   * options.
+   */
+
+  if (cmd->argc > 2)
+    return TRUE;
+
+  /* Now we need to determine if the given string (arg) should be handled
+   * as options (as when the target path is implied, e.g. "LIST -al") or
+   * as a real path.  We'll simply do a stat on the string; if it exists,
+   * then it's a path.
+   */
+
+  pr_fs_clear_cache();
+  res = pr_fsio_stat(arg, &st);
+
+  if (res == 0)
+    return FALSE;
+
+  return TRUE;
 }
 
 /* The main work for LIST and STAT (not NLST).  Returns -1 on error, 0 if
@@ -1331,44 +1496,77 @@ static void parse_list_opts(char **opt, int *glob_flags, int handle_plus_opts) {
  */
 static int dolist(cmd_rec *cmd, const char *opt, int clearflags) {
   int skiparg = 0;
-  int glob_flags = GLOB_PERIOD;
+  int glob_flags = 0;
+
   char *arg = (char*) opt;
 
   ls_curtime = time(NULL);
 
-  if (clearflags)
-    opt_A = opt_a = opt_C = opt_d = opt_F = opt_h = opt_n = opt_r = opt_R =
-      opt_S = opt_t = opt_STAT = opt_L = 0;
-
-  if (!list_strict_opts) {
-    parse_list_opts(&arg, &glob_flags, FALSE);
-
-  } else {
-
-    /* Even if the user-given options are ignored, they still need to
-     * "processed" (ie skip past options) in order to get to the paths.
-     */
-    while (*arg && isspace((int) *arg)) {
-      pr_signals_handle();
-      arg++;
-    }
-
-    while (arg && *arg == '-') {
-
-      /* Advance to the next whitespace */
-      while (*arg != '\0' && !isspace((int) *arg))
-        arg++;
-
-      while (isspace((int) *arg))
-        arg++;
-    }
-
-    while (isspace((int) *arg))
-      arg++;
+  if (clearflags) {
+    opt_A = opt_a = opt_B = opt_C = opt_d = opt_F = opt_h = opt_n = opt_r =
+      opt_R = opt_S = opt_t = opt_STAT = opt_L = 0;
   }
 
-  if (list_options)
+  if (have_options(cmd, arg)) {
+    if (!list_strict_opts) {
+      parse_list_opts(&arg, &glob_flags, FALSE);
+
+    } else {
+      char *ptr;
+
+      /* Even if the user-given options are ignored, they still need to
+       * "processed" (i.e. skip past options) in order to get to the paths.
+       *
+       * First, scan for options.  Any leading whitespace before options can
+       * be skipped, as long as there ARE options.
+       */
+      ptr = arg;
+
+      while (isspace((int) *ptr)) {
+        pr_signals_handle();
+        ptr++;
+      }
+
+      if (*ptr == '-') {
+        /* Options are found; skip past the leading whitespace. */
+        arg = ptr;
+      }
+
+      while (arg && *arg == '-') {
+        /* Advance to the next whitespace */
+        while (*arg != '\0' && !isspace((int) *arg))
+          arg++;
+
+        ptr = arg;
+
+        while (*ptr &&
+               isspace((int) *ptr)) {
+          pr_signals_handle();
+          ptr++;
+        }
+
+        if (*ptr == '-') {
+          /* Options are found; skip past the leading whitespace. */
+          arg = ptr;
+
+        } else if (*(arg + 1) == ' ') {
+          /* If the next character is a blank space, advance just one
+           * character.
+           */
+          arg++;
+          break;
+
+        } else {
+          arg = ptr;
+          break;
+        }
+      }
+    }
+  }
+
+  if (list_options) {
     parse_list_opts(&list_options, &glob_flags, TRUE);
+  }
 
   if (arg && *arg) {
     int justone = 1;
@@ -1396,23 +1594,24 @@ static int dolist(cmd_rec *cmd, const char *opt, int clearflags) {
       if (pw) {
         snprintf(pbuffer, sizeof(pbuffer), "%s%s", pw->pw_dir, p);
 
-      } else
+      } else {
         pbuffer[0] = '\0';
+      }
     }
 
     target = *pbuffer ? pbuffer : arg;
 
     /* Open data connection */
     if (!opt_STAT) {
-      session.sf_flags |= SF_ASCII_OVERRIDE;
       if (pr_data_open(NULL, "file list", PR_NETIO_IO_WR, 0) < 0)
         return -1;
+      session.sf_flags |= SF_ASCII_OVERRIDE;
     }
 
     /* If there are no globbing characters in the given target,
      * we can check to see if it even exists.
      */
-    if (strpbrk(target, "{[*?") == NULL) {
+    if (strpbrk(target, "[*?") == NULL) {
       struct stat st;
 
       pr_fs_clear_cache();
@@ -1433,8 +1632,13 @@ static int dolist(cmd_rec *cmd, const char *opt, int clearflags) {
       skiparg = FALSE;
 
       if (use_globbing &&
-          strpbrk(target, "{[*?") != NULL) {
+          strpbrk(target, "[*?") != NULL) {
         a = pr_fs_glob(target, glob_flags, NULL, &g);
+        if (a == 0) {
+          pr_log_debug(DEBUG8, "LIST: glob(3) returned %lu %s",
+            (unsigned long) g.gl_pathc, g.gl_pathc != 1 ? "paths" : "path");
+        }
+
         globbed = TRUE;
 
       } else {
@@ -1448,40 +1652,35 @@ static int dolist(cmd_rec *cmd, const char *opt, int clearflags) {
     }
 
     if (!a) {
-      int list_dir_as_file = FALSE;
       char **path;
-
-      /* If glob characters are present, and if recursion has not been
-       * explicitly requested, then do not recurse.  Do this by treating
-       * directories as files for listing purposes.
-       */
-      if (use_globbing &&
-          strpbrk(target, "{[*?") != NULL &&
-          !opt_R)
-        list_dir_as_file = TRUE;
 
       path = g.gl_pathv;
 
       if (path && path[0] && path[1])
         justone = 0;
 
-      while (path && *path) {
+      while (path &&
+             *path) {
         struct stat st;
+
+        pr_signals_handle();
 
         if (pr_fsio_lstat(*path, &st) == 0) {
           mode_t target_mode, lmode;
           target_mode = st.st_mode;
 
-          if (S_ISLNK(st.st_mode) && (lmode = file_mode((char*)*path)) != 0) {
+          if (S_ISLNK(st.st_mode) &&
+              (lmode = file_mode((char *) *path)) != 0) {
             if (opt_L || !list_show_symlinks)
               st.st_mode = lmode;
+
             target_mode = lmode;
           }
 
           if (opt_d ||
-              !(S_ISDIR(target_mode)) ||
-              (S_ISDIR(target_mode) && list_dir_as_file)) {
-            if (listfile(cmd, NULL, *path) < 0) {
+              !(S_ISDIR(target_mode))) {
+
+            if (listfile(cmd, cmd->tmp_pool, *path) < 0) {
               ls_terminate();
               if (use_globbing && globbed)
                 pr_fs_globfree(&g);
@@ -1491,8 +1690,9 @@ static int dolist(cmd_rec *cmd, const char *opt, int clearflags) {
             **path = '\0';
           }
 
-        } else 
+        } else {
           **path = '\0';
+        }
 
         path++;
       }
@@ -1505,9 +1705,18 @@ static int dolist(cmd_rec *cmd, const char *opt, int clearflags) {
         return -1;
       }
 
+      /* At this point, the only paths left in g.gl_pathv should be
+       * directories; anything else should have been listed/handled
+       * above.
+       */
+
       path = g.gl_pathv;
-      while (path && *path) {
-        if (**path && ls_perms_full(cmd->tmp_pool, cmd, *path, NULL)) {
+      while (path &&
+             *path) {
+        pr_signals_handle();
+
+        if (**path &&
+            ls_perms_full(cmd->tmp_pool, cmd, *path, NULL)) {
           char cwd_buf[PR_TUNABLE_PATH_MAX + 1] = {'\0'};
           unsigned char symhold;
 
@@ -1530,7 +1739,7 @@ static int dolist(cmd_rec *cmd, const char *opt, int clearflags) {
             int res = 0;
 
             list_ndepth.curr++;
-            res = listdir(cmd, NULL, *path);
+            res = listdir(cmd, cmd->tmp_pool, *path);
             list_ndepth.curr--;
 
             pop_cwd(cwd_buf, &symhold);
@@ -1558,17 +1767,18 @@ static int dolist(cmd_rec *cmd, const char *opt, int clearflags) {
       }
 
     } else if (!skiparg) {
-      if (a == GLOB_NOSPACE)
+      if (a == GLOB_NOSPACE) {
         pr_response_add(R_226, _("Out of memory during globbing of %s"),
           pr_fs_encode_path(cmd->tmp_pool, arg));
 
-      else if (a == GLOB_ABORTED)
+      } else if (a == GLOB_ABORTED) {
         pr_response_add(R_226, _("Read error during globbing of %s"),
           pr_fs_encode_path(cmd->tmp_pool, arg));
 
-      else if (a != GLOB_NOMATCH)
+      } else if (a != GLOB_NOMATCH) {
         pr_response_add(R_226, _("Unknown error during globbing of %s"),
           pr_fs_encode_path(cmd->tmp_pool, arg));
+      }
     }
 
     if (!skiparg && use_globbing && globbed)
@@ -1583,9 +1793,9 @@ static int dolist(cmd_rec *cmd, const char *opt, int clearflags) {
 
     /* Open data connection */
     if (!opt_STAT) {
-      session.sf_flags |= SF_ASCII_OVERRIDE;
       if (pr_data_open(NULL, "file list", PR_NETIO_IO_WR, 0) < 0)
         return -1;
+      session.sf_flags |= SF_ASCII_OVERRIDE;
     }
 
     if (ls_perms_full(cmd->tmp_pool, cmd, ".", NULL)) {
@@ -1622,6 +1832,7 @@ static int dolist(cmd_rec *cmd, const char *opt, int clearflags) {
  */
 static int nlstfile(cmd_rec *cmd, const char *file) {
   int res = 0;
+  char *display_name;
 
   /* If the data connection isn't open, return an error */
   if ((session.sf_flags & SF_XFER) == 0) {
@@ -1632,12 +1843,30 @@ static int nlstfile(cmd_rec *cmd, const char *file) {
   if (dir_hide_file(file))
     return 1;
 
-  /* Be sure to flush the output */
-  res = sendline(0, "%s\n", pr_fs_encode_path(cmd->tmp_pool, file));
-  if (res < 0)
-    return res;
+  display_name = pstrdup(cmd->tmp_pool, file);
 
-  res = sendline(LS_SENDLINE_FL_FLUSH, " ");
+#ifndef PR_USE_NLS
+  if (opt_B) {
+    register unsigned int i;
+
+    /* Check for any non-printable characters, and replace them with '?'. */
+    for (i = 0; i < strlen(display_name); i++) {
+      if (!isprint((int) display_name[i])) {
+        char replace[32];
+
+        memset(replace, '\0', sizeof(replace));
+        snprintf(replace, sizeof(replace)-1, "\\%03o", display_name[i]);
+
+        display_name = pstrndup(cmd->tmp_pool, display_name, i);
+        display_name = pstrcat(cmd->tmp_pool, display_name, replace,
+          &(display_name[i+1]), NULL);
+      }
+    }
+  }
+#endif /* PR_USE_NLS */
+
+  /* Be sure to flush the output */
+  res = sendline(0, "%s\n", pr_fs_encode_path(cmd->tmp_pool, display_name));
   if (res < 0)
     return res;
 
@@ -1654,7 +1883,7 @@ static int nlstdir(cmd_rec *cmd, const char *dir) {
   char cwd_buf[PR_TUNABLE_PATH_MAX + 1] = {'\0'};
   pool *workp;
   unsigned char symhold;
-  int curdir = 0, i, j, count = 0, hidden = 0;
+  int curdir = FALSE, i, j, count = 0, hidden = 0;
   mode_t mode;
   config_rec *c = NULL;
   unsigned char ignore_hidden = FALSE;
@@ -1688,20 +1917,30 @@ static int nlstdir(cmd_rec *cmd, const char *dir) {
   pr_pool_tag(workp, "mod_ls: nlstdir(): workp (from cmd->tmp_pool)");
 
   if (!*dir || (*dir == '.' && !dir[1]) || strcmp(dir, "./") == 0) {
-    curdir = 1;
+    curdir = TRUE;
     dir = "";
 
-  } else
+  } else {
+
+    /* If dir is not '.', then we need to change directories.  Hence we
+     * push our current working directory onto the stack, do the chdir,
+     * and pop bac, afterwards.
+     */
     push_cwd(cwd_buf, &symhold);
 
-  if (pr_fsio_chdir_canon(dir, !opt_L && list_show_symlinks)) {
-    destroy_pool(workp);
-    return 0;
+    if (pr_fsio_chdir_canon(dir, !opt_L && list_show_symlinks) < 0) {
+      pop_cwd(cwd_buf, &symhold);
+
+      destroy_pool(workp);
+      return 0;
+    }
   }
 
-  if ((list = sreaddir(".", FALSE)) == NULL) {
+  list = sreaddir(".", FALSE);
+  if (list == NULL) {
     if (!curdir)
       pop_cwd(cwd_buf, &symhold);
+
     destroy_pool(workp);
     return 0;
   }
@@ -1709,7 +1948,7 @@ static int nlstdir(cmd_rec *cmd, const char *dir) {
   /* Search for relevant <Limit>'s to this NLST command.  If found,
    * check to see whether hidden files should be ignored.
    */
-  c = _find_ls_limit(cmd->argv[0]);
+  c = find_ls_limit(cmd->argv[0]);
   if (c != NULL) {
     unsigned char *ignore = get_param_ptr(c->subset, "IgnoreHidden", FALSE);
 
@@ -1722,12 +1961,13 @@ static int nlstdir(cmd_rec *cmd, const char *dir) {
     p = list[j++];
 
     if (*p == '.') {
-      if (!opt_a && (!opt_A || is_dotdir(p)))
+      if (!opt_a && (!opt_A || is_dotdir(p))) {
         continue;
 
       /* Make sure IgnoreHidden is properly honored. */
-      else if (ignore_hidden)
+      } else if (ignore_hidden) {
         continue;
+      }
     }
 
     i = pr_fsio_readlink(p, file, sizeof(file) - 1);
@@ -1742,7 +1982,7 @@ static int nlstdir(cmd_rec *cmd, const char *dir) {
       f = p;
     }
 
-    if (ls_perms(workp, cmd, f, &hidden)) {
+    if (ls_perms(workp, cmd, dir_best_path(cmd->tmp_pool, f), &hidden)) {
       if (hidden)
         continue;
 
@@ -1754,11 +1994,10 @@ static int nlstdir(cmd_rec *cmd, const char *dir) {
         char *str = pr_fs_encode_path(cmd->tmp_pool,
           pdircat(cmd->tmp_pool, dir, p, NULL));
 
-        if (sendline(0, "%s\n", str) < 0 ||
-            sendline(LS_SENDLINE_FL_FLUSH, " ") < 0)
+        if (sendline(0, "%s\n", str) < 0) {
           count = -1;
 
-        else {
+        } else {
           count++;
 
           if (list_nfiles.curr && list_nfiles.max &&
@@ -1776,11 +2015,10 @@ static int nlstdir(cmd_rec *cmd, const char *dir) {
         }
 
       } else {
-        if (sendline(0, "%s\n", pr_fs_encode_path(cmd->tmp_pool, p)) < 0 ||
-            sendline(LS_SENDLINE_FL_FLUSH, " ") < 0)
+        if (sendline(0, "%s\n", pr_fs_encode_path(cmd->tmp_pool, p)) < 0) {
           count = -1;
 
-        else {
+        } else {
           count++;
 
           if (list_nfiles.curr && list_nfiles.max &&
@@ -1800,9 +2038,10 @@ static int nlstdir(cmd_rec *cmd, const char *dir) {
     }
   }
 
+  sendline(LS_SENDLINE_FL_FLUSH, " ");
+
   if (!curdir)
     pop_cwd(cwd_buf, &symhold);
-
   destroy_pool(workp);
 
   /* Explicitly free the memory allocated for containing the list of
@@ -1912,8 +2151,7 @@ MODRET ls_stat(cmd_rec *cmd) {
      * status.
      */
 
-    if (!dir_check(cmd->tmp_pool, cmd->argv[0], cmd->group, session.cwd,
-        NULL)) {
+    if (!dir_check(cmd->tmp_pool, cmd, cmd->group, session.cwd, NULL)) {
       pr_response_add_err(R_500, "%s: %s", cmd->argv[0], strerror(EPERM));
       return PR_ERROR(cmd);
     }
@@ -2037,6 +2275,7 @@ MODRET ls_list(cmd_rec *cmd) {
   list_nfiles.logged = list_ndirs.logged = list_ndepth.logged = FALSE;
 
   opt_l = 1;
+
   return genericlist(cmd);
 }
 
@@ -2050,7 +2289,7 @@ MODRET ls_nlst(cmd_rec *cmd) {
   size_t targetlen = 0;
   config_rec *c = NULL;
   int count = 0, res = 0, hidden = 0;
-  int glob_flags = GLOB_PERIOD;
+  int glob_flags = GLOB_NOSORT;
   unsigned char *tmp = NULL;
 
   list_nfiles.curr = list_ndirs.curr = list_ndepth.curr = 0;
@@ -2084,36 +2323,69 @@ MODRET ls_nlst(cmd_rec *cmd) {
   }
 
   /* Clear the listing option flags. */
-  opt_A = opt_a = opt_C = opt_d = opt_F = opt_n = opt_r = opt_R = opt_S =
-    opt_t = opt_STAT = opt_L = 0;
+  opt_A = opt_a = opt_B = opt_C = opt_d = opt_F = opt_n = opt_r = opt_R =
+    opt_S = opt_t = opt_STAT = opt_L = 0;
 
-  if (!list_strict_opts) {
-    parse_list_opts(&target, &glob_flags, FALSE);
+  if (have_options(cmd, target)) {
+    if (!list_strict_opts) {
+      parse_list_opts(&target, &glob_flags, FALSE);
 
-  } else {
+    } else {
+      char *ptr;
 
-    /* Even if the user-given options are ignored, they still need to
-     * "processed" (ie skip past options) in order to get to the paths.
-     */
-    while (*target && isspace((int) *target))
-      target++;
+      /* Even if the user-given options are ignored, they still need to
+       * "processed" (i.e. skip past options) in order to get to the paths.
+       *
+       * First, scan for options.  Any leading whitespace before options can
+       * be skipped, as long as there ARE options.
+       */
+      ptr = target;
 
-    while (target && *target == '-') {
+      while (isspace((int) *ptr)) {
+        pr_signals_handle();
+        ptr++;
+      }
 
-      /* Advance to the next whitespace */
-      while (*target != '\0' && !isspace((int) *target))
-        target++;
+      if (*ptr == '-') {
+        /* Options are found; skip past the leading whitespace. */
+        target = ptr;
+      }
 
-      while (*target && isspace((int) *target))
-        target++;
+      while (target && *target == '-') {
+        /* Advance to the next whitespace */
+        while (*target != '\0' && !isspace((int) *target))
+          target++;
+
+        ptr = target;
+
+        while (*ptr &&
+               isspace((int) *ptr)) {
+          pr_signals_handle();
+          ptr++;
+        }
+
+        if (*ptr == '-') {
+          /* Options are found; skip past the leading whitespace. */
+          target = ptr;
+
+        } else if (*(target + 1) == ' ') {
+          /* If the next character is a blank space, advance just one
+           * character.
+           */
+          target++;
+          break;
+
+        } else {
+          target = ptr;
+          break;
+        }
+      }
     }
-
-    while (*target && isspace((int) *target))
-      target++;
   }
 
-  if (list_options)
+  if (list_options) {
     parse_list_opts(&list_options, &glob_flags, TRUE);
+  }
 
   /* If the target starts with '~' ... */
   if (*target == '~') {
@@ -2176,23 +2448,26 @@ MODRET ls_nlst(cmd_rec *cmd) {
     targetlen = strlen(target);
   }
 
-  if (pr_data_open(NULL, "file list", PR_NETIO_IO_WR, 0) < 0)
-    return PR_ERROR(cmd);
-  session.sf_flags |= SF_ASCII_OVERRIDE;
-
   /* If the target is a glob, get the listing of files/dirs to send. */
   if (use_globbing &&
-      strpbrk(target, "{[*?") != NULL) {
+      strpbrk(target, "[*?") != NULL) {
     glob_t g;
-    char **path,*p;
+    char **path, *p;
 
     /* Make sure the glob_t is initialized */
     memset(&g, '\0', sizeof(glob_t));
 
-    if (pr_fs_glob(target, GLOB_PERIOD, NULL, &g) != 0) {
+    if (pr_fs_glob(target, glob_flags, NULL, &g) != 0) {
       pr_response_add_err(R_450, _("No files found"));
       return PR_ERROR(cmd);
     }
+
+    pr_log_debug(DEBUG8, "LIST: glob(3) returned %lu %s",
+      (unsigned long) g.gl_pathc, g.gl_pathc != 1 ? "paths" : "path");
+
+    if (pr_data_open(NULL, "file list", PR_NETIO_IO_WR, 0) < 0)
+      return PR_ERROR(cmd);
+    session.sf_flags |= SF_ASCII_OVERRIDE;
 
     /* Iterate through each matching entry */
     path = g.gl_pathv;
@@ -2224,6 +2499,7 @@ MODRET ls_nlst(cmd_rec *cmd) {
       }
     }
 
+    sendline(LS_SENDLINE_FL_FLUSH, " ");
     pr_fs_globfree(&g);
 
   } else {
@@ -2241,7 +2517,7 @@ MODRET ls_nlst(cmd_rec *cmd) {
 
     /* Don't display hidden files */
     if (hidden) {
-      c = _find_ls_limit(target);
+      c = find_ls_limit(target);
 
       if (c) {
         unsigned char *ignore_hidden = get_param_ptr(c->subset,
@@ -2270,9 +2546,17 @@ MODRET ls_nlst(cmd_rec *cmd) {
     }
 
     if (S_ISREG(st.st_mode)) {
+      if (pr_data_open(NULL, "file list", PR_NETIO_IO_WR, 0) < 0)
+        return PR_ERROR(cmd);
+      session.sf_flags |= SF_ASCII_OVERRIDE;
+
       res = nlstfile(cmd, target);
 
     } else if (S_ISDIR(st.st_mode)) {
+      if (pr_data_open(NULL, "file list", PR_NETIO_IO_WR, 0) < 0)
+        return PR_ERROR(cmd);
+      session.sf_flags |= SF_ASCII_OVERRIDE;
+
       res = nlstdir(cmd, target);
 
     } else {
@@ -2282,6 +2566,8 @@ MODRET ls_nlst(cmd_rec *cmd) {
 
     if (res > 0)
       count += res;
+
+    sendline(LS_SENDLINE_FL_FLUSH, " ");
   }
 
   if (XFER_ABORTED) {

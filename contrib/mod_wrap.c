@@ -2,7 +2,7 @@
  * ProFTPD: mod_wrap -- use Wietse Venema's TCP wrappers library for
  *                      access control
  *
- * Copyright (c) 2000-2003 TJ Saunders
+ * Copyright (c) 2000-2009 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,7 +24,7 @@
  *
  * -- DO NOT MODIFY THE TWO LINES BELOW --
  * $Libraries: -lwrap -lnsl$
- * $Id: mod_wrap.c,v 1.16 2006/06/28 16:10:05 castaglia Exp $
+ * $Id: mod_wrap.c,v 1.23 2009/12/10 17:59:14 castaglia Exp $
  */
 
 #define MOD_WRAP_VERSION "mod_wrap/1.2.3"
@@ -58,7 +58,7 @@ static int wrap_eval_expression(char **config_expr,
     array_header *session_expr) {
 
   unsigned char found = FALSE;
-  int index = 0;
+  int i = 0;
   char *elem = NULL, **list = NULL;
 
   /* sanity check */
@@ -76,9 +76,9 @@ static int wrap_eval_expression(char **config_expr,
       elem++;
     }
 
-    for (index = 0; index < session_expr->nelts; index++) {
-      if (list[index] &&
-          strcmp(list[index], elem) == 0) {
+    for (i = 0; i < session_expr->nelts; i++) {
+      if (list[i] &&
+          strcmp(list[i], elem) == 0) {
         found = !found;
         break;
       }
@@ -103,10 +103,15 @@ static int wrap_eval_expression(char **config_expr,
 static char *wrap_get_user_table(cmd_rec *cmd, char *user,
     char *path) {
 
-  char *realpath = NULL;
+  char *real_path = NULL;
   struct passwd *pw = NULL;
 
   pw = pr_auth_getpwnam(cmd->pool, user);
+
+  /* Handle the case where the given user does not exist. */
+  if (pw == NULL) {
+    return NULL;
+  }
 
   /* For the dir_realpath() function to work, some session members need to
    * be set.
@@ -115,11 +120,11 @@ static char *wrap_get_user_table(cmd_rec *cmd, char *user,
   session.login_uid = pw->pw_uid;
 
   PRIVS_USER
-  realpath = dir_realpath(cmd->pool, path);
+  real_path = dir_realpath(cmd->pool, path);
   PRIVS_RELINQUISH
 
-  if (realpath)
-    path = realpath;
+  if (real_path)
+    path = real_path;
 
   return path;
 }
@@ -154,6 +159,12 @@ static int wrap_is_usable_file(char *filename) {
 
 static void wrap_log_request_allowed(int priority,
     struct request_info *request) {
+  int facility;
+
+  /* Mask off the facility bit. */
+  facility = log_getfacility();
+  priority &= ~facility;
+
   pr_log_pri(priority, MOD_WRAP_VERSION ": allowed connection from %s",
     eval_client(request));
 
@@ -163,6 +174,12 @@ static void wrap_log_request_allowed(int priority,
 
 static void wrap_log_request_denied(int priority,
     struct request_info *request) {
+  int facility;
+
+  /* Mask off the facility bit. */
+  facility = log_getfacility();
+  priority &= ~facility;
+
   pr_log_pri(priority, MOD_WRAP_VERSION ": refused connection from %s",
     eval_client(request));
 
@@ -175,7 +192,7 @@ static void wrap_log_request_denied(int priority,
  * _true_ sense of the world]. =) hmmm...I wonder if it'd be feasible
  * to make some of mod_auth's functions visible from src/auth.c?
  */
-static config_rec *wrap_resolve_user(pool *pool, char **user) {
+static config_rec *wrap_resolve_user(pool *p, char **user) {
   config_rec *conf = NULL, *top_conf;
   char *ourname = NULL, *anonname = NULL;
   unsigned char is_alias = FALSE, force_anon = FALSE;
@@ -272,7 +289,7 @@ static config_rec *wrap_resolve_user(pool *pool, char **user) {
 /* Configuration handlers
  */
 
-MODRET add_tcpaccessfiles(cmd_rec *cmd) {
+MODRET set_tcpaccessfiles(cmd_rec *cmd) {
   config_rec *c = NULL;
 
   /* assume use of the standard TCP wrappers installation locations */
@@ -365,7 +382,7 @@ MODRET add_tcpaccessfiles(cmd_rec *cmd) {
   return PR_HANDLED(cmd);
 }
 
-MODRET add_tcpgroupaccessfiles(cmd_rec *cmd) {
+MODRET set_tcpgroupaccessfiles(cmd_rec *cmd) {
   int group_argc = 1;
   char **group_argv = NULL;
   array_header *group_acl = NULL;
@@ -481,7 +498,7 @@ MODRET add_tcpgroupaccessfiles(cmd_rec *cmd) {
   return PR_HANDLED(cmd);
 }
 
-MODRET add_tcpuseraccessfiles(cmd_rec *cmd) {
+MODRET set_tcpuseraccessfiles(cmd_rec *cmd) {
   int user_argc = 1;
   char **user_argv = NULL;
   array_header *user_acl = NULL;
@@ -666,8 +683,12 @@ MODRET set_tcpaccesssysloglevels(cmd_rec *cmd) {
       "one of emerg/alert/crit/error/warn/notice/info/debug");
   }
 
-  c = add_config_param(cmd->argv[0], 2, (void *) allow_level,
-    (void *) deny_level);
+  c = add_config_param(cmd->argv[0], 2, NULL, NULL);
+  c->argv[0] = palloc(c->pool, sizeof(int));
+  *((int *) c->argv[0]) = allow_level;
+  c->argv[1] = palloc(c->pool, sizeof(int));
+  *((int *) c->argv[1]) = deny_level;
+
   c->flags |= CF_MERGEDOWN;
 
   return PR_HANDLED(cmd);
@@ -702,7 +723,7 @@ MODRET wrap_handle_request(cmd_rec *cmd) {
   /* Sneaky...found in mod_auth.c's cmd_pass() function.  Need to find the
    * login UID in order to resolve the possibly-login-dependent filename.
    */
-  user = (char *) get_param_ptr(cmd->server->conf, C_USER, FALSE);
+  user = pr_table_get(session.notes, "mod_auth.orig-user", NULL);
 
   /* It's possible that a PASS command came before USER.  This is a PRE_CMD
    * handler, so it won't be protected from this case; we'll need to do
@@ -877,14 +898,22 @@ MODRET wrap_handle_request(cmd_rec *cmd) {
     "TCPAccessSyslogLevels", FALSE);
 
   if (syslog_conf) {
-    allow_severity = (int) syslog_conf->argv[1];
-    deny_severity = (int) syslog_conf->argv[2];
+    allow_severity = *((int *) syslog_conf->argv[0]);
+    deny_severity = *((int *) syslog_conf->argv[1]);
 
   } else {
-
     allow_severity = PR_LOG_INFO;
     deny_severity = PR_LOG_WARNING;
   }
+
+  /* While it may look odd to OR together the syslog facility and level,
+   * that is the way that syslog(3) says to do it:
+   *
+   *  "The priority argument is formed by ORing the facility and the level
+   *   values..."
+   */
+  allow_severity = log_getfacility() | allow_severity;
+  deny_severity = log_getfacility() | deny_severity ;
 
   pr_log_debug(DEBUG4, MOD_WRAP_VERSION ": checking under service name '%s'",
     wrap_service_name);
@@ -900,6 +929,9 @@ MODRET wrap_handle_request(cmd_rec *cmd) {
     /* log the denied connection */
     wrap_log_request_denied(deny_severity, &request);
 
+    /* Broadcast this event to any interested listeners. */
+    pr_event_generate("mod_wrap.connection-denied", NULL);
+
     /* check for AccessDenyMsg */
     if ((denymsg = (char *) get_param_ptr(TOPLEVEL_CONF, "AccessDenyMsg",
         FALSE)) != NULL)
@@ -908,7 +940,7 @@ MODRET wrap_handle_request(cmd_rec *cmd) {
     if (denymsg)
       return PR_ERROR_MSG(cmd, R_530, denymsg);
     else
-      return PR_ERROR_MSG(cmd, R_530, "Access denied.");
+      return PR_ERROR_MSG(cmd, R_530, _("Access denied"));
   }
 
   /* If request is allowable, return DECLINED (for engine to act as if this
@@ -937,11 +969,11 @@ static int wrap_sess_init(void) {
  */
 
 static conftable wrap_conftab[] = {
-  { "TCPAccessFiles",        add_tcpaccessfiles,        NULL },
+  { "TCPAccessFiles",        set_tcpaccessfiles,        NULL },
   { "TCPAccessSyslogLevels", set_tcpaccesssysloglevels, NULL },
-  { "TCPGroupAccessFiles",   add_tcpgroupaccessfiles,   NULL },
+  { "TCPGroupAccessFiles",   set_tcpgroupaccessfiles,   NULL },
   { "TCPServiceName",	     set_tcpservicename,	NULL },
-  { "TCPUserAccessFiles",    add_tcpuseraccessfiles,    NULL },
+  { "TCPUserAccessFiles",    set_tcpuseraccessfiles,    NULL },
   { NULL }
 };
 
@@ -972,5 +1004,8 @@ module wrap_module = {
   NULL,
 
   /* Session initialization */
-  wrap_sess_init
+  wrap_sess_init,
+
+  /* Module version */
+  MOD_WRAP_VERSION
 };

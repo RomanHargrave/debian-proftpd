@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2007 The ProFTPD Project team
+ * Copyright (c) 2001-2010 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,13 +26,12 @@
 
 /*
  * House initialization and main program loop
- * $Id: main.c,v 1.306 2007/09/30 21:05:39 castaglia Exp $
+ * $Id: main.c,v 1.391.2.2 2010/06/14 18:16:03 castaglia Exp $
  */
 
 #include "conf.h"
 
 #include <signal.h>
-#include <sys/resource.h>
 
 #ifdef HAVE_GETOPT_H
 # include <getopt.h>
@@ -54,6 +53,10 @@
 # include <execinfo.h>
 #endif
 
+#ifdef HAVE_UNAME
+# include <sys/utsname.h>
+#endif
+
 #ifdef HAVE_UCONTEXT_H
 # include <ucontext.h>
 #endif
@@ -61,6 +64,7 @@
 #include "privs.h"
 
 int (*cmd_auth_chk)(cmd_rec *);
+void (*cmd_handler)(server_rec *, conn_t *);
 
 #ifdef NEED_PERSISTENT_PASSWD
 unsigned char persistent_passwd = TRUE;
@@ -92,9 +96,11 @@ static char shutmsg[81] = {'\0'};
 
 static unsigned char have_dead_child = FALSE;
 
-static char sbuf[PR_TUNABLE_BUFFER_SIZE] = {'\0'};
-
-#define PR_DEFAULT_CMD_BUFSZ	512
+/* The default command buffer size SHOULD be large enough to handle the
+ * maximum path length, plus 4 bytes for the FTP command, plus 1 for the
+ * whitespace separating command from path, and 2 for the terminating CRLF.
+ */
+#define PR_DEFAULT_CMD_BUFSZ	(PR_TUNABLE_PATH_MAX + 7)
 
 /* From mod_auth_unix.c */
 extern unsigned char persistent_passwd;
@@ -106,6 +112,9 @@ static int nodaemon  = 0;
 static int quiet     = 0;
 static int shutdownp = 0;
 static int syntax_check = 0;
+
+/* Command handling */
+static void cmd_loop(server_rec *, conn_t *);
 
 /* Signal handling */
 static RETSIGTYPE sig_disconnect(int);
@@ -132,6 +141,8 @@ static void handle_terminate(void);
 static void handle_terminate_other(void);
 static void finish_terminate(void);
 
+static cmd_rec *make_ftp_cmd(pool *, char *, int);
+
 static const char *config_filename = PR_CONFIG_FILE_PATH;
 
 /* Add child semaphore fds into the rfd for selecting */
@@ -142,9 +153,9 @@ static int semaphore_fds(fd_set *rfd, int maxfd) {
 
     for (ch = child_get(NULL); ch; ch = child_get(ch)) {
       if (ch->ch_pipefd != -1) {
-	FD_SET(ch->ch_pipefd, rfd);
-	if (ch->ch_pipefd > maxfd)
-	  maxfd = ch->ch_pipefd;
+        FD_SET(ch->ch_pipefd, rfd);
+        if (ch->ch_pipefd > maxfd)
+          maxfd = ch->ch_pipefd;
       }
     }
   }
@@ -152,19 +163,17 @@ static int semaphore_fds(fd_set *rfd, int maxfd) {
   return maxfd;
 }
 
-void session_set_idle(void) {
-  pr_scoreboard_update_entry(getpid(),
-    PR_SCORE_BEGIN_IDLE, time(NULL),
-    PR_SCORE_CMD, "%s", "idle", NULL, NULL);
-
-  pr_scoreboard_update_entry(getpid(),
-    PR_SCORE_CMD_ARG, "%s", "", NULL, NULL);
-
-  pr_proctitle_set("%s - %s: IDLE", session.user, session.proc_prefix);
-}
-
 void set_auth_check(int (*chk)(cmd_rec*)) {
   cmd_auth_chk = chk;
+}
+
+void pr_cmd_set_handler(void (*handler)(server_rec *, conn_t *)) {
+  if (handler == NULL) {
+    cmd_handler = cmd_loop;
+
+  } else {
+    cmd_handler = handler;
+  }
 }
 
 static void end_login_noexit(void) {
@@ -175,32 +184,34 @@ static void end_login_noexit(void) {
     /* For standalone daemons, we only clear the scoreboard slot if we are
      * an exiting child process.
      */
-    if (!is_master &&
-        pr_scoreboard_del_entry(TRUE) < 0 &&
-        errno != EINVAL)
-      pr_log_debug(DEBUG1, "error deleting scoreboard entry: %s",
-        strerror(errno));
+
+    if (!is_master) {
+      if (pr_scoreboard_entry_del(TRUE) < 0 &&
+          errno != EINVAL &&
+          errno != ENOENT) {
+        pr_log_debug(DEBUG1, "error deleting scoreboard entry: %s",
+          strerror(errno));
+      }
+    }
 
   } else if (ServerType == SERVER_INETD) {
     /* For inetd-spawned daemons, we always clear the scoreboard slot. */
-    if (pr_scoreboard_del_entry(TRUE) < 0 &&
-        errno != EINVAL)
+    if (pr_scoreboard_entry_del(TRUE) < 0 &&
+        errno != EINVAL &&
+        errno != ENOENT) {
       pr_log_debug(DEBUG1, "error deleting scoreboard entry: %s",
         strerror(errno));
+    }
   }
 
-  /* If session.user is set, we have a valid login */
-  if (session.user) {
-#if (defined(BSD) && (BSD >= 199103))
-    snprintf(sbuf, sizeof(sbuf), "ftp%ld",(long)getpid());
-#else
-    snprintf(sbuf, sizeof(sbuf), "ftpd%d",(int)getpid());
-#endif
-    sbuf[sizeof(sbuf) - 1] = '\0';
+  /* If session.user is set, we have a valid login. */
+  if (session.user &&
+      session.wtmp_log) {
+    const char *sess_ttyname;
 
-    if (session.wtmp_log)
-      log_wtmp(sbuf, "", pr_netaddr_get_sess_remote_name(),
-        pr_netaddr_get_sess_remote_addr());
+    sess_ttyname = pr_session_get_ttyname(session.pool);
+    log_wtmp(sess_ttyname, "", pr_netaddr_get_sess_remote_name(),
+      pr_netaddr_get_sess_remote_addr());
   }
 
   /* These are necessary in order that cleanups associated with these pools
@@ -221,7 +232,8 @@ static void end_login_noexit(void) {
 
   if (!is_master ||
       (ServerType == SERVER_INETD && !syntax_check)) {
-    pr_log_pri(PR_LOG_INFO, "FTP session closed.");
+    pr_log_pri(PR_LOG_INFO, "%s session closed.",
+      pr_session_get_protocol(PR_SESS_PROTO_FL_LOGOUT));
   }
 
   log_closesyslog();
@@ -243,7 +255,15 @@ void end_login(int exitcode) {
   }
 #endif /* PR_USE_DEVEL */
 
+#ifdef PR_DEVEL_PROFILE
+  /* Populating the gmon.out gprof file requires that the process exit
+   * via exit(2) or by returning from main().  Using _exit(2) doesn't allow
+   * the process the time to write its profile data out.
+   */
+  exit(exitcode);
+#else
   _exit(exitcode);
+#endif /* PR_DEVEL_PROFILE */
 }
 
 void session_exit(int pri, void *lv, int exitval, void *dummy) {
@@ -288,10 +308,12 @@ static void shutdown_exit(void *d1, void *d2, void *d3, void *d4) {
     }
 
     time(&now);
-    if (authenticated && *authenticated == TRUE)
-      user = get_param_ptr(main_server->conf, C_USER, FALSE);
-    else
+    if (authenticated && *authenticated == TRUE) {
+      user = pr_table_get(session.notes, "mod_auth.orig-user", NULL);
+
+    } else {
       user = "NONE";
+    }
 
     msg = sreplace(permanent_pool, shutmsg,
                    "%s", pstrdup(permanent_pool, pr_strtime(shut)),
@@ -357,6 +379,8 @@ static int _dispatch(cmd_rec *cmd, int cmd_type, int validate, char *match) {
   c = pr_stash_get_symbol(PR_SYM_CMD, match, NULL, index_cache);
 
   while (c && !success) {
+    pr_signals_handle();
+
     session.curr_cmd = cmd->argv[0];
     session.curr_phase = cmd_type;
 
@@ -364,12 +388,21 @@ static int _dispatch(cmd_rec *cmd, int cmd_type, int validate, char *match) {
       if (c->group)
         cmd->group = pstrdup(cmd->pool, c->group);
 
-      if (c->requires_auth && cmd_auth_chk && !cmd_auth_chk(cmd))
+      if (c->requires_auth &&
+          cmd_auth_chk &&
+          !cmd_auth_chk(cmd)) {
+        pr_trace_msg("command", 8,
+          "command '%s' failed 'requires_auth' check for mod_%s.c",
+          cmd->argv[0], c->m->name);
         return -1;
+      }
 
-      cmd->tmp_pool = make_sub_pool(cmd->pool);
+      if (cmd->tmp_pool == NULL) {
+        cmd->tmp_pool = make_sub_pool(cmd->pool);
+        pr_pool_tag(cmd->tmp_pool, "cmd_rec tmp pool");
+      }
 
-      cmdargstr = make_arg_str(cmd->tmp_pool, cmd->argc, cmd->argv);
+      cmdargstr = pr_cmd_get_displayable_str(cmd);
 
       if (cmd_type == CMD) {
 
@@ -377,19 +410,20 @@ static int _dispatch(cmd_rec *cmd, int cmd_type, int validate, char *match) {
         if (session.user) {
           char *args = strchr(cmdargstr, ' ');
 
-          pr_scoreboard_update_entry(getpid(),
+          pr_scoreboard_entry_update(session.pid,
             PR_SCORE_CMD, "%s", cmd->argv[0], NULL, NULL);
-          pr_scoreboard_update_entry(getpid(),
-            PR_SCORE_CMD_ARG, "%s", args ? (args+1) : "", NULL, NULL);
+          pr_scoreboard_entry_update(session.pid,
+            PR_SCORE_CMD_ARG, "%s", args ? (args + 1) : "", NULL, NULL);
 
           pr_proctitle_set("%s - %s: %s", session.user, session.proc_prefix,
             cmdargstr);
 
         /* ...else the client has not yet authenticated */
-        } else
+        } else {
           pr_proctitle_set("%s:%d: %s", session.c->remote_addr ?
             pr_netaddr_get_ipstr(session.c->remote_addr) : "?",
             session.c->remote_port ? session.c->remote_port : 0, cmdargstr);
+        }
       }
 
       pr_log_debug(DEBUG4, "dispatching %s command '%s' to mod_%s",
@@ -421,13 +455,13 @@ static int _dispatch(cmd_rec *cmd, int cmd_type, int validate, char *match) {
 
       if (!c->group || strcmp(c->group, G_WRITE) != 0)
         kludge_disable_umask();
-      mr = call_module(c->m, c->handler, cmd);
+      mr = pr_module_call(c->m, c->handler, cmd);
       kludge_enable_umask();
 
-      if (MODRET_ISHANDLED(mr))
+      if (MODRET_ISHANDLED(mr)) {
         success = 1;
 
-      else if (MODRET_ISERROR(mr)) {
+      } else if (MODRET_ISERROR(mr)) {
         if (cmd_type == POST_CMD ||
             cmd_type == LOG_CMD ||
             cmd_type == LOG_CMD_ERR) {
@@ -435,24 +469,31 @@ static int _dispatch(cmd_rec *cmd, int cmd_type, int validate, char *match) {
             pr_log_pri(PR_LOG_NOTICE, "%s", MODRET_ERRMSG(mr));
 
         } else if (send_error) {
-          if (MODRET_ERRNUM(mr) && MODRET_ERRMSG(mr))
+          if (MODRET_ERRNUM(mr) &&
+              MODRET_ERRMSG(mr)) {
             pr_response_add_err(MODRET_ERRNUM(mr), "%s", MODRET_ERRMSG(mr));
 
-          else if (MODRET_ERRMSG(mr))
+          } else if (MODRET_ERRMSG(mr)) {
             pr_response_send_raw("%s", MODRET_ERRMSG(mr));
+          }
         }
 
         success = -1;
       }
 
-      if (session.user && !(session.sf_flags & SF_XFER) && cmd_type == CMD)
-        session_set_idle();
+      if (session.user &&
+          !(session.sf_flags & SF_XFER) &&
+          cmd_type == CMD) {
+        pr_session_set_idle();
+      }
 
       destroy_pool(cmd->tmp_pool);
+      cmd->tmp_pool = NULL;
     }
 
-    if (!success)
+    if (!success) {
       c = pr_stash_get_symbol(PR_SYM_CMD, match, c, index_cache);
+    }
   }
 
   if (!c &&
@@ -481,14 +522,163 @@ static int _dispatch(cmd_rec *cmd, int cmd_type, int validate, char *match) {
   return success;
 }
 
-int pr_cmd_dispatch(cmd_rec *cmd) {
+/* Returns the appropriate maximum buffer length to use for FTP commands
+ * from the client, taking the CommandBufferSize directive into account.
+ */
+static long get_max_cmd_len(size_t buflen) {
+  long res;
+  int *bufsz = NULL;
+  size_t default_cmd_bufsz;
+
+  /* It's possible for the admin to select a PR_TUNABLE_BUFFER_SIZE which
+   * is smaller than PR_DEFAULT_CMD_BUFSZ.  We need to handle such cases
+   * properly.
+   */
+  default_cmd_bufsz = PR_DEFAULT_CMD_BUFSZ;
+  if (default_cmd_bufsz > buflen) {
+    default_cmd_bufsz = buflen;
+  }
+ 
+  bufsz = get_param_ptr(main_server->conf, "CommandBufferSize", FALSE);
+  if (bufsz == NULL) {
+    res = default_cmd_bufsz;
+
+  } else if (*bufsz <= 0) {
+    pr_log_pri(PR_LOG_WARNING, "invalid CommandBufferSize size (%d) given, "
+      "using default buffer size (%lu) instead", *bufsz,
+      (unsigned long) default_cmd_bufsz);
+    res = default_cmd_bufsz;
+
+  } else if (*bufsz + 1 > buflen) {
+    pr_log_pri(PR_LOG_WARNING, "invalid CommandBufferSize size (%d) given, "
+      "using default buffer size (%lu) instead", *bufsz,
+      (unsigned long) default_cmd_bufsz);
+    res = default_cmd_bufsz;
+
+  } else {
+    pr_log_debug(DEBUG1, "setting CommandBufferSize to %d", *bufsz);
+    res = (long) *bufsz;
+  }
+
+  return res;
+}
+
+int pr_cmd_read(cmd_rec **res) {
+  static long cmd_bufsz = -1;
+  char buf[PR_DEFAULT_CMD_BUFSZ+1] = {'\0'};
+  char *cp;
+  size_t buflen;
+
+  if (res == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  while (TRUE) {
+    pr_signals_handle();
+
+    memset(buf, '\0', sizeof(buf));
+
+    if (pr_netio_telnet_gets(buf, sizeof(buf)-1, session.c->instrm,
+        session.c->outstrm) == NULL) {
+
+      if (errno == E2BIG) {
+        /* The client sent a too-long command which was ignored; give
+         * them another chance?
+         */
+        continue;
+      }
+
+      if (session.c->instrm->strm_errno == 0) {
+        pr_trace_msg("command", 6,
+          "client sent EOF, closing control connection");
+      }
+
+      return -1;
+    }
+
+    break;
+  }
+
+  if (cmd_bufsz == -1)
+    cmd_bufsz = get_max_cmd_len(sizeof(buf));
+
+  /* This strlen(3) is guaranteed to terminate; the last byte of buf is
+   * always NUL, since pr_netio_telnet_gets() is told that the buf size is
+   * one byte less than it really is.
+   *
+   * If the strlen(3) says that the length is less than the cmd_bufsz, then
+   * there is no need to truncate the buffer by inserting a NUL.
+   */
+  buflen = strlen(buf);
+  if (buflen > (cmd_bufsz - 1)) {
+    pr_log_debug(DEBUG0, "truncating incoming command length (%lu bytes) to "
+      "CommandBufferSize %lu; use the CommandBufferSize directive to increase "
+      "the allowed command length", (unsigned long) buflen,
+      (unsigned long) cmd_bufsz);
+    buf[cmd_bufsz - 1] = '\0';
+  }
+
+  if (buflen &&
+      (buf[buflen-1] == '\n' || buf[buflen-1] == '\r')) {
+    buf[buflen-1] = '\0';
+    buflen--;
+
+    if (buflen &&
+        (buf[buflen-1] == '\n' || buf[buflen-1] =='\r'))
+      buf[buflen-1] = '\0';
+  }
+
+  cp = buf;
+  if (*cp == '\r')
+    cp++;
+
+  if (*cp) {
+    int flags = 0;
+    cmd_rec *cmd;
+
+    /* If this is a SITE command, preserve embedded whitespace in the
+     * command parameters, in order to handle file names that have multiple
+     * spaces in the names.  Arguably this should be handled in the SITE
+     * command handlers themselves, via cmd->arg.  This small hack
+     * reduces the burden on SITE module developers, however.
+     */
+    if (strncasecmp(cp, C_SITE, 4) == 0)
+      flags |= PR_STR_FL_PRESERVE_WHITESPACE;
+
+    cmd = make_ftp_cmd(session.pool, cp, flags);
+
+    if (cmd) {
+      *res = cmd;
+    } 
+  }
+
+  return 0;
+}
+
+int pr_cmd_dispatch_phase(cmd_rec *cmd, int phase, int flags) {
   char *cp = NULL;
   int success = 0;
+  pool *resp_pool = NULL;
 
   cmd->server = main_server;
-  resp_list = resp_err_list = NULL;
 
-  /* Set the pool used for the response lists for this command. */
+  if (flags & PR_CMD_DISPATCH_FL_CLEAR_RESPONSE) {
+    resp_list = resp_err_list = NULL;
+  }
+
+  /* Get any previous pool that may be being used by the Response API.
+   *
+   * In most cases, this will be NULL.  However, if proftpd is in the
+   * midst of a data transfer when a command comes in on the control
+   * connection, then the pool in use will be that of the data transfer
+   * instigating command.  We want to stash that pool, so that after this
+   * command is dispatched, we can return the pool of the old command.
+   * Otherwise, Bad Things (segfaults) happen.
+   */
+  resp_pool = pr_response_get_pool();
+
+  /* Set the pool used by the Response API for this command. */
   pr_response_set_pool(cmd->pool);
 
   for (cp = cmd->argv[0]; *cp; cp++)
@@ -497,56 +687,103 @@ int pr_cmd_dispatch(cmd_rec *cmd) {
   if (!cmd->class)
     cmd->class = get_command_class(cmd->argv[0]);
 
-  /* First, dispatch to wildcard PRE_CMD handlers. */
-  success = _dispatch(cmd, PRE_CMD, FALSE, C_ANY);
+  if (phase == 0) {
+        
+    /* First, dispatch to wildcard PRE_CMD handlers. */
+    success = _dispatch(cmd, PRE_CMD, FALSE, C_ANY);
 
-  if (!success)	/* run other pre_cmd */
-    success = _dispatch(cmd, PRE_CMD, FALSE, NULL);
+    if (!success)	/* run other pre_cmd */
+      success = _dispatch(cmd, PRE_CMD, FALSE, NULL);
 
-  if (success < 0) {
+    if (success < 0) {
 
-    /* Dispatch to POST_CMD_ERR handlers as well. */
+      /* Dispatch to POST_CMD_ERR handlers as well. */
 
-    _dispatch(cmd, POST_CMD_ERR, FALSE, C_ANY);
-    _dispatch(cmd, POST_CMD_ERR, FALSE, NULL);
+      _dispatch(cmd, POST_CMD_ERR, FALSE, C_ANY);
+      _dispatch(cmd, POST_CMD_ERR, FALSE, NULL);
 
-    _dispatch(cmd, LOG_CMD_ERR, FALSE, C_ANY);
-    _dispatch(cmd, LOG_CMD_ERR, FALSE, NULL);
+      _dispatch(cmd, LOG_CMD_ERR, FALSE, C_ANY);
+      _dispatch(cmd, LOG_CMD_ERR, FALSE, NULL);
 
-    pr_response_flush(&resp_err_list);
-    return success;
+      pr_response_flush(&resp_err_list);
+      return success;
+    }
+
+    success = _dispatch(cmd, CMD, FALSE, C_ANY);
+
+    if (!success)
+      success = _dispatch(cmd, CMD, TRUE, NULL);
+
+    if (success == 1) {
+      success = _dispatch(cmd, POST_CMD, FALSE, C_ANY);
+      if (!success)
+        success = _dispatch(cmd, POST_CMD, FALSE, NULL);
+
+      _dispatch(cmd, LOG_CMD, FALSE, C_ANY);
+      _dispatch(cmd, LOG_CMD, FALSE, NULL);
+
+      pr_response_flush(&resp_list);
+
+    } else if (success < 0) {
+
+      /* Allow for non-logging command handlers to be run if CMD fails. */
+
+      success = _dispatch(cmd, POST_CMD_ERR, FALSE, C_ANY);
+      if (!success)
+        success = _dispatch(cmd, POST_CMD_ERR, FALSE, NULL);
+
+      _dispatch(cmd, LOG_CMD_ERR, FALSE, C_ANY);
+      _dispatch(cmd, LOG_CMD_ERR, FALSE, NULL);
+
+      pr_response_flush(&resp_err_list);
+    }
+
+  } else {
+    switch (phase) {
+      case PRE_CMD:
+      case POST_CMD:
+      case POST_CMD_ERR:
+        success = _dispatch(cmd, phase, FALSE, C_ANY);
+        if (!success)
+          success = _dispatch(cmd, phase, FALSE, NULL);
+        break;
+
+      case CMD:
+        success = _dispatch(cmd, phase, FALSE, C_ANY);
+        if (!success)
+          success = _dispatch(cmd, phase, TRUE, NULL);
+        break;
+
+      case LOG_CMD:
+      case LOG_CMD_ERR:
+        (void) _dispatch(cmd, phase, FALSE, C_ANY);
+        (void) _dispatch(cmd, phase, FALSE, NULL);
+        break;
+
+      default:
+        errno = EINVAL;
+        return -1;
+    }
+
+    if (flags & PR_CMD_DISPATCH_FL_SEND_RESPONSE) {
+      if (success == 1) {
+        pr_response_flush(&resp_list);
+
+      } else if (success < 0) {
+        pr_response_flush(&resp_err_list);
+      }
+    }
   }
 
-  success = _dispatch(cmd, CMD, FALSE, C_ANY);
-
-  if (!success)
-    success = _dispatch(cmd, CMD, TRUE, NULL);
-
-  if (success == 1) {
-    success = _dispatch(cmd, POST_CMD, FALSE, C_ANY);
-    if (!success)
-      success = _dispatch(cmd, POST_CMD, FALSE, NULL);
-
-    _dispatch(cmd, LOG_CMD, FALSE, C_ANY);
-    _dispatch(cmd, LOG_CMD, FALSE, NULL);
-
-    pr_response_flush(&resp_list);
-
-  } else if (success < 0) {
-
-    /* Allow for non-logging command handlers to be run if CMD fails. */
-
-    success = _dispatch(cmd, POST_CMD_ERR, FALSE, C_ANY);
-    if (!success)
-      success = _dispatch(cmd, POST_CMD_ERR, FALSE, NULL);
-
-    _dispatch(cmd, LOG_CMD_ERR, FALSE, C_ANY);
-    _dispatch(cmd, LOG_CMD_ERR, FALSE, NULL);
-
-    pr_response_flush(&resp_err_list);
-  }
+  /* Restore any previous pool to the Response API. */
+  pr_response_set_pool(resp_pool);
 
   return success;
+}
+
+int pr_cmd_dispatch(cmd_rec *cmd) {
+  return pr_cmd_dispatch_phase(cmd, 0,
+    PR_CMD_DISPATCH_FL_SEND_RESPONSE|PR_CMD_DISPATCH_FL_CLEAR_RESPONSE);
 }
 
 static cmd_rec *make_ftp_cmd(pool *p, char *buf, int flags) {
@@ -594,92 +831,83 @@ static cmd_rec *make_ftp_cmd(pool *p, char *buf, int flags) {
   return cmd;
 }
 
-static int idle_timeout_cb(CALLBACK_FRAME) {
-  /* We don't want to quit in the middle of a transfer */
-  if (session.sf_flags & SF_XFER) {
-
-    /* Restart the timer. */
-    return 1;
-  }
-
-  pr_event_generate("core.timeout-idle", NULL);
-
-  pr_response_send_async(R_421,
-    _("Idle timeout (%d seconds): closing control connection"), TimeoutIdle);
-  session_exit(PR_LOG_INFO, "FTP session idle timeout, disconnected", 0, NULL);
-
-  pr_timer_remove(TIMER_LOGIN, ANY_MODULE);
-  pr_timer_remove(TIMER_NOXFER, ANY_MODULE);
-  return 0;
-}
-
-static void cmd_loop(server_rec *server, conn_t *c) {
-  static long cmd_buf_size = -1;
-  config_rec *id = NULL;
-  char buf[PR_TUNABLE_BUFFER_SIZE] = {'\0'};
-  char *cp;
+static void send_session_banner(server_rec *server) {
+  config_rec *c = NULL;
   char *display = NULL;
   const char *serveraddress = NULL;
-  config_rec *masq_c = NULL;
-  int i;
-
-  serveraddress = pr_netaddr_get_ipstr(c->local_addr);
-
-  pr_proctitle_set("connected: %s (%s:%d)",
-    c->remote_name ? c->remote_name : "?",
-    c->remote_addr ? pr_netaddr_get_ipstr(c->remote_addr) : "?",
-    c->remote_port ? c->remote_port : 0);
-
-  /* Make sure we can receive OOB data */
-  pr_inet_set_async(session.pool, session.c);
-
-  /* Setup the main idle timer */
-  if (TimeoutIdle)
-    pr_timer_add(TimeoutIdle, TIMER_IDLE, NULL, idle_timeout_cb);
-
-  if ((masq_c = find_config(server->conf, CONF_PARAM, "MasqueradeAddress",
-      FALSE)) != NULL) {
-    pr_netaddr_t *masq_addr = (pr_netaddr_t *) masq_c->argv[0];
-    serveraddress = pr_netaddr_get_ipstr(masq_addr);
-  }
+  config_rec *masq = NULL;
 
   display = get_param_ptr(server->conf, "DisplayConnect", FALSE);
   if (display != NULL) {
-    if (pr_display_file(display, NULL, R_220) < 0)
+    if (pr_display_file(display, NULL, R_220, PR_DISPLAY_FL_NO_EOM) < 0) {
       pr_log_debug(DEBUG6, "unable to display DisplayConnect file '%s': %s",
         display, strerror(errno));
+    }
   }
 
-  if ((id = find_config(server->conf, CONF_PARAM, "ServerIdent",
-      FALSE)) == NULL || *((unsigned char *) id->argv[0]) == FALSE) {
+  serveraddress = pr_netaddr_get_ipstr(session.c->local_addr);
+
+  masq = find_config(server->conf, CONF_PARAM, "MasqueradeAddress", FALSE);
+  if (masq != NULL) {
+    pr_netaddr_t *masq_addr = (pr_netaddr_t *) masq->argv[0];
+    serveraddress = pr_netaddr_get_ipstr(masq_addr);
+  }
+
+  c = find_config(server->conf, CONF_PARAM, "ServerIdent", FALSE);
+  if (c == NULL ||
+      *((unsigned char *) c->argv[0]) == FALSE) {
     unsigned char *defer_welcome = get_param_ptr(main_server->conf,
       "DeferWelcome", FALSE);
 
-    if (id && id->argc > 1)
-      pr_response_send(R_220, "%s", (char *) id->argv[1]);
+    if (c &&
+        c->argc > 1) {
+      char *server_ident = c->argv[1];
 
-    else if (defer_welcome && *defer_welcome == TRUE)
+      if (strstr(server_ident, "%L") != NULL) {
+        server_ident = sreplace(session.pool, server_ident, "%L",
+          pr_netaddr_get_ipstr(session.c->local_addr), NULL);
+      }
+
+      if (strstr(server_ident, "%V") != NULL) {
+        server_ident = sreplace(session.pool, server_ident, "%V",
+          main_server->ServerFQDN, NULL);
+      }
+
+      if (strstr(server_ident, "%v") != NULL) {
+        server_ident = sreplace(session.pool, server_ident, "%v",
+          main_server->ServerName, NULL);
+      }
+
+      pr_response_send(R_220, "%s", server_ident);
+
+    } else if (defer_welcome &&
+               *defer_welcome == TRUE) {
       pr_response_send(R_220, "ProFTPD " PROFTPD_VERSION_TEXT
         " Server ready.");
 
-    else
+    } else {
       pr_response_send(R_220, "ProFTPD " PROFTPD_VERSION_TEXT
         " Server (%s) [%s]", server->ServerName, serveraddress);
+    }
 
-  } else
+  } else {
     pr_response_send(R_220, _("%s FTP server ready"), serveraddress);
+  }
+}
 
-  pr_log_pri(PR_LOG_INFO, "FTP session opened.");
+static void cmd_loop(server_rec *server, conn_t *c) {
 
   while (TRUE) {
+    int res = 0; 
+    cmd_rec *cmd = NULL;
+
     pr_signals_handle();
 
-    if (pr_netio_telnet_gets(buf, sizeof(buf)-1, session.c->instrm,
-        session.c->outstrm) == NULL) {
-
+    res = pr_cmd_read(&cmd);
+    if (res < 0) {
       if (PR_NETIO_ERRNO(session.c->instrm) == EINTR)
         /* Simple interrupted syscall */
-	continue;
+        continue;
 
 #ifndef PR_DEVEL_NO_DAEMON
       /* Otherwise, EOF */
@@ -690,71 +918,19 @@ static void cmd_loop(server_rec *server, conn_t *c) {
     }
 
     /* Data received, reset idle timer */
-    if (TimeoutIdle)
-      pr_timer_reset(TIMER_IDLE, NULL);
-
-    if (cmd_buf_size == -1) {
-      int *bufsz = get_param_ptr(main_server->conf, "CommandBufferSize", FALSE);
-      if (bufsz == NULL) {
-        cmd_buf_size = PR_DEFAULT_CMD_BUFSZ;
-
-      } else if (*bufsz <= 0) {
-        pr_log_pri(PR_LOG_WARNING, "invalid CommandBufferSize size (%d) "
-          "given, using default buffer size (%u) instead",
-          *bufsz, PR_DEFAULT_CMD_BUFSZ);
-        cmd_buf_size = PR_DEFAULT_CMD_BUFSZ;
-
-      } else if (*bufsz + 1 > sizeof(buf)) {
-        pr_log_pri(PR_LOG_WARNING, "invalid CommandBufferSize size (%d) "
-          "given, using default buffer size (%u) instead",
-          *bufsz, PR_DEFAULT_CMD_BUFSZ);
-        cmd_buf_size = PR_DEFAULT_CMD_BUFSZ;
-
-      } else {
-        pr_log_debug(DEBUG1, "setting CommandBufferSize to %d", *bufsz);
-        cmd_buf_size = (long) *bufsz;
-      }
+    if (pr_data_get_timeout(PR_DATA_TIMEOUT_IDLE) > 0) {
+      pr_timer_reset(PR_TIMER_IDLE, ANY_MODULE);
     }
 
-    buf[cmd_buf_size - 1] = '\0';
-    i = strlen(buf);
+    if (cmd) {
+      pr_cmd_dispatch(cmd);
+      destroy_pool(cmd->pool);
 
-    if (i && (buf[i-1] == '\n' || buf[i-1] == '\r')) {
-      buf[i-1] = '\0';
-      i--;
-
-      if (i && (buf[i-1] == '\n' || buf[i-1] =='\r'))
-        buf[i-1] = '\0';
+    } else {
+      pr_response_send(R_500, _("Invalid command: try being more creative"));
     }
 
-    cp = buf;
-    if (*cp == '\r')
-      cp++;
-
-    if (*cp) {
-      cmd_rec *cmd;
-      int flags = 0;
-
-      /* If this is a SITE command, preserve embedded whitespace in the
-       * command parameters, in order to handle file names that have multiple
-       * spaces in the names.  Arguably this should be handled in the SITE
-       * command handlers themselves, via cmd->arg.  This small hack
-       * reduces the burden on SITE module developers, however.
-       */
-      if (strncasecmp(cp, C_SITE, 4) == 0)
-        flags |= PR_STR_FL_PRESERVE_WHITESPACE;
-
-      cmd = make_ftp_cmd(session.pool, cp, flags);
-
-      if (cmd) {
-        pr_cmd_dispatch(cmd);
-        destroy_pool(cmd->pool);
-
-      } else
-	pr_response_send(R_500, _("Invalid command: try being more creative"));
-    }
-
-    /* release any working memory allocated in inet */
+    /* Release any working memory allocated in inet */
     pr_inet_clear();
   }
 }
@@ -801,20 +977,19 @@ static void core_restart_cb(void *d1, void *d2, void *d3, void *d4) {
 
     free_bindings();
 
-#ifdef PR_USE_NLS
-    utf8_free();
-#endif /* PR_USE_NLS */
-
     /* Run through the list of registered restart callbacks. */
     pr_event_generate("core.restart", NULL);
 
     init_log();
+    init_netaddr();
     init_class();
     init_config();
 
 #ifdef PR_USE_NLS
-    utf8_init();
+    encode_free();
 #endif /* PR_USE_NLS */
+
+    pr_netaddr_clear_cache();
 
     pr_parser_prepare(NULL, NULL);
 
@@ -827,11 +1002,16 @@ static void core_restart_cb(void *d1, void *d2, void *d3, void *d4) {
       end_login(1);
     }
     PRIVS_RELINQUISH
+
     if (pr_parser_cleanup() < 0) {
       pr_log_pri(PR_LOG_ERR, "Fatal: error processing configuration file '%s': "
        "unclosed configuration section", config_filename);
       end_login(1);
     }
+
+#ifdef PR_USE_NLS
+    encode_init();
+#endif /* PR_USE_NLS */
 
     /* After configuration is complete, make sure that passwd, group
      * aren't held open (unnecessary fds for master daemon)
@@ -842,8 +1022,11 @@ static void core_restart_cb(void *d1, void *d2, void *d3, void *d4) {
     /* Set the (possibly new) resource limits. */
     set_daemon_rlimits();
 
-    /* XXX What should be done if fixup_servers() returns -1? */
-    fixup_servers(server_list);
+    if (fixup_servers(server_list) < 0) {
+      pr_log_pri(PR_LOG_ERR, "Fatal: error processing configuration file '%s'",
+        config_filename);
+      end_login(1);
+    }
 
     pr_event_generate("core.postparse", NULL);
 
@@ -911,7 +1094,6 @@ static void set_server_privs(void) {
 
 static void fork_server(int fd, conn_t *l, unsigned char nofork) {
   conn_t *conn = NULL;
-  unsigned char *ident_lookups = NULL;
   int i, rev;
   int semfds[2] = { -1, -1 };
   int xerrno = 0;
@@ -992,6 +1174,8 @@ static void fork_server(int fd, conn_t *l, unsigned char nofork) {
     }
   }
 
+  session.pid = getpid();
+
   /* No longer need any listening fds. */
   pr_ipbind_close_listeners();
 
@@ -1014,7 +1198,7 @@ static void fork_server(int fd, conn_t *l, unsigned char nofork) {
    */
 
   /* Reseed pseudo-randoms */
-  srand(time(NULL));
+  srand((unsigned int) (time(NULL) * getpid()));
 
 #endif /* PR_DEVEL_NO_FORK */
 
@@ -1200,7 +1384,24 @@ static void fork_server(int fd, conn_t *l, unsigned char nofork) {
     main_server->listen = NULL;
   }
 
-  /* Check config tree for <Limit LOGIN> directives */
+  /* Set the ID/privs for the User/Group in this server */
+  set_server_privs();
+
+  /* Find the class for this session. */
+  session.class = pr_class_match_addr(session.c->remote_addr);
+  if (session.class != NULL) {
+    pr_log_debug(DEBUG2, "session requested from client in '%s' class",
+      session.class->cls_name);
+
+  } else {
+    pr_log_debug(DEBUG5, "session requested from client in unknown class");
+  }
+
+  /* Check config tree for <Limit LOGIN> directives.  Do not perform
+   * this check until after the class of the session has been determined,
+   * in order to properly handle any AllowClass/DenyClass directives
+   * within the <Limit> section.
+   */
   if (!login_check_limits(main_server->conf, TRUE, FALSE, &i)) {
     pr_log_pri(PR_LOG_NOTICE, "Connection from %s [%s] denied.",
       session.c->remote_name,
@@ -1208,53 +1409,43 @@ static void fork_server(int fd, conn_t *l, unsigned char nofork) {
     exit(0);
   }
 
-  /* Set the ID/privs for the User/Group in this server */
-  set_server_privs();
-
-  /* Find the class for this session. */
-  session.class = pr_class_match_addr(session.c->remote_addr);
-  if (session.class != NULL)
-    pr_log_debug(DEBUG2, "FTP session requested from class '%s'",
-      session.class->cls_name);
-
-  else
-    pr_log_debug(DEBUG5, "FTP session requested from unknown class");
-
   /* Create a table for modules to use. */
   session.notes = pr_table_alloc(session.pool, 0);
+  if (session.notes == NULL) {
+    pr_log_debug(DEBUG3, "error creating session.notes table: %s",
+      strerror(errno));
+  }
 
   /* Prepare the Timers API. */
   timers_init();
+
+  /* Set the per-child resource limits. */
+  set_session_rlimits();
 
   /* Inform all the modules that we are now a child */
   pr_log_debug(DEBUG7, "performing module session initializations");
   if (modules_session_init() < 0)
     end_login(1);
 
-  /* Use the ident protocol (RFC1413) to try to get remote ident_user */
-  ident_lookups = get_param_ptr(main_server->conf, "IdentLookups", FALSE);
-  if (ident_lookups == NULL ||
-      *ident_lookups == TRUE) {
-    pr_log_debug(DEBUG6, "performing ident lookup");
-    session.ident_lookups = TRUE;
-    session.ident_user = pr_ident_lookup(session.pool, conn);
-    pr_log_debug(DEBUG6, "ident lookup returned '%s'", session.ident_user);
-
-  } else {
-    pr_log_debug(DEBUG6, "ident lookup disabled");
-    session.ident_lookups = FALSE;
-    session.ident_user = "UNKNOWN";
-  }
-
   pr_log_debug(DEBUG4, "connected - local  : %s:%d",
     pr_netaddr_get_ipstr(session.c->local_addr), session.c->local_port);
   pr_log_debug(DEBUG4, "connected - remote : %s:%d",
     pr_netaddr_get_ipstr(session.c->remote_addr), session.c->remote_port);
 
-  /* Set the per-child resource limits. */
-  set_session_rlimits();
+  pr_proctitle_set("connected: %s (%s:%d)",
+    session.c->remote_name ? session.c->remote_name : "?",
+    session.c->remote_addr ? pr_netaddr_get_ipstr(session.c->remote_addr) : "?",
+    session.c->remote_port ? session.c->remote_port : 0);
 
-  cmd_loop(main_server, conn);
+  pr_log_pri(PR_LOG_INFO, "%s session opened.",
+    pr_session_get_protocol(PR_SESS_PROTO_FL_LOGOUT));
+
+  /* Make sure we can receive OOB data */
+  pr_inet_set_async(session.pool, session.c);
+
+  send_session_banner(main_server);
+
+  cmd_handler(main_server, conn);
 
 #ifdef PR_DEVEL_NO_DAEMON
   /* Cleanup */
@@ -1290,7 +1481,7 @@ static void daemon_loop(void) {
   fd_set listenfds;
   conn_t *listen_conn;
   int fd, maxfd;
-  int i, err_count = 0;
+  int i, err_count = 0, xerrno = 0;
   unsigned long nconnects = 0UL;
   time_t last_error;
   struct timeval tv;
@@ -1360,8 +1551,11 @@ static void daemon_loop(void) {
     running = 1;
 
     i = select(maxfd + 1, &listenfds, NULL, NULL, &tv);
+    if (i < 0) {
+      xerrno = errno;
+    }
 
-    if (i == -1 && errno == EINTR) {
+    if (i == -1 && xerrno == EINTR) {
       pr_signals_handle();
       continue;
     }
@@ -1398,7 +1592,7 @@ static void daemon_loop(void) {
       }
 
       pr_log_pri(PR_LOG_NOTICE, "select() failed in daemon_loop(): %s",
-        strerror(errno));
+        strerror(xerrno));
     }
 
     if (i == 0)
@@ -1431,6 +1625,10 @@ static void daemon_loop(void) {
 
     pr_signals_handle();
 
+    if (i < 0) {
+      continue;
+    }
+
     /* Accept the connection. */
     listen_conn = pr_ipbind_accept_conn(&listenfds, &fd);
 
@@ -1460,8 +1658,9 @@ static void daemon_loop(void) {
         close(fd);
 
       /* Fork off a child to handle the connection. */
-      } else
+      } else {
         fork_server(fd, listen_conn, FALSE);
+      }
     }
 #ifdef PR_DEVEL_NO_DAEMON
     /* Do not continue the while() loop here if not daemonizing. */
@@ -1476,18 +1675,20 @@ static void daemon_loop(void) {
  */
 
 void pr_signals_handle(void) {
+  table_handling_signal(TRUE);
 
   if (errno == EINTR &&
       PR_TUNABLE_EINTR_RETRY_INTERVAL > 0) {
-
     struct timeval tv;
+    unsigned long interval_usecs = PR_TUNABLE_EINTR_RETRY_INTERVAL * 1000000;
 
-    tv.tv_sec = PR_TUNABLE_EINTR_RETRY_INTERVAL;
-    tv.tv_usec = 0;
+    tv.tv_sec = (interval_usecs / 1000000);
+    tv.tv_usec = (interval_usecs - (tv.tv_sec * 1000000));
 
-    pr_log_debug(DEBUG10, "interrupted system call, delaying for %u sec%s",
-      PR_TUNABLE_EINTR_RETRY_INTERVAL,
-      PR_TUNABLE_EINTR_RETRY_INTERVAL != 1 ? "s" : "");
+    pr_trace_msg("signal", 8, "interrupted system call, "
+      "delaying for %lu %s, %lu %s",
+      (unsigned long) tv.tv_sec, tv.tv_sec != 1 ? "secs" : "sec",
+      (unsigned long) tv.tv_usec, tv.tv_usec != 1 ? "microsecs" : "microsec");
 
     pr_signals_block();
     (void) select(0, NULL, NULL, NULL, &tv);
@@ -1498,65 +1699,78 @@ void pr_signals_handle(void) {
 
     if (recvd_signal_flags & RECEIVED_SIG_ALRM) {
       recvd_signal_flags &= ~RECEIVED_SIG_ALRM;
+      pr_trace_msg("signal", 9, "handling SIGALRM (signal %d)", SIGALRM);
       handle_alarm();
     }
 
     if (recvd_signal_flags & RECEIVED_SIG_CHLD) {
       recvd_signal_flags &= ~RECEIVED_SIG_CHLD;
+      pr_trace_msg("signal", 9, "handling SIGCHLD (signal %d)", SIGCHLD);
       handle_chld();
     }
 
     if (recvd_signal_flags & RECEIVED_SIG_EVENT) {
       recvd_signal_flags &= ~RECEIVED_SIG_EVENT;
+
+      /* The "event" signal is SIGUSR2 in proftpd. */
+      pr_trace_msg("signal", 9, "handling SIGUSR2 (signal %d)", SIGUSR2);
       handle_evnt();
     }
 
     if (recvd_signal_flags & RECEIVED_SIG_SEGV) {
       recvd_signal_flags &= ~RECEIVED_SIG_SEGV;
+      pr_trace_msg("signal", 9, "handling SIGSEGV (signal %d)", SIGSEGV);
       handle_terminate_other();
     }
 
     if (recvd_signal_flags & RECEIVED_SIG_TERMINATE) {
       recvd_signal_flags &= ~RECEIVED_SIG_TERMINATE;
+      pr_trace_msg("signal", 9, "handling signal %d", term_signo);
       handle_terminate();
     }
 
     if (recvd_signal_flags & RECEIVED_SIG_TERM_OTHER) {
       recvd_signal_flags &= ~RECEIVED_SIG_TERM_OTHER;
+      pr_trace_msg("signal", 9, "handling signal %d", term_signo);
       handle_terminate_other();
     }
 
     if (recvd_signal_flags & RECEIVED_SIG_XCPU) {
       recvd_signal_flags &= ~RECEIVED_SIG_XCPU;
+      pr_trace_msg("signal", 9, "handling SIGXCPU (signal %d)", SIGXCPU);
       handle_xcpu();
     }
 
     if (recvd_signal_flags & RECEIVED_SIG_ABORT) {
-      recvd_signal_flags &= RECEIVED_SIG_ABORT;
+      recvd_signal_flags &= ~RECEIVED_SIG_ABORT;
+      pr_trace_msg("signal", 9, "handling SIGABRT (signal %d)", SIGABRT);
       handle_abort();
     }
 
     if (recvd_signal_flags & RECEIVED_SIG_RESTART) {
+      recvd_signal_flags &= ~RECEIVED_SIG_RESTART;
+      pr_trace_msg("signal", 9, "handling SIGHUP (signal %d)", SIGHUP);
 
       /* NOTE: should this be done here, rather than using a schedule? */
       schedule(core_restart_cb, 0, NULL, NULL, NULL, NULL);
-
-      recvd_signal_flags &= ~RECEIVED_SIG_RESTART;
     }
 
     if (recvd_signal_flags & RECEIVED_SIG_EXIT) {
-      session_exit(PR_LOG_NOTICE, "Parent process requested shutdown", 0, NULL);
       recvd_signal_flags &= ~RECEIVED_SIG_EXIT;
+      pr_trace_msg("signal", 9, "handling SIGUSR1 (signal %d)", SIGUSR1);
+      session_exit(PR_LOG_NOTICE, "Parent process requested shutdown", 0, NULL);
     }
 
     if (recvd_signal_flags & RECEIVED_SIG_SHUTDOWN) {
+      recvd_signal_flags &= ~RECEIVED_SIG_SHUTDOWN;
+      pr_trace_msg("signal", 9, "handling SIGUSR1 (signal %d)", SIGUSR1);
 
       /* NOTE: should this be done here, rather than using a schedule? */
       schedule(shutdown_exit, 0, NULL, NULL, NULL, NULL);
-
-      recvd_signal_flags &= ~RECEIVED_SIG_SHUTDOWN;
     }
   }
+
+  table_handling_signal(FALSE);
 }
 
 /* sig_restart occurs in the master daemon when manually "kill -HUP"
@@ -1645,19 +1859,18 @@ static char *prepare_core(void) {
 static RETSIGTYPE sig_abort(int signo) {
   recvd_signal_flags |= RECEIVED_SIG_ABORT;
   signal(SIGABRT, SIG_DFL);
-}
-
-static void handle_abort(void) {
 
 #ifdef PR_DEVEL_COREDUMP
   pr_log_pri(PR_LOG_NOTICE, "ProFTPD received SIGABRT signal, generating core "
     "file in %s", prepare_core());
-#else
-  pr_log_pri(PR_LOG_NOTICE, "ProFTPD received SIGABRT signal, no core dump");
-#endif /* PR_DEVEL_COREDUMP */
-
   end_login_noexit();
   abort();
+#endif /* PR_DEVEL_COREDUMP */
+}
+
+static void handle_abort(void) {
+  pr_log_pri(PR_LOG_NOTICE, "ProFTPD received SIGABRT signal, no core dump");
+  finish_terminate();
 }
 
 #ifdef PR_DEVEL_STACK_TRACE
@@ -1669,6 +1882,7 @@ static void handle_segv(int signo, siginfo_t *info, void *ptr) {
   size_t tracesz;
 
   /* Call the "normal" SIGSEGV handler. */
+  table_handling_signal(TRUE);
   sig_terminate(signo);
 
   pr_log_pri(PR_LOG_ERR, "-----BEGIN STACK TRACE-----");
@@ -1676,7 +1890,11 @@ static void handle_segv(int signo, siginfo_t *info, void *ptr) {
   tracesz = backtrace(trace, PR_TUNABLE_CALLER_DEPTH);
 
   /* Overwrite sigaction with caller's address */
+#if defined(REG_EIP)
   trace[1] = (void *) uc->uc_mcontext.gregs[REG_EIP];
+#elif defined(REG_RIP)
+  trace[1] = (void *) uc->uc_mcontext.gregs[REG_RIP];
+#endif
 
   strings = backtrace_symbols(trace, tracesz);
 
@@ -1693,18 +1911,27 @@ static void handle_segv(int signo, siginfo_t *info, void *ptr) {
 
 static RETSIGTYPE sig_terminate(int signo) {
 
-  if (signo == SIGSEGV) {
-    recvd_signal_flags |= RECEIVED_SIG_ABORT;
+  /* Make sure the scoreboard slot is properly cleared.  Note that this is
+   * possibly redundant, as it should already be handled properly in
+   * end_login_noexit().
+   */
+  pr_scoreboard_entry_del(FALSE);
 
-    /* Make sure the scoreboard slot is properly cleared. */
-    pr_scoreboard_del_entry(FALSE);
+  /* Capture the signal number for later display purposes. */
+  term_signo = signo;
+
+  if (signo == SIGSEGV) {
+    recvd_signal_flags |= RECEIVED_SIG_SEGV;
 
     /* This is probably not the safest thing to be doing, but since the
      * process is terminating anyway, why not?  It helps when knowing/logging
      * that a segfault happened...
      */
-    pr_log_pri(PR_LOG_NOTICE, "ProFTPD terminating (signal 11)");
-    pr_log_pri(PR_LOG_INFO, "FTP session closed.");
+    pr_trace_msg("signal", 9, "handling SIGSEGV (signal %d)", signo);
+    pr_log_pri(PR_LOG_NOTICE, "ProFTPD terminating (signal %d)", signo);
+
+    pr_log_pri(PR_LOG_INFO, "%s session closed.",
+      pr_session_get_protocol(PR_SESS_PROTO_FL_LOGOUT));
 
     /* Restore the default signal handler. */
 #ifdef PR_DEVEL_STACK_TRACE
@@ -1713,17 +1940,15 @@ static RETSIGTYPE sig_terminate(int signo) {
     signal(SIGSEGV, SIG_DFL);
 #endif /* PR_DEVEL_STACK_TRACE */
 
-  } else if (signo == SIGTERM)
+  } else if (signo == SIGTERM) {
     recvd_signal_flags |= RECEIVED_SIG_TERMINATE;
 
-  else if (signo == SIGXCPU)
+  } else if (signo == SIGXCPU) {
     recvd_signal_flags |= RECEIVED_SIG_XCPU;
 
-  else
+  } else {
     recvd_signal_flags |= RECEIVED_SIG_TERM_OTHER;
-
-  /* Capture the signal number for later display purposes. */
-  term_signo = signo;
+  }
 }
 
 static void handle_chld(void) {
@@ -1912,7 +2137,7 @@ void set_daemon_rlimits(void) {
   config_rec *c = NULL;
   struct rlimit rlim;
 
-  if (getrlimit(RLIMIT_CORE, &rlim) == -1)
+  if (getrlimit(RLIMIT_CORE, &rlim) < 0)
     pr_log_pri(PR_LOG_ERR, "error: getrlimit(RLIMIT_CORE): %s",
       strerror(errno));
 
@@ -1924,7 +2149,7 @@ void set_daemon_rlimits(void) {
 #endif /* PR_DEVEL_COREDUMP */
 
     PRIVS_ROOT
-    if (setrlimit(RLIMIT_CORE, &rlim) == -1) {
+    if (setrlimit(RLIMIT_CORE, &rlim) < 0) {
       PRIVS_RELINQUISH
       pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_CORE): %s",
         strerror(errno));
@@ -1943,7 +2168,7 @@ void set_daemon_rlimits(void) {
       struct rlimit *cpu_rlimit = (struct rlimit *) c->argv[0];
 
       PRIVS_ROOT
-      if (setrlimit(RLIMIT_CPU, cpu_rlimit) == -1) {
+      if (setrlimit(RLIMIT_CPU, cpu_rlimit) < 0) {
         PRIVS_RELINQUISH
         pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_CPU): %s",
           strerror(errno));
@@ -1960,29 +2185,29 @@ void set_daemon_rlimits(void) {
 
   c = find_config(main_server->conf, CONF_PARAM, "RLimitMemory", FALSE);
 
-#if defined(RLIMIT_AS) || defined(RLIMIT_DATA) || defined(RLIMIT_VMEM)
+#if defined(RLIMIT_DATA) || defined(RLIMIT_AS) || defined(RLIMIT_VMEM)
   while (c) {
     /* Does this limit apply to the daemon? */
     if (c->argv[1] == NULL || !strcmp(c->argv[1], "daemon")) {
       struct rlimit *memory_rlimit = (struct rlimit *) c->argv[0];
 
       PRIVS_ROOT
-#  if defined(RLIMIT_AS)
-      if (setrlimit(RLIMIT_AS, memory_rlimit) == -1) {
-        PRIVS_RELINQUISH
-        pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_AS): %s",
-          strerror(errno));
-        return;
-      }
-#  elif defined(RLIMIT_DATA)
-      if (setrlimit(RLIMIT_DATA, memory_rlimit) == -1) {
+#  if defined(RLIMIT_DATA)
+      if (setrlimit(RLIMIT_DATA, memory_rlimit) < 0) {
         PRIVS_RELINQUISH
         pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_DATA): %s",
           strerror(errno));
         return;
       }
+#  elif defined(RLIMIT_AS)
+      if (setrlimit(RLIMIT_AS, memory_rlimit) < 0) {
+        PRIVS_RELINQUISH
+        pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_AS): %s",
+          strerror(errno));
+        return;
+      }
 #  elif defined(RLIMIT_VMEM)
-      if (setrlimit(RLIMIT_VMEM, memory_rlimit) == -1) {
+      if (setrlimit(RLIMIT_VMEM, memory_rlimit) < 0) {
         PRIVS_RELINQUISH
         pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_VMEM): %s",
           strerror(errno));
@@ -1996,7 +2221,7 @@ void set_daemon_rlimits(void) {
 
     c = find_config_next(c, c->next, CONF_PARAM, "RLimitMemory", FALSE);
   }
-#endif /* no RLIMIT_AS || RLIMIT_DATA || RLIMIT_VMEM */
+#endif /* no RLIMIT_DATA || RLIMIT_AS || RLIMIT_VMEM */
 
   c = find_config(main_server->conf, CONF_PARAM, "RLimitOpenFiles", FALSE);
 
@@ -2008,14 +2233,14 @@ void set_daemon_rlimits(void) {
 
       PRIVS_ROOT
 #  if defined(RLIMIT_NOFILE)
-      if (setrlimit(RLIMIT_NOFILE, nofile_rlimit) == -1) {
+      if (setrlimit(RLIMIT_NOFILE, nofile_rlimit) < 0) {
         PRIVS_RELINQUISH
         pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_NOFILE): %s",
           strerror(errno));
         return;
       }
 #  elif defined(RLIMIT_OFILE)
-      if (setrlimit(RLIMIT_OFILE, nofile_rlimit) == -1) {
+      if (setrlimit(RLIMIT_OFILE, nofile_rlimit) < 0) {
         PRIVS_RELINQUISH
         pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_OFILE): %s",
           strerror(errno));
@@ -2045,7 +2270,7 @@ void set_session_rlimits(void) {
       struct rlimit *cpu_rlimit = (struct rlimit *) c->argv[0];
 
       PRIVS_ROOT
-      if (setrlimit(RLIMIT_CPU, cpu_rlimit) == -1) {
+      if (setrlimit(RLIMIT_CPU, cpu_rlimit) < 0) {
         PRIVS_RELINQUISH
         pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_CPU): %s",
           strerror(errno));
@@ -2062,29 +2287,29 @@ void set_session_rlimits(void) {
 
   c = find_config(main_server->conf, CONF_PARAM, "RLimitMemory", FALSE);
 
-#if defined(RLIMIT_AS) || defined(RLIMIT_DATA) || defined(RLIMIT_VMEM)
+#if defined(RLIMIT_DATA) || defined(RLIMIT_AS) || defined(RLIMIT_VMEM)
   while (c) {
     /* Does this limit apply to the session? */
     if (c->argv[1] == NULL || !strcmp(c->argv[1], "session")) {
       struct rlimit *memory_rlimit = (struct rlimit *) c->argv[0];
 
       PRIVS_ROOT
-#  if defined(RLIMIT_AS)
-      if (setrlimit(RLIMIT_AS, memory_rlimit) == -1) {
-        PRIVS_RELINQUISH
-        pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_AS): %s",
-          strerror(errno));
-        return;
-      }
-#  elif defined(RLIMIT_DATA)
-      if (setrlimit(RLIMIT_DATA, memory_rlimit) == -1) {
+#  if defined(RLIMIT_DATA)
+      if (setrlimit(RLIMIT_DATA, memory_rlimit) < 0) {
         PRIVS_RELINQUISH
         pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_DATA): %s",
           strerror(errno));
         return;
       }
+#  elif defined(RLIMIT_AS)
+      if (setrlimit(RLIMIT_AS, memory_rlimit) < 0) {
+        PRIVS_RELINQUISH
+        pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_AS): %s",
+          strerror(errno));
+        return;
+      }
 #  elif defined(RLIMIT_VMEM)
-      if (setrlimit(RLIMIT_VMEM, memory_rlimit) == -1) {
+      if (setrlimit(RLIMIT_VMEM, memory_rlimit) < 0) {
         PRIVS_RELINQUISH
         pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_VMEM): %s",
           strerror(errno));
@@ -2098,7 +2323,7 @@ void set_session_rlimits(void) {
 
     c = find_config_next(c, c->next, CONF_PARAM, "RLimitMemory", FALSE);
   }
-#endif /* no RLIMIT_AS || RLIMIT_DATA || RLIMIT_VMEM */
+#endif /* no RLIMIT_DATA || RLIMIT_AS || RLIMIT_VMEM */
 
   c = find_config(main_server->conf, CONF_PARAM, "RLimitOpenFiles", FALSE);
 
@@ -2110,14 +2335,14 @@ void set_session_rlimits(void) {
 
       PRIVS_ROOT
 #  if defined(RLIMIT_NOFILE)
-      if (setrlimit(RLIMIT_NOFILE, nofile_rlimit) == -1) {
+      if (setrlimit(RLIMIT_NOFILE, nofile_rlimit) < 0) {
         PRIVS_RELINQUISH
         pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_NOFILE): %s",
           strerror(errno));
         return;
       }
 #  elif defined(RLIMIT_OFILE)
-      if (setrlimit(RLIMIT_OFILE, nofile_rlimit) == -1) {
+      if (setrlimit(RLIMIT_OFILE, nofile_rlimit) < 0) {
         PRIVS_RELINQUISH
         pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_OFILE): %s",
           strerror(errno));
@@ -2187,6 +2412,12 @@ static void daemonize(void) {
 # endif
 #endif
 
+  /* Reset the cached "master PID" value to that of the daemon process;
+   * there are places in the code which check this value to see if they
+   * are the daemon process, e.g. at shutdown.
+   */
+  mpid = getpid();
+
   pr_fsio_chdir("/", 0);
 }
 
@@ -2252,8 +2483,6 @@ static void standalone_main(void) {
     daemonize();
   }
 
-  mpid = getpid();
-
   PRIVS_ROOT
   pr_delete_scoreboard();
   if ((res = pr_open_scoreboard(O_RDWR)) < 0) {
@@ -2295,7 +2524,7 @@ static void standalone_main(void) {
 }
 
 extern char *optarg;
-extern int optind,opterr,optopt;
+extern int optind, opterr, optopt;
 
 #ifdef HAVE_GETOPT_LONG
 static struct option opts[] = {
@@ -2319,9 +2548,31 @@ static struct option opts[] = {
 #endif /* HAVE_GETOPT_LONG */
 
 static void show_settings(void) {
+#ifdef HAVE_UNAME
+  int res;
+  struct utsname uts;
+#endif /* !HAVE_UNAME */
+
   printf("Compile-time Settings:\n");
-  printf("  Version: " PROFTPD_VERSION_TEXT "\n");
-  printf("  Platform: " PR_PLATFORM "\n");
+  printf("  Version: " PROFTPD_VERSION_TEXT " " PR_STATUS "\n");
+
+#ifdef HAVE_UNAME
+  /* We use uname(2) to get the 'machine', which will tell us whether
+   * we're a 32- or 64-bit machine.
+   */
+  res = uname(&uts);
+  if (res == 0) {
+    printf("  Platform: " PR_PLATFORM " [%s %s %s]\n", uts.sysname,
+      uts.release, uts.machine);
+
+  } else {
+    printf("  Platform: " PR_PLATFORM " [unavailable]\n");
+  }
+#else
+  printf("  Platform: " PR_PLATFORM " [unknown]\n");
+#endif /* !HAVE_UNAME */
+
+  printf("  Built: " BUILD_STAMP "\n");
   printf("  Built With:\n    configure " PR_BUILD_OPTS "\n\n");
 
   printf("  CFLAGS: " PR_BUILD_CFLAGS "\n");
@@ -2336,6 +2587,8 @@ static void show_settings(void) {
   printf("    Scoreboard File:\n");
   printf("      " PR_RUN_DIR "/proftpd.scoreboard\n");
 #ifdef PR_USE_DSO
+  printf("    Header Directory:\n");
+  printf("      " PR_INCLUDE_DIR "/proftpd\n");
   printf("    Shared Module Directory:\n");
   printf("      " PR_LIBEXEC_DIR "\n");
 #endif /* PR_USE_DSO */
@@ -2354,11 +2607,11 @@ static void show_settings(void) {
   printf("    - Controls support\n");
 #endif /* PR_USE_CTRLS */
 
-#ifdef PR_USE_CURSES
+#if defined(PR_USE_CURSES) && defined(HAVE_LIBCURSES)
   printf("    + curses support\n");
 #else
   printf("    - curses support\n");
-#endif /* PR_USE_CURSES */
+#endif /* PR_USE_CURSES && HAVE_LIBCURSES */
 
 #ifdef PR_USE_DEVEL
   printf("    + Developer support\n");
@@ -2390,11 +2643,13 @@ static void show_settings(void) {
   printf("    - Lastlog support\n");
 #endif /* PR_USE_LASTLOG */
 
-#ifdef PR_USE_NCURSES
+#if defined(PR_USE_NCURSESW) && defined(HAVE_LIBNCURSESW)
+  printf("    + ncursesw support\n");
+#elif defined(PR_USE_NCURSES) && defined(HAVE_LIBNCURSES)
   printf("    + ncurses support\n");
 #else
   printf("    - ncurses support\n");
-#endif /* PR_USE_NCURSES */
+#endif
 
 #ifdef PR_USE_NLS
   printf("    + NLS support\n");
@@ -2435,60 +2690,77 @@ static void show_settings(void) {
   /* Tunable settings */
   printf("\n  Tunable Options:\n");
   printf("    PR_TUNABLE_BUFFER_SIZE = %u\n", PR_TUNABLE_BUFFER_SIZE);
-  printf("    PR_TUNABLE_GLOBBING_MAX = %u\n", PR_TUNABLE_GLOBBING_MAX);
+  printf("    PR_TUNABLE_GLOBBING_MAX_MATCHES = %lu\n", PR_TUNABLE_GLOBBING_MAX_MATCHES);
+  printf("    PR_TUNABLE_GLOBBING_MAX_RECURSION = %u\n", PR_TUNABLE_GLOBBING_MAX_RECURSION);
   printf("    PR_TUNABLE_HASH_TABLE_SIZE = %u\n", PR_TUNABLE_HASH_TABLE_SIZE);
   printf("    PR_TUNABLE_NEW_POOL_SIZE = %u\n", PR_TUNABLE_NEW_POOL_SIZE);
-  printf("    PR_TUNABLE_RCVBUFSZ = %u\n", PR_TUNABLE_RCVBUFSZ);
   printf("    PR_TUNABLE_SCOREBOARD_BUFFER_SIZE = %u\n",
     PR_TUNABLE_SCOREBOARD_BUFFER_SIZE);
   printf("    PR_TUNABLE_SCOREBOARD_SCRUB_TIMER = %u\n",
     PR_TUNABLE_SCOREBOARD_SCRUB_TIMER);
   printf("    PR_TUNABLE_SELECT_TIMEOUT = %u\n", PR_TUNABLE_SELECT_TIMEOUT);
-  printf("    PR_TUNABLE_SNDBUFSZ = %u\n", PR_TUNABLE_SNDBUFSZ);
   printf("    PR_TUNABLE_TIMEOUTIDENT = %u\n", PR_TUNABLE_TIMEOUTIDENT);
   printf("    PR_TUNABLE_TIMEOUTIDLE = %u\n", PR_TUNABLE_TIMEOUTIDLE);
   printf("    PR_TUNABLE_TIMEOUTLINGER = %u\n", PR_TUNABLE_TIMEOUTLINGER);
   printf("    PR_TUNABLE_TIMEOUTLOGIN = %u\n", PR_TUNABLE_TIMEOUTLOGIN);
   printf("    PR_TUNABLE_TIMEOUTNOXFER = %u\n", PR_TUNABLE_TIMEOUTNOXFER);
   printf("    PR_TUNABLE_TIMEOUTSTALLED = %u\n", PR_TUNABLE_TIMEOUTSTALLED);
-  printf("    PR_TUNABLE_XFER_BUFFER_SIZE = %u\n", PR_TUNABLE_XFER_BUFFER_SIZE);
   printf("    PR_TUNABLE_XFER_SCOREBOARD_UPDATES = %u\n\n",
     PR_TUNABLE_XFER_SCOREBOARD_UPDATES);
 }
 
 static struct option_help {
-  const char *long_opt,*short_opt,*desc;
+  const char *long_opt, *short_opt, *desc;
+
 } opts_help[] = {
   { "--help", "-h",
     "Display proftpd usage"},
+
   { "--nocollision", "-N",
     "Disable address/port collision checking" },
+
   { "--nodaemon", "-n",
     "Disable background daemon mode (and send all output to stderr)" },
+
   { "--quiet", "-q",
     "Don't send output to stderr when running with -n or --nodaemon" },
+
   { "--debug", "-d [level]",
     "Set debugging level (0-10, 10 = most debugging)" },
+
   { "--define", "-D [definition]",
     "Set arbitrary IfDefine definition" },
+
   { "--config", "-c [config-file]",
     "Specify alternate configuration file" },
+
   { "--persistent", "-p [0|1]",
     "Enable/disable default persistent passwd support" },
+
   { "--list", "-l",
     "List all compiled-in modules" },
+
+  { "--serveraddr", "-S",
+    "Specify IP address for server config" },
+
   { "--configtest", "-t",
     "Test the syntax of the specified config" },
+
   { "--settings", "-V",
     "Print compile-time settings and exit" },
+
   { "--version", "-v",
     "Print version number and exit" },
+
   { "--version-status", "-vv",
     "Print extended version information and exit" },
+
   { "--ipv4", "-4",
     "Support IPv4 connections only" },
+
   { "--ipv6", "-6",
     "Support IPv6 connections" },
+
   { NULL, NULL, NULL }
 };
 
@@ -2510,39 +2782,10 @@ static void show_usage(int exit_code) {
 
 int main(int argc, char *argv[], char **envp) {
   int optc, show_version = 0;
-  const char *cmdopts = "D:NVc:d:hlnp:qtv46";
+  const char *cmdopts = "D:NVc:d:hlnp:qS:tv46";
   mode_t *main_umask = NULL;
   socklen_t peerlen;
   struct sockaddr peer;
-
-#ifdef DEBUG_MEMORY
-  int logfd;
-  extern int EF_PROTECT_BELOW;
-  extern int EF_PROTECT_FREE;
-  extern int EF_ALIGNMENT;
-
-  EF_PROTECT_BELOW = 1;/* */
-  EF_PROTECT_FREE = 1; /* */
-  EF_ALIGNMENT = 0; /* */
-
-  /* Redirect stderr to somewhere appropriate.
-   * Ideally, this would be syslog, but alas...
-   */
-  if ((logfd = open(PR_RUN_DIR "/proftpd-memory.log",
-		   O_WRONLY | O_CREAT | O_APPEND, 0644))< 0) {
-	pr_log_pri(PR_LOG_ERR, "Error opening error logfile: %s",
-          strerror(errno));
-	exit(1);
-  }
-
-  close(fileno(stderr));
-  if (dup2(logfd, fileno(stderr)) == -1) {
-	pr_log_pri(PR_LOG_ERR,
-          "Error converting standard error to a logfile: %s", strerror(errno));
-	exit(1);
-  }
-  close(logfd);
-#endif /* DEBUG_MEMORY */
 
 #ifdef HAVE_SET_AUTH_PARAMETERS
   (void) set_auth_parameters(argc, argv);
@@ -2559,7 +2802,7 @@ int main(int argc, char *argv[], char **envp) {
   pr_proctitle_init(argc, argv, envp);
 
   /* Seed rand */
-  srand(time(NULL));
+  srand((unsigned int) (time(NULL) * getpid()));
 
   /* getpeername() fails if the fd isn't a socket */
   peerlen = sizeof(peer);
@@ -2589,6 +2832,8 @@ int main(int argc, char *argv[], char **envp) {
    * --nocollision
    * -n                 standalone server does not daemonize, all logging
    * --nodaemon         redirected to stderr
+   * -S                 specify the IP address for the 'server config',
+   * --serveraddr       rather than using DNS on the hostname
    * -t                 syntax check of the configuration file
    * --configtest
    * -v                 report version number
@@ -2615,7 +2860,7 @@ int main(int argc, char *argv[], char **envp) {
         exit(1);
       }
 
-      pr_define_add(optarg);
+      pr_define_add(optarg, TRUE);
       break;
 
     case 'V':
@@ -2629,6 +2874,9 @@ int main(int argc, char *argv[], char **envp) {
 
     case 'n':
       nodaemon++;
+#ifdef PR_USE_DEVEL
+      pr_pool_debug_set_flags(PR_POOL_DEBUG_FL_OOM_DUMP_POOLS);
+#endif
       break;
 
     case 'q':
@@ -2657,8 +2905,23 @@ int main(int argc, char *argv[], char **envp) {
       break;
 
     case 'l':
-      modules_list();
+      modules_list(PR_MODULES_LIST_FL_SHOW_STATIC);
       exit(0);
+      break;
+
+    case 'S':
+      if (!optarg) {
+        pr_log_pri(PR_LOG_ERR,
+          "Fatal: -S requires IP address parameter.");
+        exit(1);
+      }
+
+      if (pr_netaddr_set_localaddr_str(optarg) < 0) {
+        pr_log_pri(PR_LOG_ERR,
+          "Fatal: unable to use '%s' as server address: %s", optarg,
+          strerror(errno));
+        exit(1);
+      }
       break;
 
     case 't':
@@ -2687,16 +2950,20 @@ int main(int argc, char *argv[], char **envp) {
 
     case 'h':
       show_usage(0);
+      break;
 
     case 4:
       pr_netaddr_disable_ipv6();
+      break;
 
     case 6:
       pr_netaddr_enable_ipv6();
+      break;
 
     case '?':
       pr_log_pri(PR_LOG_ERR, "unknown option: %c", (char)optopt);
       show_usage(1);
+      break;
     }
   }
 
@@ -2706,37 +2973,16 @@ int main(int argc, char *argv[], char **envp) {
     exit(1);
   }
 
-  if (show_version) {
-    if (show_version == 1)
-      pr_log_pri(PR_LOG_NOTICE, "ProFTPD Version " PROFTPD_VERSION_TEXT);
-
-    else {
-      register unsigned int i;
-
-      pr_log_pri(PR_LOG_NOTICE, "ProFTPD Version: %s",
-        PROFTPD_VERSION_TEXT " " PR_STATUS);
-      pr_log_pri(PR_LOG_NOTICE, "  Scoreboard Version: %08x",
-        PR_SCOREBOARD_VERSION);
-      pr_log_pri(PR_LOG_NOTICE, "  Built: %s", BUILD_STAMP);
-
-      for (i = 0; static_modules[i]; i++) {
-        char buf[256];
-        char *desc = static_modules[i]->module_version;
-
-        if (!desc) {
-          memset(buf, '\0', sizeof(buf));
-          snprintf(buf, sizeof(buf), "mod_%s.c", static_modules[i]->name);
-          buf[sizeof(buf)-1] = '\0';
-
-          desc = buf;
-        }
-
-        pr_log_pri(PR_LOG_NOTICE, "    Module: %s", desc);
-      }
-    }
-
+  if (show_version &&
+      show_version == 1) {
+    printf("ProFTPD Version " PROFTPD_VERSION_TEXT "\n");
     exit(0);
   }
+
+  mpid = getpid();
+
+  /* Install signal handlers */
+  install_signal_handlers();
 
   /* Initialize sub-systems */
   init_pools();
@@ -2744,6 +2990,7 @@ int main(int argc, char *argv[], char **envp) {
   init_log();
   init_inet();
   init_netio();
+  init_netaddr();
   init_fs();
   init_class();
   free_bindings();
@@ -2754,12 +3001,32 @@ int main(int argc, char *argv[], char **envp) {
   init_ctrls();
 #endif /* PR_USE_CTRLS */
 
-#ifdef PR_USE_NLS
-  utf8_init();
-#endif /* PR_USE_NLS */
-
   var_init();
   modules_init();
+
+#ifdef PR_USE_NLS
+# ifdef HAVE_LOCALE_H
+  /* Initialize the locale based on environment variables. */
+  if (setlocale(LC_ALL, "") == NULL) {
+    const char *env_lang;
+
+    env_lang = pr_env_get(permanent_pool, "LANG");
+    pr_log_pri(PR_LOG_WARNING, "warning: unknown/unsupported LANG environment "
+      "variable '%s', ignoring", env_lang);
+
+    setlocale(LC_ALL, "C");
+
+  } else {
+    /* Make sure that LC_NUMERIC is always set to "C", so as not to interfere
+     * with formatting of strings (like printing out floats in SQL query
+     * strings).
+     */
+    setlocale(LC_NUMERIC, "C");
+  }
+# endif /* !HAVE_LOCALE_H */
+
+ encode_init();
+#endif /* PR_USE_NLS */
 
   /* Now, once the modules have had a chance to initialize themselves
    * but before the configuration stream is actually parsed, check
@@ -2793,6 +3060,17 @@ int main(int argc, char *argv[], char **envp) {
   }
 
   pr_event_generate("core.postparse", NULL);
+
+  if (show_version &&
+      show_version == 2) {
+
+    printf("ProFTPD Version: %s", PROFTPD_VERSION_TEXT " " PR_STATUS "\n");
+    printf("  Scoreboard Version: %08x\n", PR_SCOREBOARD_VERSION); 
+    printf("  Built: %s\n\n", BUILD_STAMP);
+
+    modules_list(PR_MODULES_LIST_FL_SHOW_VERSION);
+    exit(0);
+  }
 
   /* We're only doing a syntax check of the configuration file. */
   if (syntax_check) {
@@ -2866,9 +3144,6 @@ int main(int argc, char *argv[], char **envp) {
   }
 #endif /* PR_DEVEL_COREDUMP */
 
-  /* Install signal handlers */
-  install_signal_handlers();
-
 #ifndef PR_DEVEL_NO_DAEMON
   set_daemon_rlimits();
 #endif /* PR_DEVEL_NO_DAEMON */
@@ -2879,6 +3154,10 @@ int main(int argc, char *argv[], char **envp) {
       break;
 
     case SERVER_INETD:
+      /* Reset the variable containing the pid of the master/daemon process;
+       * it should only be non-zero in the case of standalone daemons.
+       */
+      mpid = 0;
       inetd_main();
       break;
   }

@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2001-2006 The ProFTPD Project team
+ * Copyright (c) 2001-2009 The ProFTPD Project team
  *  
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,12 +24,27 @@
 
 /* Controls API routines
  *
- * $Id: ctrls.c,v 1.16 2006/12/16 01:13:52 castaglia Exp $
+ * $Id: ctrls.c,v 1.23 2009/03/10 16:59:23 castaglia Exp $
  */
 
 #include "conf.h"
+#include "privs.h"
+
+#ifdef HAVE_UCRED_H
+# include <ucred.h>
+#endif /* !HAVE_UCRED_H */
+
+#ifdef HAVE_SYS_UCRED_H
+# include <sys/ucred.h>
+#endif /* !HAVE_SYS_UCRED_H */
+
+#ifdef HAVE_SYS_UIO_H
+# include <sys/uio.h>
+#endif /* !HAVE_SYS_UIO_H */
 
 #ifdef PR_USE_CTRLS
+
+#include "mod_ctrls.h"
 
 typedef struct ctrls_act_obj {
   struct ctrls_act_obj *prev, *next;
@@ -58,6 +73,9 @@ static const char *trace_channel = "ctrls";
 static ctrls_action_t *action_lookup_next = NULL;
 static const char *action_lookup_action = NULL;
 static module *action_lookup_module = NULL;
+
+/* Logging */
+static int ctrls_logfd = -1;
 
 /* necessary prototypes */
 static ctrls_action_t *ctrls_action_new(void);
@@ -255,7 +273,7 @@ int pr_ctrls_register(const module *mod, const char *action,
 
   act->next = NULL;
   act->id = act_id;
-  act->action = action;
+  act->action = pstrdup(ctrls_pool, action);
   act->desc = desc;
   act->module = mod;
   act->action_cb = cb;
@@ -889,6 +907,36 @@ int pr_set_registered_actions(module *mod, const char *action,
   return 0;
 }
 
+#if !defined(SO_PEERCRED) && !defined(HAVE_GETPEEREID) && \
+    !defined(HAVE_GETPEERUCRED) && defined(LOCAL_CREDS)
+static int ctrls_connect_local_creds(int sockfd) {
+  char buf[1] = {'\0'};
+  int res;
+
+  /* The backend doesn't care what we send here, but it wants
+   * exactly one character to force recvmsg() to block and wait
+   * for us.
+   */
+
+  res = write(sockfd, buf, 1);
+  while (res < 0) {
+    if (errno == EINTR) {
+      pr_signals_handle();
+
+      res = write(sockfd, buf, 1);
+      continue;
+    }
+
+    pr_trace_msg(trace_channel, 5,
+      "error writing credentials byte for LOCAL_CREDS to fd %d: %s", sockfd,
+      strerror(errno));
+    return -1;
+  }
+
+  return res;
+}
+#endif /* !SCM_CREDS */
+
 int pr_ctrls_connect(const char *socket_file) {
   int sockfd = -1, len = 0;
   struct sockaddr_un cl_sock, ctrl_sock;
@@ -914,7 +962,8 @@ int pr_ctrls_connect(const char *socket_file) {
    */
 
   cl_sock.sun_family = AF_UNIX;
-  sprintf(cl_sock.sun_path, "%s%05u", "/tmp/ftp.cl", (unsigned int) getpid());
+  snprintf(cl_sock.sun_path, sizeof(cl_sock.sun_path) - 1, "%s%05u",
+    "/tmp/ftp.cl", (unsigned int) getpid());
   len = sizeof(cl_sock);
 
   /* Make sure the file doesn't already exist */
@@ -947,6 +996,15 @@ int pr_ctrls_connect(const char *socket_file) {
     return -1;
   }
 
+#if !defined(SO_PEERCRED) && !defined(HAVE_GETPEEREID) && \
+    !defined(HAVE_GETPEERUCRED) && defined(LOCAL_CREDS)
+  if (ctrls_connect_local_creds(sockfd) < 0) {
+    unlink(cl_sock.sun_path);
+    pr_signals_unblock();
+    return -1;
+  }
+#endif /* LOCAL_CREDS */
+
   pr_signals_unblock();
   return sockfd;
 }
@@ -969,6 +1027,351 @@ int pr_ctrls_issock_unix(mode_t sock_mode) {
 
   errno = ENOSYS;
   return -1;
+}
+
+#if defined(SO_PEERCRED)
+static int ctrls_get_creds_peercred(int sockfd, uid_t *uid, gid_t *gid,
+    pid_t *pid) {
+  struct ucred cred;
+  socklen_t credlen = sizeof(cred);
+
+  if (getsockopt(sockfd, SOL_SOCKET, SO_PEERCRED, &cred, &credlen) < 0) {
+    pr_trace_msg(trace_channel, 2,
+      "error obtaining peer credentials using SO_PEERCRED: %s",
+      strerror(errno));
+    errno = EPERM;
+    return -1;
+  }
+
+  if (uid)
+    *uid = cred.uid;
+
+  if (gid)
+    *gid = cred.gid;
+
+  if (pid)
+    *pid = cred.pid;
+
+  return 0;
+}
+#endif /* SO_PEERCRED */
+
+#if !defined(SO_PEERCRED) && defined(HAVE_GETPEEREID)
+static int ctrls_get_creds_peereid(int sockfd, uid_t *uid, gid_t *gid) {
+  if (getpeereid(sockfd, uid, gid) < 0) {
+    pr_trace_msg(trace_channel, 7, "error obtaining credentials using "
+      "getpeereid(2) on fd %d: %s", sockfd, strerror(errno));
+    return -1;
+  }
+
+  return 0;
+}
+#endif /* !HAVE_GETPEEREID */
+
+#if !defined(SO_PEERCRED) && !defined(HAVE_GETPEEREID) && \
+    defined(HAVE_GETPEERUCRED)
+static int ctrls_get_creds_peerucred(int sockfd, uid_t *uid, gid_t *gid) {
+  ucred_t *cred = NULL;
+
+  if (getpeerucred(sockfd, &cred) < 0) {
+    pr_trace_msg(trace_channel, 7, "error obtaining credentials using "
+      "getpeerucred(3) on fd %d: %s", sockfd, strerror(errno));
+    return -1;
+  }
+
+  if (uid)
+    *uid = ucred_getruid(cred);
+
+  if (gid)
+    *gid = ucred_getrgid(cred);
+
+  ucred_free(cred);
+  return 0;
+}
+#endif /* !HAVE_GETPEERUCRED */
+
+#if !defined(SO_PEERCRED) && !defined(HAVE_GETPEEREID) && \
+    !defined(HAVE_GETPEERUCRED) && defined(LOCAL_CREDS)
+static int ctrls_get_creds_local(int sockfd, uid_t *uid, gid_t *gid,
+    pid_t *pid) {
+  int res;
+  char buf[1];
+  struct iovec iov;
+  struct msghdr msg;
+
+# if defined(SOCKCREDSIZE)
+#  define MINCREDSIZE		(sizeof(struct cmsghdr) + SOCKCREDSIZE(0))
+# else
+#  if defined(HAVE_STRUCT_CMSGCRED)
+#   define MINCREDSIZE		(sizeof(struct cmsghdr) + sizeof(struct cmsgcred))
+#  elif defined(HAVE_STRUCT_SOCKCRED)
+#   define MINCREDSIZE		(sizeof(struct cmsghdr) + sizeof(struct sockcred))
+#  endif
+# endif /* !SOCKCREDSIZE */
+
+  char control[MINCREDSIZE];
+
+  iov.iov_base = buf;
+  iov.iov_len = 1;
+
+  memset(&msg, 0, sizeof(msg));
+  msg.msg_iov = &iov;
+  msg.msg_iovlen = 1;
+  msg.msg_control = control;
+  msg.msg_controllen = sizeof(control);
+  msg.msg_flags = 0;
+
+  res = recvmsg(sockfd, &msg, 0);
+  while (res < 0) {
+    if (errno == EINTR) {
+      pr_signals_handle();
+
+      res = recvmsg(sockfd, &msg, 0);
+      continue;
+    }
+
+    pr_trace_msg(trace_channel, 6,
+      "error calling recvmsg() on fd %d: %s", sockfd, strerror(errno));
+    return -1;
+  }
+
+  if (msg.msg_controllen > 0) {
+#if defined(HAVE_STRUCT_CMSGCRED)
+    struct cmsgcred cred;
+#elif defined(HAVE_STRUCT_SOCKCRED)
+    struct sockcred cred;
+#endif /* !CMSGCRED and !SOCKCRED */
+
+    struct cmsghdr *hdr = (struct cmsghdr *) control;
+
+    if (hdr->cmsg_level != SOL_SOCKET) {
+      pr_trace_msg(trace_channel, 5,
+        "message received via recvmsg() on fd %d was not a SOL_SOCKET message",
+        sockfd);
+
+      errno = EINVAL;
+      return -1;
+    }
+
+    if (hdr->cmsg_len < MINCREDSIZE) {
+      pr_trace_msg(trace_channel, 5,
+        "message received via recvmsg() on fd %d was not of proper "
+        "length (%u bytes)", sockfd, MINCREDSIZE);
+
+      errno = EINVAL;
+      return -1;
+    }
+
+    if (hdr->cmsg_type != SCM_CREDS) {
+      pr_trace_msg(trace_channel, 5,
+        "message received via recvmsg() on fd %d was not of type SCM_CREDS",
+        sockfd);
+
+      errno = EINVAL;
+      return -1;
+    }
+
+#if defined(HAVE_STRUCT_CMSGCRED)
+    memcpy(&cred, CMSG_DATA(hdr), sizeof(struct cmsgcred));
+
+    if (uid)
+      *uid = cred.cmcred_uid;
+
+    if (gid)
+      *gid = cred.cmcred_gid;
+
+    if (pid)
+      *pid = cred.cmcred_pid;
+
+#elif defined(HAVE_STRUCT_SOCKCRED)
+    memcpy(&cred, CMSG_DATA(hdr), sizeof(struct sockcred));
+
+    if (uid)
+      *uid = cred.sc_uid;
+
+    if (gid)
+      *gid = cred.sc_gid;
+#endif
+
+    return 0;
+  }
+
+  return -1;
+}
+#endif /* !SCM_CREDS */
+
+static int ctrls_get_creds_basic(struct sockaddr_un *sock, int cl_fd,
+    unsigned int max_age, uid_t *uid, gid_t *gid, pid_t *pid) {
+  pid_t cl_pid = 0;
+  char *tmp = NULL;
+  time_t stale_time;
+  struct stat st;
+
+  /* Check the path -- hmmm... */
+  PRIVS_ROOT
+  while (stat(sock->sun_path, &st) < 0) {
+    if (errno == EINTR) {
+      pr_signals_handle();
+      continue;
+    }
+
+    PRIVS_RELINQUISH
+    pr_trace_msg(trace_channel, 2, "error: unable to stat %s: %s",
+      sock->sun_path, strerror(errno));
+    (void) close(cl_fd);
+    return -1;
+  }
+  PRIVS_RELINQUISH
+
+  /* Is it a socket? */
+  if (pr_ctrls_issock_unix(st.st_mode) < 0) {
+    (void) close(cl_fd);
+    errno = ENOTSOCK;
+    return -1;
+  }
+
+  /* Are the perms _not_ rwx------? */
+  if (st.st_mode & (S_IRWXG|S_IRWXO) ||
+      ((st.st_mode & S_IRWXU) != PR_CTRLS_CL_MODE)) {
+    pr_trace_msg(trace_channel, 3,
+      "error: unable to accept connection: incorrect mode");
+    (void) close(cl_fd);
+    errno = EPERM;
+    return -1;
+  }
+
+  /* Is it new enough? */
+  stale_time = time(NULL) - max_age;
+
+  if (st.st_atime < stale_time ||
+      st.st_ctime < stale_time ||
+      st.st_mtime < stale_time) {
+    char *msg = "error: stale connection";
+
+    pr_trace_msg(trace_channel, 3,
+      "unable to accept connection: stale connection");
+
+    /* Log the times being compared, to aid in debugging this situation. */
+    if (st.st_atime < stale_time) {
+      time_t age = stale_time - st.st_atime;
+
+      pr_trace_msg(trace_channel, 3,
+         "last access time of '%s' is %lu secs old (must be less than %u secs)",
+         sock->sun_path, (unsigned long) age, max_age);
+    }
+
+    if (st.st_ctime < stale_time) {
+      time_t age = stale_time - st.st_ctime;
+
+      pr_trace_msg(trace_channel, 3,
+         "last change time of '%s' is %lu secs old (must be less than %u secs)",
+         sock->sun_path, (unsigned long) age, max_age);
+    }
+
+    if (st.st_mtime < stale_time) {
+      time_t age = stale_time - st.st_mtime;
+
+      pr_trace_msg(trace_channel, 3,
+         "last modified time of '%s' is %lu secs old (must be less than %u "
+         "secs)", sock->sun_path, (unsigned long) age, max_age);
+    }
+
+    if (pr_ctrls_send_msg(cl_fd, -1, 1, &msg) < 0)
+      pr_trace_msg(trace_channel, 2, "error sending message: %s",
+        strerror(errno));
+
+    close(cl_fd);
+    cl_fd = -1;
+
+    errno = ETIMEDOUT;
+    return -1;
+  }
+
+  /* Parse the PID out of the path */
+  tmp = sock->sun_path;
+  tmp += strlen("/tmp/ftp.cl");
+  cl_pid = atol(tmp);
+
+  /* Return the IDs of the caller */
+  if (uid)
+    *uid = st.st_uid;
+
+  if (gid)
+    *gid = st.st_gid;
+
+  if (pid)
+    *pid = cl_pid;
+
+  return 0;
+}
+
+int pr_ctrls_accept(int sockfd, uid_t *uid, gid_t *gid, pid_t *pid,
+    unsigned int max_age) {
+  socklen_t len = 0;
+  struct sockaddr_un sock;
+  int cl_fd = -1;
+  int res = -1;
+
+  len = sizeof(sock);
+
+  while ((cl_fd = accept(sockfd, (struct sockaddr *) &sock, &len)) < 0) {
+    if (errno == EINTR) {
+      pr_signals_handle();
+      continue;
+    }
+
+    pr_trace_msg(trace_channel, 3,
+      "error: unable to accept on local socket: %s", strerror(errno));
+    return -1;
+  }
+
+  len -= sizeof(sock.sun_family);
+
+  /* NULL terminate the name */
+  sock.sun_path[len] = '\0';
+
+#if defined(SO_PEERCRED)
+  pr_trace_msg(trace_channel, 5,
+    "checking client credentials using SO_PEERCRED");
+  res = ctrls_get_creds_peercred(cl_fd, uid, gid, pid);
+
+#elif !defined(SO_PEERCRED) && defined(HAVE_GETPEEREID)
+  pr_trace_msg(trace_channel, 5,
+    "checking client credentials using getpeereid(2)");
+  res = ctrls_get_creds_peereid(cl_fd, uid, gid);
+
+#elif !defined(SO_PEERCRED) && !defined(HAVE_GETPEEREID) && \
+      defined(HAVE_GETPEERUCRED)
+  pr_trace_msg(trace_channel, 5,
+    "checking client credentials using getpeerucred(3)");
+  res = ctrls_get_creds_peerucred(cl_fd, uid, gid);
+
+#elif !defined(SO_PEERCRED) && !defined(HAVE_GETPEEREID) && \
+      !defined(HAVE_GETPEERUCRED) && defined(LOCAL_CREDS)
+  pr_trace_msg(trace_channel, 5,
+    "checking client credentials using SCM_CREDS");
+  res = ctrls_get_creds_local(cl_fd, uid, gid, pid);
+
+#endif
+
+  /* Fallback to the Stevens method of determining connection credentials,
+   * if the kernel-enforced methods did not pan out.
+   */
+  if (res < 0) {
+    pr_trace_msg(trace_channel, 5,
+      "checking client credentials using Stevens' method");
+    res = ctrls_get_creds_basic(&sock, cl_fd, max_age, uid, gid, pid);
+
+    if (res < 0)
+      return res;
+  }
+
+  /* Done with the path now */
+  PRIVS_ROOT
+  unlink(sock.sun_path);
+  PRIVS_RELINQUISH
+
+  return cl_fd;
 }
 
 void pr_block_ctrls(void) {
@@ -1102,6 +1505,404 @@ int pr_reset_ctrls(void) {
   return 0;
 }
 
+/* From include/mod_ctrls.h */
+
+/* Returns TRUE if the given cl_gid is allowed by the group ACL, FALSE
+ * otherwise. Note that the default is to deny everyone, unless an ACL has
+ * been configured.
+ */
+unsigned char pr_ctrls_check_group_acl(gid_t cl_gid,
+    const ctrls_grp_acl_t *grp_acl) {
+  register int i = 0;
+  unsigned char res = FALSE;
+
+  /* Note: the special condition of ngids of 1 and gids of NULL signals
+   * that all groups are to be treated according to the allow member.
+   */
+  if (grp_acl->gids) {
+    for (i = 0; i < grp_acl->ngids; i++) {
+      if ((grp_acl->gids)[i] == cl_gid) {
+        res = TRUE;
+      }
+    }
+
+  } else if (grp_acl->ngids == 1)
+    res = TRUE;
+
+  if (!grp_acl->allow)
+    res = !res;
+
+  return res;
+}
+
+/* Returns TRUE if the given cl_uid is allowed by the user ACL, FALSE
+ * otherwise. Note that the default is to deny everyone, unless an ACL has
+ * been configured.
+ */
+unsigned char pr_ctrls_check_user_acl(uid_t cl_uid,
+    const ctrls_usr_acl_t *usr_acl) {
+  register int i = 0;
+  unsigned char res = FALSE;
+
+  /* Note: the special condition of nuids of 1 and uids of NULL signals
+   * that all users are to be treated according to the allow member.
+   */
+  if (usr_acl->uids) {
+    for (i = 0; i < usr_acl->nuids; i++) {
+      if ((usr_acl->uids)[i] == cl_uid) {
+        res = TRUE;
+      }
+    }
+
+  } else if (usr_acl->nuids == 1)
+    res = TRUE;
+
+  if (!usr_acl->allow)
+    res = !res;
+
+  return res;
+}
+
+/* Returns TRUE for allowed, FALSE for denied. */
+unsigned char pr_ctrls_check_acl(const pr_ctrls_t *ctrl,
+    const ctrls_acttab_t *acttab, const char *action) {
+  register unsigned int i = 0;
+
+  for (i = 0; acttab[i].act_action; i++) {
+    if (strcmp(acttab[i].act_action, action) == 0) {
+
+      if (!pr_ctrls_check_user_acl(ctrl->ctrls_cl->cl_uid,
+            &(acttab[i].act_acl->acl_usrs)) &&
+          !pr_ctrls_check_group_acl(ctrl->ctrls_cl->cl_gid,
+            &(acttab[i].act_acl->acl_grps))) {
+
+        /* Access denied */
+        return FALSE;
+      }
+    }
+  }
+
+  return TRUE;
+}
+
+void pr_ctrls_init_acl(ctrls_acl_t *acl) {
+
+  /* Sanity check */
+  if (!acl)
+    return;
+
+  memset(acl, 0, sizeof(ctrls_acl_t));
+  acl->acl_usrs.allow = acl->acl_grps.allow = TRUE;
+}
+
+static char *ctrls_argsep(char **arg) {
+  char *ret = NULL, *dst = NULL;
+  char quote_mode = 0;
+
+  if (!arg || !*arg || !**arg)
+    return NULL;
+
+  while (**arg && isspace((int) **arg))
+    (*arg)++;
+
+  if (!**arg)
+    return NULL;
+
+  ret = dst = *arg;
+
+  if (**arg == '\"') {
+    quote_mode++;
+    (*arg)++;
+  }
+
+  while (**arg && **arg != ',' &&
+      (quote_mode ? (**arg != '\"') : (!isspace((int) **arg)))) {
+
+    if (**arg == '\\' && quote_mode) {
+
+      /* escaped char */
+      if (*((*arg) + 1))
+        *dst = *(++(*arg));
+    }
+
+    *dst++ = **arg;
+    ++(*arg);
+  }
+
+  if (**arg)
+    (*arg)++;
+
+  *dst = '\0';
+  return ret;
+}
+
+char **pr_ctrls_parse_acl(pool *acl_pool, char *acl_str) {
+  char *name = NULL, *acl_str_dup = NULL, **acl_list = NULL;
+  array_header *acl_arr = NULL;
+  pool *tmp_pool = NULL;
+
+  /* Sanity checks */
+  if (!acl_pool || !acl_str)
+    return NULL;
+
+  tmp_pool = make_sub_pool(acl_pool);
+  acl_str_dup = pstrdup(tmp_pool, acl_str);
+
+  /* Allocate an array */
+  acl_arr = make_array(acl_pool, 0, sizeof(char **));
+
+  /* Add each name to the array */
+  while ((name = ctrls_argsep(&acl_str_dup)) != NULL) {
+    char *tmp = pstrdup(acl_pool, name);
+
+    /* Push the name into the ACL array */
+    *((char **) push_array(acl_arr)) = tmp;
+  }
+
+  /* Terminate the temp array with a NULL, as is proper. */
+  *((char **) push_array(acl_arr)) = NULL;
+
+  acl_list = (char **) acl_arr->elts;
+  destroy_pool(tmp_pool);
+
+  /* return the array of names */
+  return acl_list;
+}
+
+void pr_ctrls_set_group_acl(pool *grp_acl_pool, ctrls_grp_acl_t *grp_acl,
+    const char *allow, char *grouplist) {
+  char *group = NULL, **groups = NULL;
+  array_header *gid_list = NULL;
+  gid_t gid = 0;
+  pool *tmp_pool = NULL;
+
+  if (grp_acl_pool == NULL ||
+      grp_acl == NULL ||
+      allow == NULL ||
+      grouplist == NULL) {
+    return;
+  }
+
+  tmp_pool = make_sub_pool(grp_acl_pool);
+
+  if (strcmp(allow, "allow") == 0)
+    grp_acl->allow = TRUE;
+  else
+    grp_acl->allow = FALSE;
+
+  /* Parse the given expression into an array, then retrieve the GID
+   * for each given name.
+   */
+  groups = pr_ctrls_parse_acl(grp_acl_pool, grouplist);
+
+  /* Allocate an array of gid_t's */
+  gid_list = make_array(grp_acl_pool, 0, sizeof(gid_t));
+
+  for (group = *groups; group != NULL; group = *++groups) {
+
+    /* Handle a group name of "*" differently. */
+    if (strcmp("*", group) == 0) {
+      grp_acl->ngids = 1;
+      grp_acl->gids = NULL;
+      destroy_pool(tmp_pool);
+      return;
+
+    } else {
+      gid = pr_auth_name2gid(tmp_pool, group);
+      if (gid == (gid_t) -1)
+        continue;
+    }
+
+    *((gid_t *) push_array(gid_list)) = gid;
+  }
+
+  grp_acl->ngids = gid_list->nelts;
+  grp_acl->gids = (gid_t *) gid_list->elts;
+
+  destroy_pool(tmp_pool);
+}
+
+void pr_ctrls_set_user_acl(pool *usr_acl_pool, ctrls_usr_acl_t *usr_acl,
+    const char *allow, char *userlist) {
+  char *user = NULL, **users = NULL;
+  array_header *uid_list = NULL;
+  uid_t uid = 0;
+  pool *tmp_pool = NULL;
+
+  /* Sanity checks */
+  if (usr_acl_pool == NULL ||
+      usr_acl == NULL ||
+      allow == NULL ||
+      userlist == NULL) {
+    return;
+  }
+
+  tmp_pool = make_sub_pool(usr_acl_pool);
+
+  if (strcmp(allow, "allow") == 0)
+    usr_acl->allow = TRUE;
+  else
+    usr_acl->allow = FALSE;
+
+  /* Parse the given expression into an array, then retrieve the UID
+   * for each given name.
+   */
+  users = pr_ctrls_parse_acl(usr_acl_pool, userlist);
+
+  /* Allocate an array of uid_t's */
+  uid_list = make_array(usr_acl_pool, 0, sizeof(uid_t));
+
+  for (user = *users; user != NULL; user = *++users) {
+
+    /* Handle a user name of "*" differently. */
+    if (strcmp("*", user) == 0) {
+      usr_acl->nuids = 1;
+      usr_acl->uids = NULL;
+      destroy_pool(tmp_pool);
+      return;
+
+    } else {
+      uid = pr_auth_name2uid(tmp_pool, user);
+      if (uid == (uid_t) -1)
+        continue;
+    }
+
+    *((uid_t *) push_array(uid_list)) = uid;
+  }
+
+  usr_acl->nuids = uid_list->nelts;
+  usr_acl->uids = (uid_t *) uid_list->elts;
+
+  destroy_pool(tmp_pool);
+}
+
+char *pr_ctrls_set_module_acls(ctrls_acttab_t *acttab, pool *acl_pool,
+    char **actions, const char *allow, const char *type, char *list) {
+  register unsigned int i = 0;
+  unsigned char all_actions = FALSE;
+
+  /* First, sanity check the given list of actions against the actions
+   * in the given table.
+   */
+  for (i = 0; actions[i]; i++) {
+    register unsigned int j = 0;
+    unsigned char valid_action = FALSE;
+
+    if (strcmp(actions[i], "all") == 0)
+      continue;
+
+    for (j = 0; acttab[j].act_action; j++) {
+      if (strcmp(actions[i], acttab[j].act_action) == 0) {
+        valid_action = TRUE;
+        break;
+      }
+    }
+
+    if (!valid_action)
+      return actions[i];
+  }
+
+  for (i = 0; actions[i]; i++) {
+    register unsigned int j = 0;
+
+    if (!all_actions && strcmp(actions[i], "all") == 0)
+      all_actions = TRUE;
+
+    for (j = 0; acttab[j].act_action; j++) {
+      if (all_actions || strcmp(actions[i], acttab[j].act_action) == 0) {
+
+        /* Use the type parameter to determine whether the list is of users or
+         * of groups.
+         */
+        if (strcmp(type, "user") == 0) {
+          pr_ctrls_set_user_acl(acl_pool, &(acttab[j].act_acl->acl_usrs),
+            allow, list);
+
+        } else if (strcmp(type, "group") == 0) {
+          pr_ctrls_set_group_acl(acl_pool, &(acttab[j].act_acl->acl_grps),
+            allow, list);
+        }
+      }
+    }
+  }
+
+  return NULL;
+}
+
+char *pr_ctrls_unregister_module_actions(ctrls_acttab_t *acttab,
+    char **actions, module *mod) {
+  register unsigned int i = 0;
+
+  /* First, sanity check the given actions against the actions supported by
+   * this module.
+   */
+  for (i = 0; actions[i]; i++) {
+    register unsigned int j = 0;
+    unsigned char valid_action = FALSE;
+
+    for (j = 0; acttab[j].act_action; j++) {
+      if (strcmp(actions[i], acttab[j].act_action) == 0) {
+        valid_action = TRUE;
+        break;
+      }
+    }
+
+    if (!valid_action)
+      return actions[i];
+  }
+
+  /* Next, iterate through both lists again, looking for actions of the
+   * module _not_ in the given list.
+   */
+  for (i = 0; acttab[i].act_action; i++) {
+    register unsigned int j = 0;
+    unsigned char have_action = FALSE;
+
+    for (j = 0; actions[j]; j++) {
+      if (strcmp(acttab[i].act_action, actions[j]) == 0) {
+        have_action = TRUE;
+        break;
+      }
+    }
+
+    if (have_action) {
+      pr_trace_msg(trace_channel, 4, "mod_%s.c: removing '%s' control",
+        mod->name, acttab[i].act_action);
+      pr_ctrls_unregister(mod, acttab[i].act_action);
+      destroy_pool(acttab[i].act_acl->acl_pool);
+    }
+  }
+
+  return NULL;
+}
+
+int pr_ctrls_set_logfd(int fd) {
+
+  /* Close any existing log fd. */
+  if (ctrls_logfd >= 0) {
+    (void) close(ctrls_logfd);
+  }
+
+  ctrls_logfd = fd;
+  return 0;
+}
+
+int pr_ctrls_log(const char *module_version, const char *fmt, ...) {
+  va_list msg;
+  int res;
+
+  /* sanity check */
+  if (ctrls_logfd < 0)
+    return 0;
+
+  va_start(msg, fmt);
+  res = pr_log_vwritefile(ctrls_logfd, module_version, fmt, msg);
+  va_end(msg);
+
+  return res;
+}
+
+/* Initialize the Controls API. */
 void init_ctrls(void) {
   struct stat st;
   int sockfd;
@@ -1162,27 +1963,27 @@ void init_ctrls(void) {
   }
 
 #ifdef S_ISFIFO
-  pr_trace_msg(trace_channel, 9, "testing Unix domain socket using S_ISFIFO");
+  pr_log_debug(DEBUG10, "testing Unix domain socket using S_ISFIFO");
   if (S_ISFIFO(st.st_mode)) {
     ctrls_use_isfifo = TRUE;
   }
 #else
-  pr_trace_msg(trace_channel, 9, "cannot test Unix domain socket using "
-    "S_ISFIFO: macro undefined");
+  pr_log_debug(DEBUG10, "cannot test Unix domain socket using S_ISFIFO: "
+    "macro undefined");
 #endif
 
 #ifdef S_ISSOCK
-  pr_trace_msg(trace_channel, 9, "testing Unix domain socket using S_ISSOCK");
+  pr_log_debug(DEBUG10, "testing Unix domain socket using S_ISSOCK");
   if (S_ISSOCK(st.st_mode)) {
     ctrls_use_isfifo = FALSE;
   }
 #else
-  pr_trace_msg(trace_channel, 9, "cannot test Unix domain socket using "
-    "S_ISSOCK: macro undefined");
+  pr_log_debug(DEBUG10, "cannot test Unix domain socket using S_ISSOCK: "
+    "macro undefined");
 #endif
 
-  pr_trace_msg(trace_channel, 9, "using %s macro for Unix domain socket "
-    "detection", ctrls_use_isfifo ? "S_ISFIFO" : "S_ISSOCK");
+  pr_log_debug(DEBUG10, "using %s macro for Unix domain socket detection",
+    ctrls_use_isfifo ? "S_ISFIFO" : "S_ISSOCK");
 
   (void) close(sockfd);
   (void) unlink(sockpath);

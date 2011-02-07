@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2007 The ProFTPD Project team
+ * Copyright (c) 2001-2010 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* Inet support functions, many wrappers for netdb functions
- * $Id: inet.c,v 1.105 2007/05/21 16:10:46 castaglia Exp $
+ * $Id: inet.c,v 1.121 2010/02/21 19:51:42 castaglia Exp $
  */
 
 #include "conf.h"
@@ -45,7 +45,7 @@ static int tcp_proto = IPPROTO_TCP;
 static int inet_errno = 0;		/* Holds errno */
 
 /* The default address family to use when creating a socket, if a pr_netaddr_t
- * is not given.  This is mainly for the benefit of initialize_connection().
+ * is not given.  This is mainly for the benefit of init_conn().
  */
 static int inet_family = 0;
 
@@ -79,63 +79,50 @@ int pr_inet_getservport(pool *p, const char *serv, const char *proto) {
   return (servent ? ntohs(servent->s_port) : -1);
 }
 
-/* Validate anything returned from the 'outside', since it's untrusted
- * information.
- */
-char *pr_inet_validate(char *buf) {
-  char *p;
-
-  /* Validate anything returned from a DNS.
-   */
-  for (p = buf; p && *p; p++) {
-
-    /* Per RFC requirements, these are all that are valid from a DNS. */
-    if (!isalnum((int) *p) && *p != '.' && *p != '-'
-#ifdef PR_USE_IPV6
-        && *p != ':'
-#endif /* PR_USE_IPV6 */
-        ) {
-
-      /* We set it to _ because we know that's an invalid, yet safe, option
-       * for a DNS entry.
-       */
-      *p = '_';
-    }
-  }
-
-  return buf;
-}
-
 static void conn_cleanup_cb(void *cv) {
   conn_t *c = (conn_t *) cv;
 
-  if (c->instrm)
+  /* XXX These closes' return values should be checked, ideally. Do
+   * we really care if they fail, though?
+   */
+
+  if (c->instrm) {
     pr_netio_close(c->instrm);
+    c->instrm = NULL;
+  }
 
-  if (c->outstrm && c->outstrm != c->instrm)
+  if (c->outstrm && c->outstrm != c->instrm) {
     pr_netio_close(c->outstrm);
+    c->outstrm = NULL;
+  }
 
-  if (c->listen_fd != -1)
+  if (c->listen_fd != -1) {
     close(c->listen_fd);
+    c->listen_fd = -1;
+  }
 
-  if (c->rfd != -1)
+  if (c->rfd != -1) {
     close(c->rfd);
+    c->rfd = -1;
+  }
 
-  if (c->wfd != -1)
+  if (c->wfd != -1) {
     close(c->wfd);
+    c->wfd = -1;
+  }
 }
 
 /* Copy a connection structure, also creates a sub pool for the new
  * connection.
  */
-conn_t *pr_inet_copy_connection(pool *p, conn_t *c) {
+conn_t *pr_inet_copy_conn(pool *p, conn_t *c) {
   conn_t *res = NULL;
   pool *sub_pool = NULL;
 
   sub_pool = make_sub_pool(p);
-  pr_pool_tag(sub_pool, "pr_inet_copy_connection() subpool");
+  pr_pool_tag(sub_pool, "pr_inet_copy_conn() subpool");
 
-  res = (conn_t *) pcalloc(sub_pool,sizeof(conn_t));
+  res = (conn_t *) pcalloc(sub_pool, sizeof(conn_t));
 
   memcpy(res, c, sizeof(conn_t));
   res->pool = sub_pool;
@@ -169,7 +156,7 @@ conn_t *pr_inet_copy_connection(pool *p, conn_t *c) {
 /* Initialize a new connection record, also creates a new subpool just for the
  * new connection.
  */
-static conn_t *inet_initialize_connection(pool *p, xaset_t *servers, int fd,
+static conn_t *init_conn(pool *p, xaset_t *servers, int fd,
     pr_netaddr_t *bind_addr, int port, int retry_bind, int reporting) {
   pool *sub_pool = NULL;
   conn_t *c;
@@ -191,7 +178,7 @@ static conn_t *inet_initialize_connection(pool *p, xaset_t *servers, int fd,
   pr_netaddr_clear(&na);
 
   sub_pool = make_sub_pool(p);
-  pr_pool_tag(sub_pool, "inet_initialize_connection() subpool");
+  pr_pool_tag(sub_pool, "init_conn() subpool");
 
   c = (conn_t *) pcalloc(sub_pool, sizeof(conn_t));
   c->pool = sub_pool;
@@ -199,13 +186,13 @@ static conn_t *inet_initialize_connection(pool *p, xaset_t *servers, int fd,
   c->local_port = port;
   c->rfd = c->wfd = -1;
 
-  if (bind_addr)
+  if (bind_addr) {
     addr_family = pr_netaddr_get_family(bind_addr);
 
-  else if (inet_family)
+  } else if (inet_family) {
     addr_family = inet_family;
 
-  else {
+  } else {
 
     /* If no default family has been set, then default to IPv6 (if IPv6
      * support is enabled), otherwise use IPv4.
@@ -240,7 +227,7 @@ static conn_t *inet_initialize_connection(pool *p, xaset_t *servers, int fd,
 #if defined(SOLARIS2) || defined(FREEBSD2) || defined(FREEBSD3) || \
     defined(FREEBSD4) || defined(FREEBSD5) || defined(FREEBSD6) || \
     defined(FREEBSD7) || defined(__OpenBSD__) || defined(__NetBSD__) || \
-    defined(DARWIN6) || defined(DARWIN7) || defined(DARWIN8) || \
+    defined(DARWIN6) || defined(DARWIN7) || defined(DARWIN8) || defined(DARWIN9) || defined(DARWIN10) || \
     defined(SCO3) || defined(CYGWIN) || defined(SYSV4_2MP) || \
     defined(SYSV5SCO_SV6) || defined(SYSV5UNIXWARE7)
 # ifdef SOLARIS2
@@ -258,7 +245,7 @@ static conn_t *inet_initialize_connection(pool *p, xaset_t *servers, int fd,
 #if defined(SOLARIS2) || defined(FREEBSD2) || defined(FREEBSD3) || \
     defined(FREEBSD4) || defined(FREEBSD5) || defined(FREEBSD6) || \
     defined(FREEBSD7) || defined(__OpenBSD__) || defined(__NetBSD__) || \
-    defined(DARWIN6) || defined(DARWIN7) || defined(DARWIN8) || \
+    defined(DARWIN6) || defined(DARWIN7) || defined(DARWIN8) || defined(DARWIN9) || defined(DARWIN10) || \
     defined(SCO3) || defined(CYGWIN) || defined(SYSV4_2MP) || \
     defined(SYSV5SCO_SV6) || defined(SYSV5UNIXWARE7)
 # ifdef SOLARIS2
@@ -288,14 +275,21 @@ static conn_t *inet_initialize_connection(pool *p, xaset_t *servers, int fd,
       pr_log_pri(PR_LOG_NOTICE, "error setting SO_REUSEADDR: %s",
         strerror(errno));
 
+    /* Allow socket keep-alive messages. */
+    if (setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (void *) &one,
+        sizeof(one)) < 0)
+      pr_log_pri(PR_LOG_NOTICE, "error setting SO_KEEPALIVE: %s",
+        strerror(errno));
+
     memset(&na, 0, sizeof(na));
     pr_netaddr_set_family(&na, addr_family);
 
-    if (bind_addr)
+    if (bind_addr) {
       pr_netaddr_set_sockaddr(&na, pr_netaddr_get_sockaddr(bind_addr));
 
-    else
+    } else {
       pr_netaddr_set_sockaddr_any(&na);
+    }
 
 #if defined(PR_USE_IPV6) && defined(IPV6_V6ONLY)
     if (pr_netaddr_use_ipv6() &&
@@ -320,8 +314,19 @@ static conn_t *inet_initialize_connection(pool *p, xaset_t *servers, int fd,
           pr_trace_msg(trace_channel, 5,
             "disabling IPV6_V6ONLY on server socket %d", fd);
 
-          if (setsockopt(fd, level, IPV6_V6ONLY, (void *) &off,
-              len) < 0) {
+          res = setsockopt(fd, level, IPV6_V6ONLY, (void *) &off, len);
+
+          /* Bug#3237 shows that some systems do NOT like setting the V6ONLY
+           * option on an IPv4-mapped IPv6 address.  However, other systems
+           * (e.g. FreeBSD) require that this be done in order for EPSV
+           * to work properly.  Portability strikes again!
+           */
+
+          if (res < 0
+#ifdef ENOPROTOOPT
+              && errno != ENOPROTOOPT
+#endif /* !ENOPROTOOPT */
+              ) {
             pr_log_pri(PR_LOG_NOTICE, "error setting IPV6_V6ONLY: %s",
               strerror(errno));
           }
@@ -412,13 +417,17 @@ static conn_t *inet_initialize_connection(pool *p, xaset_t *servers, int fd,
      */
 
     salen = pr_netaddr_get_sockaddr_len(&na);
-    if (getsockname(fd, pr_netaddr_get_sockaddr(&na), &salen) != -1) {
+    if (getsockname(fd, pr_netaddr_get_sockaddr(&na), &salen) == 0) {
       if (!c->local_addr)
         c->local_addr = pr_netaddr_alloc(c->pool);
 
       pr_netaddr_set_family(c->local_addr, pr_netaddr_get_family(&na));
       pr_netaddr_set_sockaddr(c->local_addr, pr_netaddr_get_sockaddr(&na));
       c->local_port = ntohs(pr_netaddr_get_port(&na));
+
+    } else {
+      pr_log_debug(DEBUG3, "getsockname error on socket %d: %s", fd,
+        strerror(errno));
     }
 
   } else {
@@ -436,12 +445,11 @@ static conn_t *inet_initialize_connection(pool *p, xaset_t *servers, int fd,
   return c;
 }
 
-conn_t *pr_inet_create_connection(pool *p, xaset_t *servers, int fd,
+conn_t *pr_inet_create_conn(pool *p, xaset_t *servers, int fd,
     pr_netaddr_t *bind_addr, int port, int retry_bind) {
   conn_t *c = NULL;
 
-  c = inet_initialize_connection(p, servers, fd, bind_addr, port,
-    retry_bind, TRUE);
+  c = init_conn(p, servers, fd, bind_addr, port, retry_bind, TRUE);
 
   /* This code is somewhat of a kludge, because error handling should
    * NOT occur in inet.c, it should be handled by the caller.
@@ -456,7 +464,7 @@ conn_t *pr_inet_create_connection(pool *p, xaset_t *servers, int fd,
 /* Attempt to create a connection bound to a given port range, returns NULL
  * if unable to bind to any port in the range.
  */
-conn_t *pr_inet_create_connection_portrange(pool *p, xaset_t *servers,
+conn_t *pr_inet_create_conn_portrange(pool *p, xaset_t *servers,
     pr_netaddr_t *bind_addr, int low_port, int high_port) {
   int range_len, i;
   int *range, *ports;
@@ -489,8 +497,7 @@ conn_t *pr_inet_create_connection_portrange(pool *p, xaset_t *servers,
 	random_index = (int) ((1.0 * i * rand()) / (RAND_MAX+1.0));
 
 	/* Copy the port at that index into the array from which port
-	 * numbers will be selected when calling
-         * inet_initialize_connection().
+	 * numbers will be selected when calling init_conn().
 	 */
 	ports[i] = range[random_index];
 
@@ -498,14 +505,14 @@ conn_t *pr_inet_create_connection_portrange(pool *p, xaset_t *servers,
 	 * port will be from the range of as-yet untried ports.
 	 */
 
-	while (++random_index < i)
+	while (++random_index <= i)
 	  range[random_index-1] = range[random_index];
       }
 
-      c = inet_initialize_connection(p, servers, -1, bind_addr, ports[i],
-        FALSE, FALSE);
+      c = init_conn(p, servers, -1, bind_addr, ports[i], FALSE, FALSE);
 
-      if (!c && inet_errno != EADDRINUSE) {
+      if (!c &&
+          inet_errno != EADDRINUSE) {
         pr_log_pri(PR_LOG_ERR, "error initializing connection: %s",
           strerror(inet_errno));
         end_login(1);
@@ -520,9 +527,9 @@ void pr_inet_close(pool *p, conn_t *c) {
 
   /* It is not necessary to close the fds or schedule netio streams for
    * removal, because the creator of the connection (either
-   * pr_inet_create_connection() or pr_inet_copy_connection() will have
-   * registered a pool cleanup handler (conn_cleanup_cb()) which will do all
-   * this for us. Simply destroy the pool and all the dirty work gets done.
+   * pr_inet_create_conn() or pr_inet_copy_conn() will have registered a pool
+   * cleanup handler (conn_cleanup_cb()) which will do all this for us.
+   * Simply destroy the pool and all the dirty work gets done.
    */
 
   destroy_pool(c->pool);
@@ -602,11 +609,28 @@ int pr_inet_set_proto_opts(pool *p, conn_t *c, int mss, int nodelay,
 
   if (!no_delay ||
       *no_delay == TRUE) {
+
+    if (c->rfd != -1) {
+      if (setsockopt(c->rfd, IPPROTO_TCP, TCP_NODELAY, (void *) &nodelay,
+          sizeof(nodelay)) < 0) {
+        pr_log_pri(PR_LOG_NOTICE, "error setting read fd %d TCP_NODELAY: %s",
+          c->rfd, strerror(errno));
+      }
+    }
+
+    if (c->wfd != -1) {
+      if (setsockopt(c->wfd, tcp_level, TCP_NODELAY, (void *) &nodelay,
+          sizeof(nodelay)) < 0) {
+        pr_log_pri(PR_LOG_NOTICE, "error setting write fd %d TCP_NODELAY: %s",
+          c->wfd, strerror(errno));
+      }
+    }
+
     if (c->listen_fd != -1) {
       if (setsockopt(c->listen_fd, tcp_level, TCP_NODELAY, (void *) &nodelay,
           sizeof(nodelay)) < 0) {
-        pr_log_pri(PR_LOG_NOTICE, "error setting listen fd TCP_NODELAY: %s",
-          strerror(errno));
+        pr_log_pri(PR_LOG_NOTICE, "error setting listen fd %d TCP_NODELAY: %s",
+          c->listen_fd, strerror(errno));
       }
     }
   }
@@ -726,7 +750,7 @@ static void set_oobinline(int fd) {
 #ifdef F_SETOWN
 static void set_owner(int fd) {
   if (fd != -1)
-    fcntl(fd, F_SETOWN, getpid());
+    fcntl(fd, F_SETOWN, session.pid ? session.pid : getpid());
 }
 #endif
 
@@ -1101,59 +1125,6 @@ int pr_inet_get_conn_info(conn_t *c, int fd) {
   return 0;
 }
 
-/* Associate already open streams with the connection, returns NULL if either
- * stream points to a non-socket descriptor.  If addr is non-NULL, remote
- * address discovery is attempted. If resolve is non-zero, the remote address
- * is reverse resolved.
- */
-conn_t *pr_inet_associate(pool *p, conn_t *c, pr_netaddr_t *addr,
-    pr_netio_stream_t *in, pr_netio_stream_t *out, int resolve) {
-  int rfd, wfd;
-  int socktype;
-  socklen_t socktype_len = sizeof(socktype);
-  conn_t *res;
-
-  rfd = PR_NETIO_FD(in);
-  wfd = PR_NETIO_FD(out);
-
-  if (getsockopt(rfd, SOL_SOCKET, SO_TYPE, (void *) &socktype,
-      &socktype_len) == -1 || socktype != SOCK_STREAM)
-    return NULL;
-
-  if (getsockopt(wfd, SOL_SOCKET, SO_TYPE, (void *) &socktype,
-      &socktype_len) == -1 || socktype != SOCK_STREAM)
-    return NULL;
-
-  res = pr_inet_copy_connection(p, c);
-
-  res->rfd = rfd;
-  res->wfd = wfd;
-  res->instrm = in;
-  res->outstrm = out;
-  res->mode = CM_OPEN;
-
-  if (pr_inet_get_conn_info(res, wfd) < 0)
-    return NULL;
-
-  /* Get the remote address */
-
-  if (addr) {
-    if (!res->remote_addr)
-      res->remote_addr = pr_netaddr_alloc(res->pool);
-
-    memcpy(res->remote_addr, addr, sizeof(pr_netaddr_t));
-  }
-
-  if (resolve && res->remote_addr)
-    res->remote_name = pr_netaddr_get_dnsstr(res->remote_addr);
-
-  if (!res->remote_name)
-    res->remote_name = pr_netaddr_get_ipstr(res->remote_addr);
-
-  pr_inet_set_socket_opts(res->pool, res, 0, 0);
-  return res;
-}
-
 /* Open streams for a new socket. If rfd and wfd != -1, two new fds are duped
  * to the respective read/write fds. If the fds specified correspond to the
  * normal stdin and stdout, the streams opened will be assigned to stdin and
@@ -1174,7 +1145,7 @@ conn_t *pr_inet_openrw(pool *p, conn_t *c, pr_netaddr_t *addr, int strm_type,
   conn_t *res = NULL;
   int close_fd = TRUE;
 
-  res = pr_inet_copy_connection(p, c);
+  res = pr_inet_copy_conn(p, c);
 
   res->listen_fd = -1;
 

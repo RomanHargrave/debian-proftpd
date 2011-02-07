@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2004-2006 The ProFTPD Project team
+ * Copyright (c) 2004-2010 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -22,9 +22,8 @@
  * OpenSSL in the source distribution.
  */
 
-/*
- * Display of files
- * $Id: display.c,v 1.7 2006/12/06 04:29:58 castaglia Exp $
+/* Display of files
+ * $Id: display.c,v 1.16.2.2 2010/04/17 17:11:14 castaglia Exp $
  */
 
 #include "conf.h"
@@ -43,13 +42,16 @@ static void format_size_str(char *buf, size_t buflen, off_t size) {
   snprintf(buf, buflen, "%.3" PR_LU "%cB", (pr_off_t) size, units[i]);
 }
 
-static int display_fh(pr_fh_t *fh, const char *fs, const char *code) {
+static int display_fh(pr_fh_t *fh, const char *fs, const char *code,
+    int flags) {
+  struct stat st;
   char buf[PR_TUNABLE_BUFFER_SIZE] = {'\0'};
   int len;
   unsigned int *current_clients = NULL;
   unsigned int *max_clients = NULL;
   off_t fs_size = 0;
   pool *p;
+  void *v;
   xaset_t *s;
   config_rec *c = NULL;
   const char *serverfqdn = main_server->ServerFQDN;
@@ -59,9 +61,16 @@ static int display_fh(pr_fh_t *fh, const char *fs, const char *code) {
     total_files_xfer[12] = {'\0'};
   char mg_class_limit[12] = {'\0'}, mg_cur[12] = {'\0'},
     mg_xfer_bytes[12] = {'\0'}, mg_cur_class[12] = {'\0'};
-  char mg_xfer_units[12] = {'\0'}, config_class_users[128] = {'\0'}, *user;
+  char mg_xfer_units[12] = {'\0'}, *user;
   const char *mg_time;
-  unsigned char first = TRUE;
+  char *rfc1413_ident = NULL;
+  char *first = NULL, *prev = NULL;
+  int sent_first = FALSE;
+
+  /* Stat the opened file to determine the optimal buffer size for IO. */
+  memset(&st, 0, sizeof(st));
+  pr_fsio_fstat(fh, &st);
+  fh->fh_iosz = st.st_blksize;
 
 #if defined(HAVE_STATFS) || defined(HAVE_SYS_STATVFS_H) || \
    defined(HAVE_SYS_VFS_H)
@@ -82,22 +91,25 @@ static int display_fh(pr_fh_t *fh, const char *fs, const char *code) {
 
   max_clients = get_param_ptr(s, "MaxClients", FALSE);
 
-  current_clients = get_param_ptr(main_server->conf, "CURRENT-CLIENTS", FALSE);
+  v = pr_table_get(session.notes, "client-count", NULL);
+  if (v) {
+    current_clients = v;
+  }
 
   snprintf(mg_cur, sizeof(mg_cur), "%u", current_clients ? *current_clients: 1);
 
   if (session.class && session.class->cls_name) {
-    unsigned int *class_users = NULL;
+    unsigned int *class_clients = NULL;
     config_rec *maxc = NULL;
     unsigned int maxclients = 0;
 
-    snprintf(config_class_users, sizeof(config_class_users),
-      "CURRENT-CLIENTS-CLASS-%s", session.class->cls_name);
-
-    class_users = get_param_ptr(main_server->conf, config_class_users, FALSE);
+    v = pr_table_get(session.notes, "class-client-count", NULL);
+    if (v) {
+      class_clients = v;
+    }
 
     snprintf(mg_cur_class, sizeof(mg_cur_class), "%u",
-      class_users ? *class_users : 0);
+      class_clients ? *class_clients : 0);
 
     /* For the %z variable, first we scan through the MaxClientsPerClass,
      * and use the first applicable one.  If none are found, look for
@@ -128,7 +140,6 @@ static int display_fh(pr_fh_t *fh, const char *fs, const char *code) {
     snprintf(mg_class_limit, sizeof(mg_class_limit), "%u", maxclients);
 
   } else {
-    mg_cur_class[0] = 0;
     snprintf(mg_class_limit, sizeof(mg_class_limit), "%u",
       max_clients ? *max_clients : 0);
     snprintf(mg_cur_class, sizeof(mg_cur_class), "%u", 0);
@@ -154,7 +165,7 @@ static int display_fh(pr_fh_t *fh, const char *fs, const char *code) {
 
   snprintf(mg_max, sizeof(mg_max), "%u", max_clients ? *max_clients : 0);
 
-  user = get_param_ptr(main_server->conf, C_USER, FALSE);
+  user = pr_table_get(session.notes, "mod_auth.orig-user", NULL);
   if (user == NULL)
     user = "";
 
@@ -177,6 +188,11 @@ static int display_fh(pr_fh_t *fh, const char *fs, const char *code) {
     session.total_files_xfer);
   total_files_xfer[sizeof(total_files_xfer)-1] = '\0';
 
+  rfc1413_ident = pr_table_get(session.notes, "mod_ident.rfc1413-ident", NULL);
+  if (rfc1413_ident == NULL) {
+    rfc1413_ident = "UNKNOWN";
+  }
+
   while (pr_fsio_gets(buf, sizeof(buf), fh) != NULL) {
     char *tmp;
 
@@ -188,6 +204,74 @@ static int display_fh(pr_fh_t *fh, const char *fs, const char *code) {
     while(len && (buf[len-1] == '\r' || buf[len-1] == '\n')) {
       buf[len-1] = '\0';
       len--;
+    }
+
+    /* Check for any Variable-type strings. */
+    tmp = strstr(buf, "%{");
+    while (tmp) {
+      char *key, *tmp2;
+      const char *val;
+
+      pr_signals_handle();
+
+      tmp2 = strchr(tmp, '}');
+      if (!tmp2) {
+        tmp = strstr(tmp + 1, "%{");
+        continue;
+      }
+
+      key = pstrndup(p, tmp, tmp2 - tmp + 1);
+
+      /* There are a couple of special-case keys to watch for:
+       *
+       *   env:$var
+       *   time:$fmt
+       *
+       * The Var API does not easily support returning values for keys
+       * where part of the value depends on part of the key.  That's why
+       * these keys are handled here, instead of in pr_var_get().
+       */
+
+      if (strncmp(key, "%{time:", 7) == 0) {
+        char time_str[128], *fmt;
+        time_t now;
+        struct tm *time_info;
+
+        fmt = pstrndup(p, key + 7, strlen(key) - 8);
+
+        now = time(NULL);
+        time_info = pr_localtime(NULL, &now);
+
+        memset(time_str, 0, sizeof(time_str));
+        strftime(time_str, sizeof(time_str), fmt, time_info);
+
+        val = pstrdup(p, time_str);
+
+      } else if (strncmp(key, "%{env:", 6) == 0) {
+        char *env_var;
+
+        env_var = pstrndup(p, key + 6, strlen(key) - 7);
+        val = pr_env_get(p, env_var);
+        if (val == NULL) {
+          pr_trace_msg("var", 4,
+            "no value set for environment variable '%s', using \"(none)\"",
+            env_var);
+          val = "(none)";
+        }
+
+      } else {
+        val = pr_var_get(key);
+        if (val == NULL) {
+          pr_trace_msg("var", 4,
+            "no value set for name '%s', using \"(none)\"", key);
+          val = "(none)";
+        }
+      }
+
+      outs = sreplace(p, buf, key, val, NULL);
+      sstrncpy(buf, outs, sizeof(buf));
+
+      tmp = strstr(outs, "%{");
     }
 
     outs = sreplace(p, buf,
@@ -207,7 +291,7 @@ static int display_fh(pr_fh_t *fh, const char *fs, const char *code) {
       "%T", mg_time,
       "%t", total_files_xfer,
       "%U", user,
-      "%u", session.ident_user,
+      "%u", rfc1413_ident,
       "%V", main_server->ServerName,
       "%x", session.class ? session.class->cls_name : "(unknown)",
       "%y", mg_cur_class,
@@ -216,64 +300,92 @@ static int display_fh(pr_fh_t *fh, const char *fs, const char *code) {
 
     sstrncpy(buf, outs, sizeof(buf));
 
-    /* Check for any Variable-type strings. */
-    tmp = strstr(outs, "%{");
-    while (tmp) {
-      char t, *key, *tmp2;
-      const char *val;
+    /* Handle the case where the Display file might contain only one
+     * line.
+     *
+     * We _could_ just use pr_response_add(), and let the response code
+     * automatically handle all of the multiline response formatting.
+     * However, some of the Display files are at times waiting for the
+     * response chains to be flushed, which won't work (e.g. login, logout).
+     * Thus we have to deal with multiline files appropriately here.
+     */
 
-      pr_signals_handle();
-
-      tmp2 = strchr(tmp, '}');
-      if (!tmp2) {
-        tmp = strstr(tmp + 1, "%{");
-        continue;
-      }
-
-      key = tmp;
-      t = *(tmp2 + 1);
-      *(tmp2 + 1) = '\0';
-
-      val = pr_var_get(key);
-
-      if (!val) {
-        pr_trace_msg("var", 4,
-          "no value set for name '%s', using \"(none)\"", key);
-        val = "(none)";
-      }
-
-      outs = sreplace(p, buf, key, val, NULL);
-      sstrncpy(buf, outs, sizeof(buf));
-
-      *(tmp2 + 1) = t;
-      tmp = strstr(outs, "%{");
+    if (sent_first == FALSE &&
+        first == NULL) {
+      first = pstrdup(p, outs);
+      continue;
     }
 
     if (first) {
-      pr_response_send_raw("%s-%s", code, outs);
-      first = FALSE;
+      pr_response_send_raw("%s-%s", code, first);
+      first = NULL;
+      sent_first = TRUE;
+
+      prev = pstrdup(p, outs);
+      continue;
+    }
+
+    if (prev) {
+      if (MultilineRFC2228) {
+        pr_response_send_raw("%s-%s", code, prev);
+
+      } else {
+        pr_response_send_raw(" %s", prev);
+      }
+    }
+
+    prev = pstrdup(p, outs);
+  }
+
+  if (first != NULL) {
+    if (session.auth_mech != NULL) {
+      if (flags & PR_DISPLAY_FL_NO_EOM) {
+        pr_response_send_raw("%s-%s", code, first);
+
+      } else {
+        pr_response_send_raw("%s %s", code, first);
+      }
 
     } else {
-      if (MultilineRFC2228)
-        pr_response_send_raw("%s-%s", code, outs);
-      else
-        pr_response_send_raw(" %s", outs);
+      /* There is a special case if the client has not yet authenticated; it
+       * means we are handling a DisplayConnect file.  The server will send
+       * a banner as well, so we need to treat this is the start of a multiline
+       * response.
+       */
+      pr_response_send_raw("%s-%s", code, first);
+    }
+
+  } else {
+    if (prev) {
+      if (MultilineRFC2228) {
+        pr_response_send_raw("%s-%s", code, prev);
+
+      } else {
+        if (flags & PR_DISPLAY_FL_NO_EOM) {
+          pr_response_send_raw(" %s", prev);
+
+        } else {
+          pr_response_send_raw("%s %s", code, prev);
+        }
+      }
     }
   }
 
+  destroy_pool(p);
   return 0;
 }
 
-int pr_display_fh(pr_fh_t *fh, const char *fs, const char *code) {
+int pr_display_fh(pr_fh_t *fh, const char *fs, const char *code, int flags) {
   if (!fh || !code) {
     errno = EINVAL;
     return -1;
   }
 
-  return display_fh(fh, fs, code);
+  return display_fh(fh, fs, code, flags);
 }
 
-int pr_display_file(const char *path, const char *fs, const char *code) {
+int pr_display_file(const char *path, const char *fs, const char *code,
+    int flags) {
   pr_fh_t *fh = NULL;
   int res, xerrno;
 
@@ -286,7 +398,7 @@ int pr_display_file(const char *path, const char *fs, const char *code) {
   if (fh == NULL)
     return -1;
 
-  res = display_fh(fh, fs, code);
+  res = display_fh(fh, fs, code, flags);
   xerrno = errno;
 
   pr_fsio_close(fh);

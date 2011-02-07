@@ -2,7 +2,7 @@
  * ProFTPD: mod_auth_pam -- Support for PAM-style authentication.
  * Copyright (c) 1998, 1999, 2000 Habeeb J. Dihu aka
  *   MacGyver <macgyver@tos.net>, All Rights Reserved.
- * Copyright 2000-2006 The ProFTPD Project
+ * Copyright 2000-2009 The ProFTPD Project
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -36,7 +36,7 @@
  *
  * -- DO NOT MODIFY THE TWO LINES BELOW --
  * $Libraries: -lpam$
- * $Id: mod_auth_pam.c,v 1.17 2006/12/19 03:26:32 castaglia Exp $
+ * $Id: mod_auth_pam.c,v 1.24 2009/03/05 05:24:06 castaglia Exp $
  */
 
 #include "conf.h"
@@ -44,7 +44,7 @@
 
 #ifdef HAVE_PAM
 
-#define MOD_AUTH_PAM_VERSION		"mod_auth_pam/1.0.1"
+#define MOD_AUTH_PAM_VERSION		"mod_auth_pam/1.1"
 
 #ifdef HAVE_SECURITY_PAM_APPL_H
 # ifdef HPUX11
@@ -79,14 +79,23 @@ static size_t		pam_user_len		= 0;
 static size_t		pam_pass_len		= 0;
 static int		pam_conv_error		= 0;
 
+static unsigned long auth_pam_opts = 0UL;
+#define AUTH_PAM_OPT_NO_TTY	0x0001
+
 static const char *trace_channel = "pam";
 
-static int pam_exchange(num_msg, msg, resp, appdata_ptr)
-     int num_msg;
-     struct pam_message **msg;
-     struct pam_response **resp;
-     void *appdata_ptr;
-{
+/* On non-Solaris systems, the struct pam_message argument is declared
+ * const, but on Solaris, it isn't.  To avoid compiler warnings about
+ * incompatible pointer types, we need to use const or not as appropriate.
+ */
+#ifndef SOLARIS2
+# define PR_PAM_CONST	const
+#else
+# define PR_PAM_CONST
+#endif
+
+static int pam_exchange(int num_msg, PR_PAM_CONST struct pam_message **msg,
+    struct pam_response **resp, void *appdata_ptr) {
   register unsigned int i;
   struct pam_response *response = NULL;
 
@@ -103,7 +112,7 @@ static int pam_exchange(num_msg, msg, resp, appdata_ptr)
 
     switch (msg[i]->msg_style) {
     case PAM_PROMPT_ECHO_ON:
-      pr_trace_msg(trace_channel, 9, "received PAM_PROMPT_ECHO_ON response");
+      pr_trace_msg(trace_channel, 9, "received PAM_PROMPT_ECHO_ON message");
 
       /* PAM frees response and resp.  If you don't believe this, please read
        * the actual PAM RFCs as well as have a good look at libpam.
@@ -112,7 +121,7 @@ static int pam_exchange(num_msg, msg, resp, appdata_ptr)
       break;
 
     case PAM_PROMPT_ECHO_OFF:
-      pr_trace_msg(trace_channel, 9, "received PAM_PROMPT_ECHO_OFF response");
+      pr_trace_msg(trace_channel, 9, "received PAM_PROMPT_ECHO_OFF message");
 
       /* PAM frees response and resp.  If you don't believe this, please read
        * the actual PAM RFCs as well as have a good look at libpam.
@@ -122,8 +131,9 @@ static int pam_exchange(num_msg, msg, resp, appdata_ptr)
 
     case PAM_TEXT_INFO:
     case PAM_ERROR_MSG:
-      pr_trace_msg(trace_channel, 9, "received %s response",
-        msg[i]->msg_style == PAM_TEXT_INFO ? "PAM_TEXT_INFO" : "PAM_ERROR_MSG");
+      pr_trace_msg(trace_channel, 9, "received %s response: %s",
+        msg[i]->msg_style == PAM_TEXT_INFO ? "PAM_TEXT_INFO" : "PAM_ERROR_MSG",
+        msg[i]->msg);
 
       /* Ignore it, but pam still wants a NULL response... */
       response[i].resp = NULL;
@@ -202,10 +212,7 @@ MODRET pam_auth(cmd_rec *cmd) {
   int pam_error = 0, retval = PR_AUTH_ERROR, success = 0;
   config_rec *c = NULL;
   unsigned char *auth_pam = NULL, pam_authoritative = FALSE;
-
-#ifdef SOLARIS2
   char ttyentry[32];
-#endif /* SOLARIS2 */
 
   /* If we have been explicitly disabled, return now.  Otherwise,
    * the module is considered enabled.
@@ -282,6 +289,22 @@ MODRET pam_auth(cmd_rec *cmd) {
     pr_trace_msg(trace_channel, 8, "using PAM service name '%s'", pamconfig);
   }
 
+  /* Check for minor PAM configuration options such as use of PAM_TTY. */
+  c = find_config(main_server->conf, CONF_PARAM, "AuthPAMOptions", FALSE);
+  if (c != NULL) {
+    auth_pam_opts = *((unsigned long *) c->argv[0]);
+  }
+
+#ifdef SOLARIS2
+  /* For Solaris environments, the TTY environment will always be set,
+   * in order to workaround a bug (Solaris Bug ID 4250887) where
+   * pam_open_session() will crash unless both PAM_RHOST and PAM_TTY are
+   * set, and the PAM_TTY setting is at least greater than the length of
+   * the string "/dev/".
+   */
+  auth_pam_opts &= ~AUTH_PAM_OPT_NO_TTY;
+#endif /* SOLARIS2 */
+
   /* Due to the different types of authentication used, such as shadow
    * passwords, etc. we need root privs for this operation.
    */
@@ -310,20 +333,15 @@ MODRET pam_auth(cmd_rec *cmd) {
   else
     pam_set_item(pamh, PAM_RHOST, "IHaveNoIdeaHowIGotHere");
 
-#ifdef SOLARIS2
-  /* Set our TTY environment.  This is apparently required for Solaris
-   * environments, since unless PAM_RHOST and PAM_TTY are defined, and
-   * the string given to PAM_TTY must be of the form (or at least greater
-   * than the length of) "/dev/", pam_open_session() will crash and burn
-   * a horrible death that took many hours to debug...YUCK.
-   *
-   * This bug is Sun bugid 4250887, and should be fixed in an update for
-   * Solaris.  -- MacGyver
-   */
-  snprintf(ttyentry, sizeof(ttyentry), "/dev/ftp%02lu",
-    (unsigned long) getpid());
-  pam_set_item(pamh, PAM_TTY, ttyentry);
-#endif /* SOLARIS2 */
+  if (!(auth_pam_opts & AUTH_PAM_OPT_NO_TTY)) {
+    memset(ttyentry, '\0', sizeof(ttyentry));
+    snprintf(ttyentry, sizeof(ttyentry), "/dev/ftpd%02lu",
+      (unsigned long) getpid());
+    ttyentry[sizeof(ttyentry)-1] = '\0';
+
+    pr_trace_msg(trace_channel, 9, "setting PAM_TTY to '%s'", ttyentry);
+    pam_set_item(pamh, PAM_TTY, ttyentry);
+  }
 
   /* Authenticate, and get any credentials as needed.
    */
@@ -510,6 +528,49 @@ MODRET set_authpamconfig(cmd_rec *cmd) {
   return PR_HANDLED(cmd);
 }
 
+/* usage: AuthPAMOptions opt1 opt2 ... */
+MODRET set_authpamoptions(cmd_rec *cmd) {
+  config_rec *c = NULL;
+  register unsigned int i = 0;
+  unsigned long opts = 0UL;
+
+  if (cmd->argc-1 == 0)
+    CONF_ERROR(cmd, "wrong number of parameters");
+
+  CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
+
+  c = add_config_param(cmd->argv[0], 1, NULL);
+
+  for (i = 1; i < cmd->argc; i++) {
+    if (strcasecmp(cmd->argv[i], "NoTTY") == 0) {
+      opts |= AUTH_PAM_OPT_NO_TTY;
+
+    } else {
+      CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, ": unknown AuthPAMOption: '",
+        cmd->argv[i], "'", NULL));
+    }
+  }
+
+  c->argv[0] = pcalloc(c->pool, sizeof(unsigned long));
+  *((unsigned long *) c->argv[0]) = opts;
+
+  return PR_HANDLED(cmd);
+}
+
+/* Initialization routines
+ */
+
+static int auth_pam_sess_init(void) {
+  if (pr_auth_add_auth_only_module("mod_auth_pam.c") < 0) {
+    pr_log_pri(PR_LOG_NOTICE, MOD_AUTH_PAM_VERSION
+      ": unable to add 'mod_auth_pam.c' as an auth-only module: %s",
+      strerror(errno));
+    return -1;
+  }
+
+  return 0;
+}
+
 static authtable auth_pam_authtab[] = {
   { 0, "auth", pam_auth },
   { 0, NULL, NULL }
@@ -518,6 +579,7 @@ static authtable auth_pam_authtab[] = {
 static conftable auth_pam_conftab[] = {
   { "AuthPAM",			set_authpam,			NULL },
   { "AuthPAMConfig",		set_authpamconfig,		NULL },
+  { "AuthPAMOptions",		set_authpamoptions,		NULL },
   { NULL, NULL, NULL }
 };
 
@@ -543,7 +605,7 @@ module auth_pam_module = {
   NULL,
 
   /* Session initialization */
-  NULL,
+  auth_pam_sess_init,
 
   /* Module version */
   MOD_AUTH_PAM_VERSION

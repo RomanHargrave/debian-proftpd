@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2007 The ProFTPD Project team
+ * Copyright (c) 2001-2009 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,7 +26,7 @@
 
 /* User configurable defaults and tunable parameters.
  *
- * $Id: options.h,v 1.24 2007/05/22 17:45:19 castaglia Exp $
+ * $Id: options.h,v 1.29 2009/03/22 01:30:10 castaglia Exp $
  */
 
 #ifndef PR_OPTIONS_H
@@ -71,17 +71,18 @@
 
 #define PR_TUNABLE_DEFAULT_BACKLOG	5
 
-/* The next two define the default receive/send TCP windows.  These can be
- * configured on a per-vhost basis via the SocketOptions directive.
+/* The default TCP send/receive buffer sizes, should explicit sizes not
+ * be defined at compile time, or should the runtime determination process
+ * fail.
  */
 
-#ifndef PR_TUNABLE_RCVBUFSZ
-# define PR_TUNABLE_RCVBUFSZ		8192
-#endif
+#ifndef PR_TUNABLE_DEFAULT_RCVBUFSZ
+# define PR_TUNABLE_DEFAULT_RCVBUFSZ	8192
+#endif /* PR_TUNABLE_DEFAULT_RCVBUFSZ */
 
-#ifndef PR_TUNABLE_SNDBUFSZ
-# define PR_TUNABLE_SNDBUFSZ		8192
-#endif
+#ifndef PR_TUNABLE_DEFAULT_SNDBUFSZ
+# define PR_TUNABLE_DEFAULT_SNDBUFSZ	8192
+#endif /* PR_TUNABLE_DEFAULT_SNDBUFSZ */
 
 /* Default internal buffer size used for data transfers and other
  * miscellaneous tasks.
@@ -90,7 +91,14 @@
 # define PR_TUNABLE_BUFFER_SIZE	1024
 #endif
 
-/* This one is specifically for data transfers.
+/* There is also a definable buffer size used specifically for data
+ * transfers: PR_TUNABLE_XFER_BUFFER_SIZE.  By default, this buffer
+ * size is automatically determined, at runtime, as the smaller of the
+ * TCP receive and send buffer sizes.
+ *
+ * You should manually set the PR_TUNABLE_XFER_BUFFER_SIZE only in
+ * special circumstances, when you need to explicitly control that
+ * buffer size.
  */
 #ifndef PR_TUNABLE_XFER_BUFFER_SIZE
 # define PR_TUNABLE_XFER_BUFFER_SIZE	PR_TUNABLE_BUFFER_SIZE
@@ -122,8 +130,14 @@
 # define PR_TUNABLE_TIMEOUTIDLE		600
 #endif
 
+/* The default command timeout in many command-line FTP clients (e.g.
+ * lukemftp, used on BSDs and maybe Linux?) is 60 seconds.  To avoid having
+ * those clients close the control connection because proftpd takes too
+ * long, while performing lingering closes, to send a response, keep the
+ * default linger timeout under 60 seconds.
+ */
 #ifndef PR_TUNABLE_TIMEOUTLINGER
-# define PR_TUNABLE_TIMEOUTLINGER	180
+# define PR_TUNABLE_TIMEOUTLINGER	30
 #endif
 
 #ifndef PR_TUNABLE_TIMEOUTLOGIN
@@ -180,10 +194,16 @@
 # define PR_TUNABLE_CALLER_DEPTH	32
 #endif
 
-#ifndef PR_TUNABLE_GLOBBING_MAX	
+#ifndef PR_TUNABLE_GLOBBING_MAX_RECURSION
 /* Max number of recursion/directory levels to support when globbing.
  */
-# define PR_TUNABLE_GLOBBING_MAX	8
+# define PR_TUNABLE_GLOBBING_MAX_RECURSION	8
+#endif
+
+#ifndef PR_TUNABLE_GLOBBING_MAX_MATCHES
+/* Max number of matches to support when globbing.
+ */
+# define PR_TUNABLE_GLOBBING_MAX_MATCHES	100000UL
 #endif
 
 #ifndef PR_TUNABLE_LOGIN_MAX
@@ -201,9 +221,9 @@
 /* Define the time to delay, in seconds, after a system call has been
  * interrupted (errno is EINTR) before retrying that call.
  *
- * The default behavior is not to delay between retries.
+ * The default behavior is delay 0.2 secs between retries.
  */
-# define PR_TUNABLE_EINTR_RETRY_INTERVAL	0
+# define PR_TUNABLE_EINTR_RETRY_INTERVAL	0.2
 #endif
 
 #endif /* PR_OPTIONS_H */

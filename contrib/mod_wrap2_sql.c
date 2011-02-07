@@ -2,7 +2,7 @@
  * ProFTPD: mod_wrap2_sql -- a mod_wrap2 sub-module for supplying IP-based
  *                           access control data via SQL tables
  *
- * Copyright (c) 2002-2007 TJ Saunders
+ * Copyright (c) 2002-2010 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -22,13 +22,19 @@
  * with OpenSSL, and distribute the resulting executable, without including
  * the source code for OpenSSL in the source distribution.
  *
- * $Id: mod_wrap2_sql.c,v 1.2 2007/08/03 14:52:06 castaglia Exp $
+ * $Id: mod_wrap2_sql.c,v 1.9.2.1 2010/06/22 13:59:23 castaglia Exp $
  */
 
 #include "mod_wrap2.h"
 #include "mod_sql.h"
 
 #define MOD_WRAP2_SQL_VERSION		"mod_wrap2_sql/1.0"
+
+#define WRAP2_SQL_NSLOTS		2
+#define WRAP2_SQL_CLIENT_QUERY_IDX	0
+#define WRAP2_SQL_OPTION_QUERY_IDX	1
+
+module wrap2_sql_module;
 
 static cmd_rec *sql_cmd_create(pool *parent_pool, int argc, ...) {
   pool *cmd_pool = NULL;
@@ -60,6 +66,7 @@ static int sqltab_close_cb(wrap2_table_t *sqltab) {
 
 static array_header *sqltab_fetch_clients_cb(wrap2_table_t *sqltab,
     const char *name) {
+  register unsigned int i;
   pool *tmp_pool = NULL;
   cmdtable *sql_cmdtab = NULL;
   cmd_rec *sql_cmd = NULL;
@@ -71,7 +78,7 @@ static array_header *sqltab_fetch_clients_cb(wrap2_table_t *sqltab,
   /* Allocate a temporary pool for the duration of this read. */
   tmp_pool = make_sub_pool(sqltab->tab_pool);
 
-  query = ((char **) sqltab->tab_data)[0];
+  query = ((char **) sqltab->tab_data)[WRAP2_SQL_CLIENT_QUERY_IDX];
 
   /* Find the cmdtable for the sql_lookup command. */
   sql_cmdtab = pr_stash_get_symbol(PR_SYM_HOOK, "sql_lookup", NULL, NULL);
@@ -85,7 +92,7 @@ static array_header *sqltab_fetch_clients_cb(wrap2_table_t *sqltab,
   sql_cmd = sql_cmd_create(tmp_pool, 3, "sql_lookup", query, name);
 
   /* Call the handler. */
-  sql_res = call_module(sql_cmdtab->m, sql_cmdtab->handler, sql_cmd);
+  sql_res = pr_module_call(sql_cmdtab->m, sql_cmdtab->handler, sql_cmd);
 
   /* Check the results. */
   if (!sql_res) {
@@ -100,9 +107,6 @@ static array_header *sqltab_fetch_clients_cb(wrap2_table_t *sqltab,
     return NULL;
   }
 
-  /* Construct a single string, concatenating the returned client tokens
-   * together.
-   */
   sql_data = (array_header *) sql_res->data;
   vals = (char **) sql_data->elts;
 
@@ -113,12 +117,49 @@ static array_header *sqltab_fetch_clients_cb(wrap2_table_t *sqltab,
   }
 
   clients_list = make_array(sqltab->tab_pool, sql_data->nelts, sizeof(char *));
-  *((char **) push_array(clients_list)) = pstrdup(sqltab->tab_pool, vals[0]);
 
-  if (sql_data->nelts > 1) {
-    register unsigned int i = 0;
+  /* Iterate through each returned row.  If there are commas or whitespace
+   * in the row, parse them as separate client names.  Otherwise, a comma-
+   * or space-delimited list of names will be treated as a single name, and
+   * violate the principle of least surprise for the site admin.
+   */
 
-    for (i = 1; i < sql_data->nelts; i++) {
+  for (i = 0; i < sql_data->nelts; i++) {
+    char *ptr;
+
+    if (vals[i] == NULL) {
+      continue;
+    }
+
+    ptr = strpbrk(vals[i], ", \t");
+    if (ptr != NULL) {
+      char *dup = pstrdup(sqltab->tab_pool, vals[i]);
+      char *word;
+
+      while ((word = pr_str_get_token(&dup, ", \t")) != NULL) {
+        size_t wordlen;
+
+        pr_signals_handle();
+
+        wordlen = strlen(word);
+        if (wordlen == 0)
+          continue;
+
+        /* Remove any trailing comma */
+        if (word[wordlen-1] == ',')
+          word[wordlen-1] = '\0';
+
+        *((char **) push_array(clients_list)) = word;
+
+        /* Skip redundant whitespaces */
+        while (*dup == ' ' ||
+               *dup == '\t') {
+          pr_signals_handle();
+          dup++;
+        }
+      }
+
+    } else {
       *((char **) push_array(clients_list)) = pstrdup(sqltab->tab_pool,
         vals[i]);
     }
@@ -151,11 +192,13 @@ static array_header *sqltab_fetch_options_cb(wrap2_table_t *sqltab,
   /* Allocate a temporary pool for the duration of this read. */
   tmp_pool = make_sub_pool(sqltab->tab_pool);
 
-  query = ((char **) sqltab->tab_data)[1];
+  query = ((char **) sqltab->tab_data)[WRAP2_SQL_OPTION_QUERY_IDX];
 
   /* The options-query is not necessary.  Skip if not present. */
-  if (!query)
+  if (!query) {
+    destroy_pool(tmp_pool);
     return NULL;
+  }
 
   /* Find the cmdtable for the sql_lookup command. */
   sql_cmdtab = pr_stash_get_symbol(PR_SYM_HOOK, "sql_lookup", NULL, NULL);
@@ -169,7 +212,7 @@ static array_header *sqltab_fetch_options_cb(wrap2_table_t *sqltab,
   sql_cmd = sql_cmd_create(tmp_pool, 3, "sql_lookup", query, name);
 
   /* Call the handler. */
-  sql_res = call_module(sql_cmdtab->m, sql_cmdtab->handler, sql_cmd);
+  sql_res = pr_module_call(sql_cmdtab->m, sql_cmdtab->handler, sql_cmd);
 
   /* Check the results. */
   if (!sql_res) {
@@ -203,6 +246,10 @@ static array_header *sqltab_fetch_options_cb(wrap2_table_t *sqltab,
     register unsigned int i = 0;
 
     for (i = 1; i < sql_data->nelts; i++) {
+      if (vals[i] == NULL) {
+        continue;
+      }
+
       *((char **) push_array(options_list)) = pstrdup(sqltab->tab_pool,
         vals[i]);
     }
@@ -282,10 +329,11 @@ static wrap2_table_t *sqltab_open_cb(pool *parent_pool, char *srcinfo) {
 
   tab->tab_name = pstrcat(tab->tab_pool, "SQL(", srcinfo, ")", NULL);
 
-  tab->tab_data = pcalloc(tab->tab_pool, 2 * sizeof(char));
-  ((char **) tab->tab_data)[0] = pstrdup(tab->tab_pool, clients_query);
+  tab->tab_data = pcalloc(tab->tab_pool, WRAP2_SQL_NSLOTS * sizeof(char *));
+  ((char **) tab->tab_data)[WRAP2_SQL_CLIENT_QUERY_IDX] =
+    pstrdup(tab->tab_pool, clients_query);
 
-  ((char **) tab->tab_data)[1] =
+  ((char **) tab->tab_data)[WRAP2_SQL_OPTION_QUERY_IDX] =
     (options_query ? pstrdup(tab->tab_pool, options_query) : NULL);
 
   /* Set the necessary callbacks. */
@@ -298,10 +346,30 @@ static wrap2_table_t *sqltab_open_cb(pool *parent_pool, char *srcinfo) {
   return tab;
 }
 
+/* Event handlers
+ */
+
+#if defined(PR_SHARED_MODULE)
+static void sqltab_mod_unload_ev(const void *event_data, void *user_data) {
+  if (strcmp("mod_wrap2_sql.c", (const char *) event_data) == 0) {
+    pr_event_unregister(&wrap2_sql_module, NULL, NULL);
+    wrap2_unregister("sql");
+  }
+}
+#endif /* PR_SHARED_MODULE */
+
+/* Initialization routines
+ */
+
 static int sqltab_init(void) {
 
   /* Initialize the wrap source objects for type "sql".  */
   wrap2_register("sql", sqltab_open_cb);
+
+#if defined(PR_SHARED_MODULE)
+  pr_event_register(&wrap2_sql_module, "core.module-unload",
+    sqltab_mod_unload_ev, NULL);
+#endif /* PR_SHARED_MODULE */
 
   return 0;
 }

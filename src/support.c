@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2007 The ProFTPD Project team
+ * Copyright (c) 2001-2010 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -27,7 +27,7 @@
 /* Various basic support routines for ProFTPD, used by all modules
  * and not specific to one or another.
  *
- * $Id: support.c,v 1.92 2007/02/15 17:54:58 castaglia Exp $
+ * $Id: support.c,v 1.104.2.1 2010/06/15 16:58:38 castaglia Exp $
  */
 
 #include "conf.h"
@@ -45,6 +45,15 @@
 #ifdef AIX3
 # include <sys/statfs.h>
 #endif
+
+#ifdef PR_USE_OPENSSL
+# include <openssl/crypto.h>
+#endif /* PR_USE_OPENSSL */
+
+/* Keep a counter of the number of times signals_block()/signals_unblock()
+ * have been called, to handle nesting of calls.
+ */
+static unsigned int sigs_nblocked = 0;
 
 typedef struct sched_obj {
   struct sched_obj *next, *prev;
@@ -81,16 +90,40 @@ static void mask_signals(unsigned char block) {
 
     sigprocmask(SIG_BLOCK, &mask_sigset, NULL);
 
-  } else
+  } else {
     sigprocmask(SIG_UNBLOCK, &mask_sigset, NULL);
+  }
 }
 
 void pr_signals_block(void) {
-  mask_signals(TRUE);
+  if (sigs_nblocked == 0) {
+    mask_signals(TRUE);
+    pr_trace_msg("signal", 5, "signals blocked");
+
+  } else {
+    pr_trace_msg("signal", 9, "signals already blocked (block count = %u)",
+      sigs_nblocked);
+  }
+
+  sigs_nblocked++;
 }
 
 void pr_signals_unblock(void) {
-  mask_signals(FALSE);
+  if (sigs_nblocked == 0) {
+    pr_trace_msg("signal", 5, "signals already unblocked");
+    return;
+  }
+
+  if (sigs_nblocked == 1) {
+    mask_signals(FALSE);
+    pr_trace_msg("signal", 5, "signals unblocked");
+
+  } else {
+    pr_trace_msg("signal", 9, "signals already unblocked (block count = %u)",
+      sigs_nblocked);
+  }
+
+  sigs_nblocked--;
 }
 
 void schedule(void (*f)(void*,void*,void*,void*),int nloops, void *a1,
@@ -328,11 +361,29 @@ char *dir_realpath(pool *p, const char *path) {
 char *dir_abs_path(pool *p, const char *path, int interpolate) {
   char *res = NULL;
 
-  if (interpolate)
-    path = dir_interpolate(p, path);
-
-  if (!path)
+  if (path == NULL) {
+    errno = EINVAL;
     return NULL;
+  }
+
+  if (interpolate) {
+    char buf[PR_TUNABLE_PATH_MAX+1];
+
+    memset(buf, '\0', sizeof(buf));
+    switch (pr_fs_interpolate(path, buf, sizeof(buf)-1)) {
+      case -1:
+        return NULL;
+
+      case 0:
+        /* Do nothing; path exists */
+        break;
+
+      case 1:
+        /* Interpolation occurred; make a copy of the interpolated path. */
+        path = pstrdup(p, buf);
+        break;
+    }
+  }
 
   if (*path != '/') {
     if (session.chroot_path) {
@@ -448,67 +499,6 @@ int exists(char *path) {
   return _exists(path, -1);
 }
 
-char *pr_str_strip(pool *p, char *str) {
-  char c, *dupstr, *start, *finish;
-
-  if (!p || !str) {
-    errno = EINVAL;
-    return NULL;
-  }
-
-  /* First, find the non-whitespace start of the given string */
-  for (start = str; isspace((int) *start); start++);
-
-  /* Now, find the non-whitespace end of the given string */
-  for (finish = &str[strlen(str)-1]; isspace((int) *finish); finish--);
-
-  /* finish is now pointing to a non-whitespace character.  So advance one
-   * character forward, and set that to NUL.
-   */
-  c = *++finish;
-  *finish = '\0';
-
-  /* The space-stripped string is, then, everything from start to finish. */
-  dupstr = pstrdup(p, start);
- 
-  /* Restore the given string buffer contents. */
-  *finish = c;
-
-  return dupstr;
-}
-
-char *strip_end(char *s, char *ch) {
-  int i = strlen(s);
-
-  while (i && strchr(ch,*(s+i-1))) {
-    *(s+i-1) = '\0';
-    i--;
-  }
-
-  return s;
-}
-
-/* get_token tokenizes a string, increments the src pointer to
- * the next non-separator in the string.  If the src string is
- * empty or NULL, the next token returned is NULL.
- */
-char *get_token(char **s, char *sep) {
-  char *res;
-
-  if (!s || !*s || !**s)
-    return NULL;
-
-  res = *s;
-
-  while (**s && !strchr(sep,**s))
-    (*s)++;
-
-  if (**s)
-    *(*s)++ = '\0';
-
-  return res;
-}
-
 /* safe_token tokenizes a string, and increments the pointer to
  * the next non-white space character.  It's "safe" because it
  * never returns NULL, only an empty string if no token remains
@@ -610,171 +600,6 @@ int check_shutmsg(time_t *shut, time_t *deny, time_t *disc, char *msg,
   return 0;
 }
 
-/* Make sure we don't display any sensitive information via argstr. Note:
- * make this a separate function in the future (get_full_cmd() or somesuch),
- * and have that function deal with creating a displayable string.  Once
- * RFC2228 support is added, PASS won't be the only command whose parameters
- * should not be displayed.
- */
-char *make_arg_str(pool *p, int argc, char **argv) {
-  char *res = "";
-
-  /* Check for "sensitive" commands. */
-  if (!strcmp(argv[0], C_PASS) ||
-      !strcmp(argv[0], C_ADAT)) {
-    argc = 2;
-    argv[1] = "(hidden)";
-  }
-
-  while (argc--) {
-    if (*res)
-      res = pstrcat(p, res, " ", *argv++, NULL);
-    else
-      res = pstrcat(p, res, *argv++, NULL);
-  }
-
-  return res;
-}
-
-char *sreplace(pool *p, char *s, ...) {
-  va_list args;
-  char *m,*r,*src = s,*cp;
-  char **mptr,**rptr;
-  char *marr[33],*rarr[33];
-  char buf[PR_TUNABLE_PATH_MAX] = {'\0'}, *pbuf = NULL;
-  size_t mlen = 0, rlen = 0;
-  int blen;
-  int dyn = TRUE;
-
-  cp = buf;
-  *cp = '\0';
-
-  memset(marr, '\0', sizeof(marr));
-  memset(rarr, '\0', sizeof(rarr));
-  blen = strlen(src) + 1;
-
-  va_start(args, s);
-
-  while ((m = va_arg(args, char *)) != NULL && mlen < sizeof(marr)-1) {
-    char *tmp = NULL;
-    int count = 0;
-
-    if ((r = va_arg(args, char *)) == NULL)
-      break;
-
-    /* Increase the length of the needed buffer by the difference between
-     * the given match and replacement strings, multiplied by the number
-     * of times the match string occurs in the source string.
-     */
-    tmp = strstr(s, m);
-    while (tmp) {
-      pr_signals_handle();
-      count++;
-      if (count > 8) {
-        /* More than eight instances of the same escape on the same line?
-         * Give me a break.
-         */
-        return s;
-      }
-
-      /* Be sure to increment the pointer returned by strstr(3), to
-       * advance past the beginning of the substring for which we are
-       * looking.  Otherwise, we just loop endlessly, seeing the same
-       * value for tmp over and over.
-       */
-      tmp += strlen(m);
-      tmp = strstr(tmp, m);
-    }
-
-    /* We are only concerned about match/replacement strings that actually
-     * occur in the given string.
-     */
-    if (count) {
-      blen += count * (strlen(r) - strlen(m));
-      if (blen < 0) {
-        /* Integer overflow. In order to overflow this, somebody must be
-         * doing something very strange. The possibility still exists that
-         * we might not catch this overflow in extreme corner cases, but
-         * massive amounts of data (gigabytes) would need to be in s to
-         * trigger this, easily larger than any buffer we might use.
-         */
-        return s;
-      }
-      marr[mlen] = m;
-      rarr[mlen++] = r;
-    }
-  }
-
-  va_end(args);
-
-  /* Try to handle large buffer situations (i.e. escaping of PR_TUNABLE_PATH_MAX
-   * (>2048) correctly, but do not allow very big buffer sizes, that may
-   * be dangerous (BUFSIZ may be defined in stdio.h) in some library
-   * functions.
-   */
-#ifndef BUFSIZ
-# define BUFSIZ 8192
-#endif
-
-  if (blen < BUFSIZ)
-    cp = pbuf = (char *) pcalloc(p, ++blen);
-
-  if (!pbuf) {
-    cp = pbuf = buf;
-    dyn = FALSE;
-    blen = sizeof(buf);
-  }
-
-  while (*src) {
-    for (mptr = marr, rptr = rarr; *mptr; mptr++, rptr++) {
-      mlen = strlen(*mptr);
-      rlen = strlen(*rptr);
-
-      if (strncmp(src, *mptr, mlen) == 0) {
-        sstrncpy(cp, *rptr, blen - strlen(pbuf));
-	if (((cp + rlen) - pbuf + 1) > blen) {
-	  pr_log_pri(PR_LOG_ERR,
-		  "WARNING: attempt to overflow internal ProFTPD buffers");
-	  cp = pbuf;
-          if (blen >= BUFSIZ)
-            blen = BUFSIZ;
-          cp += (blen - 1);
-
-	  goto done;
-
-	} else {
-	  cp += rlen;
-	}
-	
-        src += mlen;
-        break;
-      }
-    }
-
-    if (!*mptr) {
-      if ((cp - pbuf + 1) >= blen) {
-	pr_log_pri(PR_LOG_ERR,
-		"WARNING: attempt to overflow internal ProFTPD buffers");
-	cp = pbuf;
-        if (blen >= BUFSIZ)
-          blen = BUFSIZ;
-        cp += (blen - 1);
-
-	goto done;
-      }
-      *cp++ = *src++;
-    }
-  }
-
- done:
-  *cp = '\0';
-
-  if (dyn)
-    return pbuf;
-
-  return pstrdup(p, buf);
-}
-
 /* "safe" memset() (code borrowed from OpenSSL).  This function should be
  * used to clear/scrub sensitive memory areas instead of memset() for the
  * reasons mentioned in this BugTraq thread:
@@ -785,10 +610,23 @@ char *sreplace(pool *p, char *s, ...) {
 unsigned char memscrub_ctr = 0;
 
 void pr_memscrub(void *ptr, size_t ptrlen) {
+#if defined(PR_USE_OPENSSL) && OPENSSL_VERSION_NUMBER > 0x000907000L
+  if (ptr == NULL ||
+      ptrlen == 0) {
+    return;
+  }
+
+  /* Just use OpenSSL's function for this.  They have optimized it for
+   * performance in later OpenSSL releases.
+   */
+  OPENSSL_cleanse(ptr, ptrlen);
+
+#else 
   unsigned char *p;
   size_t loop;
 
-  if (!ptr || ptrlen == 0) {
+  if (ptr == NULL ||
+      ptrlen == 0) {
     return;
   }
 
@@ -802,34 +640,24 @@ void pr_memscrub(void *ptr, size_t ptrlen) {
 
   if (memchr(ptr, memscrub_ctr, ptrlen))
     memscrub_ctr += 63;
-}
-
-/* "safe" strcat, saves room for \0 at end of dest, and refuses to copy
- * more than "n" bytes.
- */
-char *sstrcat(char *dest, const char *src, size_t n) {
-  register char *d;
-
-  if (!dest || !src || n == 0) {
-    errno = EINVAL;
-    return NULL;
-  }
-
-  for (d = dest; *d && n > 1; d++, n--) ;
-
-  while (n-- > 1 && *src)
-    *d++ = *src++;
-
-  *d = 0;
-  return dest;
+#endif
 }
 
 struct tm *pr_gmtime(pool *p, const time_t *t) {
   struct tm *sys_tm, *dup_tm;
 
   sys_tm = gmtime(t);
-  dup_tm = pcalloc(p, sizeof(struct tm));
-  memcpy(dup_tm, sys_tm, sizeof(struct tm));
+
+  /* If the caller provided a pool, make a copy of the struct tm using that
+   * pool.  Otherwise, return the struct tm as is.
+   */
+  if (p) {
+    dup_tm = pcalloc(p, sizeof(struct tm));
+    memcpy(dup_tm, sys_tm, sizeof(struct tm));
+
+  } else {
+    dup_tm = sys_tm;
+  }
 
   return dup_tm;
 }
@@ -894,7 +722,11 @@ struct tm *pr_localtime(pool *p, const time_t *t) {
 }
 
 const char *pr_strtime(time_t t) {
-  static char buf[30];
+  return pr_strtime2(t, FALSE);
+}
+
+const char *pr_strtime2(time_t t, int use_gmtime) {
+  static char buf[64];
   static char *mons[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul",
     "Aug", "Sep", "Oct", "Nov", "Dec" };
   static char *days[] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
@@ -902,14 +734,21 @@ const char *pr_strtime(time_t t) {
 
   memset(buf, '\0', sizeof(buf));
 
-  tr = pr_localtime(NULL, &t);
+  if (use_gmtime) {
+    tr = pr_gmtime(NULL, &t);
+
+  } else {
+    tr = pr_localtime(NULL, &t);
+  }
+
   if (tr != NULL) {
-    snprintf(buf, sizeof(buf), "%s %s %2d %02d:%02d:%02d %d",
+    snprintf(buf, sizeof(buf), "%s %s %02d %02d:%02d:%02d %d",
       days[tr->tm_wday], mons[tr->tm_mon], tr->tm_mday, tr->tm_hour,
       tr->tm_min, tr->tm_sec, tr->tm_year + 1900);
 
-  } else
+  } else {
     buf[0] = '\0';
+  }
 
   buf[sizeof(buf)-1] = '\0';
 

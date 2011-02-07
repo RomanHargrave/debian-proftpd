@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2007 The ProFTPD Project team
+ * Copyright (c) 2001-2009 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,7 +26,7 @@
 
 /* ProFTPD module definitions.
  *
- * $Id: modules.h,v 1.48 2007/01/19 21:59:44 castaglia Exp $
+ * $Id: modules.h,v 1.53 2009/02/15 00:27:34 castaglia Exp $
  */
 
 #ifndef PR_MODULES_H
@@ -156,7 +156,10 @@ struct module_struc {
 
 unsigned char command_exists(char *);
 int modules_init(void);
-void modules_list(void);
+void modules_list(int);
+#define PR_MODULES_LIST_FL_SHOW_VERSION		0x00001
+#define PR_MODULES_LIST_FL_SHOW_STATIC		0x00002
+
 int modules_session_init(void);
 
 unsigned char pr_module_exists(const char *);
@@ -164,7 +167,7 @@ module *pr_module_get(const char *);
 int pr_module_load(module *m);
 int pr_module_unload(module *m);
 
-modret_t *call_module(module *, modret_t *(*)(cmd_rec *), cmd_rec *);
+modret_t *pr_module_call(module *, modret_t *(*)(cmd_rec *), cmd_rec *);
 
 /* Symbol table hash ("stash") support. */
 typedef enum {
@@ -189,9 +192,6 @@ extern int (*cmd_auth_chk)(cmd_rec *);
 modret_t *mod_create_ret(cmd_rec *, unsigned char, char *, char *);
 modret_t *mod_create_error(cmd_rec *, int);
 modret_t *mod_create_data(cmd_rec *, void *);
-
-/* Implemented in main.c */
-int pr_cmd_dispatch(cmd_rec *);
 
 /* Implemented in mod_core.c */
 int core_chgrp(cmd_rec *, char *, uid_t, gid_t);

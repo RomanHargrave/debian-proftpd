@@ -37,9 +37,6 @@
 /* Define to `int' if <sys/socket.h> doesn't define. */
 #undef socklen_t
 
-/* Define to `mode_t' if <sys/types.h> doesn't define. */
-#undef umode_t
-
 /* Define if you have AIX send_file() semantics. */
 #undef HAVE_AIX_SENDFILE
 
@@ -54,6 +51,9 @@
 
 /* Define if you have Linux sendfile() semantics. */
 #undef HAVE_LINUX_SENDFILE
+
+/* Define if you have Mac OSX sendfile() semantics.  */
+#undef HAVE_MACOSX_SENDFILE
 
 /* Define if you have Solaris POSIX ACLs. */
 #undef HAVE_SOLARIS_POSIX_ACL
@@ -70,14 +70,17 @@
 /* Define if you want support for PAM based authentication */
 #undef HAVE_PAM
 
-/* Define if you have the <linux/capability.h> header file. */
-#undef HAVE_LINUX_CAPABILITY_H
-
 /* Define if your DIR structure has member dd_fd */
 #undef HAVE_STRUCT_DIR_DD_FD
 
 /* Define if your DIR structure has member __dd_fd */
 #undef HAVE_STRUCT_DIR___DD_FD
+
+/* Define if you have struct cmsgcred.  */
+#undef HAVE_STRUCT_CMSGCRED
+
+/* Define if you have struct sockcred.  */
+#undef HAVE_STRUCT_SOCKCRED
 
 /* Define if your spwd structure has member warn */
 #undef HAVE_SPWD_SP_WARN
@@ -240,6 +243,9 @@
 /* Define if you have the crypt function.  */
 #undef HAVE_CRYPT
 
+/* Define if you have the dirfd function.  */
+#undef HAVE_DIRFD
+
 /* Define if you have the endprotoent function.  */
 #undef HAVE_ENDPROTOENT
 
@@ -270,6 +276,9 @@
 /* Define if you have the freeaddrinfo function.  */
 #undef HAVE_FREEADDRINFO
 
+/* Define if you have the futimes function.  */
+#undef HAVE_FUTIMES
+
 /* Define if you have the gai_strerror function.  */
 #undef HAVE_GAI_STRERROR
 
@@ -281,6 +290,12 @@
 
 /* Define if you have the getenv function.  */
 #undef HAVE_GETENV
+
+/* Define if you have the getgrouplist function.  */
+#undef HAVE_GETGROUPLIST
+
+/* Define if you have the getgrset function.  */
+#undef HAVE_GETGRSET
 
 /* Define if you have the gethostbyname2 function.  */
 #undef HAVE_GETHOSTBYNAME2
@@ -296,6 +311,18 @@
 
 /* Define if you have the getopt_long function.  */
 #undef HAVE_GETOPT_LONG
+
+/* Define if you have the getpeereid function.  */
+#undef HAVE_GETPEEREID
+
+/* Define if you have the getpeerucred function.  */
+#undef HAVE_GETPEERUCRED
+
+/* Define if you have the getpgid function.  */
+#undef HAVE_GETPGID
+
+/* Define if you have the getpgrp function.  */
+#undef HAVE_GETPGRP
 
 /* Define if you have the getprpwent function.  */
 #undef HAVE_GETPRPWENT
@@ -317,6 +344,9 @@
 
 /* Define if you have the inet_pton function.  */
 #undef HAVE_INET_PTON
+
+/* Define if you have the loginrestrictions function.  */
+#undef HAVE_LOGINRESTRICTIONS
 
 /* Define if you have the memcpy function.  */
 #undef HAVE_MEMCPY
@@ -429,6 +459,9 @@
 /* Define if you have the tzset function.  */
 #undef HAVE_TZSET
 
+/* Define if you have the uname function.  */
+#undef HAVE_UNAME
+
 /* Define if you have the unsetenv function.  */
 #undef HAVE_UNSETENV
 
@@ -443,6 +476,9 @@
 
 /* Define if you have the <bstring.h> header file.  */
 #undef HAVE_BSTRING_H
+
+/* Define if you have the <check.h> header file.  */
+#undef HAVE_CHECK_H
 
 /* Define if you have the <crypt.h> header file.  */
 #undef HAVE_CRYPT_H
@@ -494,6 +530,9 @@
 
 /* Define if you have the <limits.h> header file.  */
 #undef HAVE_LIMITS_H
+
+/* Define if you have the <linux/capability.h> header file.  */
+#undef HAVE_LINUX_CAPABILITY_H
 
 /* Define if you have the <locale.h> header file.  */
 #undef HAVE_LOCALE_H
@@ -591,6 +630,9 @@
 /* Define if you have the <sys/pstat.h> header file.  */
 #undef HAVE_SYS_PSTAT_H
 
+/* Define if you have the <sys/resource.h> header file.  */
+#undef HAVE_SYS_RESOURCE_H
+
 /* Define if you have the <sys/security.h> header file.  */
 #undef HAVE_SYS_SECURITY_H
 
@@ -621,6 +663,9 @@
 /* Define if you have the <sys/types.h> header file.  */
 #undef HAVE_SYS_TYPES_H
 
+/* Define if you have the <sys/ucred.h> header file.  */
+#undef HAVE_SYS_UCRED_H
+
 /* Define if you have the <sys/uio.h> header file.  */
 #undef HAVE_SYS_UIO_H
 
@@ -633,14 +678,23 @@
 /* Define if you have <sys/wait.h> that is POSIX.1 compatible.  */
 #undef HAVE_SYS_WAIT_H
 
+/* Define if you have the <termios.h> header file.  */
+#undef HAVE_TERMIOS_H
+
 /* Define if you have the <ucontext.h> header file.  */
 #undef HAVE_UCONTEXT_H
+
+/* Define if you have the <ucred.h> header file.  */
+#undef HAVE_UCRED_H
 
 /* Define if you have the <unistd.h> header file.  */
 #undef HAVE_UNISTD_H
 
+/* Define if you have the <usersec.h> header file.  */
+#undef HAVE_USERSEC_H
+
 /* Define if you have the <utime.h> header file.  */
-#define HAVE_UTIME_H
+#undef HAVE_UTIME_H
 
 /* Define if you have the <utmp.h> header file.  */
 #undef HAVE_UTMP_H
@@ -657,8 +711,17 @@
 /* Define if you have the bind library (-lbind).  */
 #undef HAVE_LIBBIND
 
+/* Define if you have the cap library (-lcap).  */
+#undef HAVE_LIBCAP
+
+/* Define if you have the cap (v2) library (-lcap2).  */
+#undef HAVE_LIBCAP2
+
 /* Define if you have the crypt library (-lcrypt).  */
 #undef HAVE_LIBCRYPT
+
+/* Define if you have the check library (-lcheck).  */
+#undef HAVE_LIBCHECK
 
 /* Define if you have the curses library (-lcurses).  */
 #undef HAVE_LIBCURSES
@@ -666,11 +729,17 @@
 /* Define if you have the UnixWare gen library (-lgen).  */
 #undef HAVE_LIBGEN
 
+/* Define if you have the iconv library (-liconv).  */
+#undef HAVE_LIBICONV
+
 /* Define if you have the intl library (-lintl).  */
 #undef HAVE_LIBINTL
 
 /* Define if you have the ncurses library (-lncurses).  */
 #undef HAVE_LIBNCURSES
+
+/* Define if you have the ncurses library (-lncursesw).  */
+#undef HAVE_LIBNCURSESW
 
 /* Define if you have the nsl library (-lnsl).  */
 #undef HAVE_LIBNSL
@@ -722,6 +791,10 @@
 #ifndef PR_CONFIG_DIR
 #undef PR_CONFIG_DIR
 #endif /* PR_CONFIG_DIR */
+
+#ifndef PR_INCLUDE_DIR
+#undef PR_INCLUDE_DIR
+#endif /* PR_INCLUDE_DIR */
 
 #ifndef PR_LIBEXEC_DIR
 #undef PR_LIBEXEC_DIR
@@ -803,6 +876,12 @@
 /* Define if ncurses support, if available, should be used.  */
 #undef PR_USE_NCURSES
 
+/* Define if ncursesw support, if available, should be used.  */
+#undef PR_USE_NCURSESW
+
+/* Define if using nonblocking open of log files.  */
+#undef PR_USE_NONBLOCKING_LOG_OPEN
+
 /* Define if OpenSSL support, if available, should be used.  */
 #undef PR_USE_OPENSSL
 
@@ -818,6 +897,9 @@
 /* Define if use of system getopt is desired.  */
 #undef PR_USE_SYSTEM_GETOPT
 
+/* Define if using testsuite support.  */
+#undef PR_USE_TESTS
+
 /* Define if using trace support.  */
 #undef PR_USE_TRACE
 
@@ -832,17 +914,5 @@
 #undef PR_TUNABLE_TIMEOUTNOXFER
 #undef PR_TUNABLE_TIMEOUTSTALLED
 #undef PR_TUNABLE_XFER_SCOREBOARD_UPDATES
-
-#ifndef PR_TUNABLE_RCVBUFSZ
-# undef PR_TUNABLE_RCVBUFSZ
-#endif
-
-#ifndef PR_TUNABLE_SNDBUFSZ
-# undef PR_TUNABLE_SNDBUFSZ
-#endif
-
-#ifndef PR_TUNABLE_XFER_BUFFER_SIZE
-# undef PR_TUNABLE_XFER_BUFFER_SIZE
-#endif
 
 #endif /* config_h_included */

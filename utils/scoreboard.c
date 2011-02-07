@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2001, 2002, 2003 The ProFTPD Project team
+ * Copyright (c) 2001-2008 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
 /*
  * ProFTPD scoreboard support (modified for use by external utilities).
  *
- * $Id: scoreboard.c,v 1.8 2006/03/22 18:51:45 castaglia Exp $
+ * $Id: scoreboard.c,v 1.13 2009/12/03 21:45:24 castaglia Exp $
  */
 
 #include "utils.h"
@@ -53,8 +53,8 @@ static int read_scoreboard_header(pr_scoreboard_header_t *header) {
 
     if (errno == EINTR)
       continue;
-    else
-      return -1;
+
+    return -1;
   }
 
   /* Note: these errors will most likely occur only for inetd-run daemons.
@@ -82,33 +82,22 @@ static int rlock_scoreboard(void) {
   lock.l_len = 0;
 
   while (fcntl(util_scoreboard_fd, F_SETLKW, &lock) < 0) {
-    if (errno == EINTR)
+
+    /* It would be nice to try to restart the fcntl(2) in cases where
+     * it is interrupted.  However, that could possibly lead to a tight
+     * loop which leaves the scoreboard file locked, which in turn causes
+     * problems for the proftpd daemon trying to read that scoreboard.
+     *
+     * Instead, only retry the fcntl(2) on EAGAIN, and NOT on EINTR.
+     */
+    if (errno == EAGAIN)
       continue;
-    else
-      return -1;
+
+    return -1;
   }
 
   util_scoreboard_read_locked = TRUE;
   return 0;
-}
-
-/* "safe" strncpy, saves room for \0 at end of dest, and refuses to copy
- * more than "n" bytes.
- */
-char *util_sstrncpy(char *dest, const char *src, size_t n) {
-  register char *d = dest;
-
-  if(!dest)
-    return NULL;
-
-  if(src && *src) {
-    for(; *src && n > 1; n--)
-      *d++ = *src++;
-  }
-
-  *d = '\0';
-
-  return dest;
 }
 
 static int unlock_scoreboard(void) {
@@ -120,7 +109,15 @@ static int unlock_scoreboard(void) {
   lock.l_len = 0;
 
   util_scoreboard_read_locked = FALSE;
-  return fcntl(util_scoreboard_fd, F_SETLK, &lock);
+
+  while (fcntl(util_scoreboard_fd, F_SETLK, &lock) < 0) {
+    if (errno == EAGAIN)
+      continue;
+
+    return -1;
+  }
+
+  return 0;
 }
 
 /* Public routines
@@ -152,7 +149,8 @@ int util_open_scoreboard(int flags) {
    * If so, close the file and error out.  If not, truncate as necessary,
    * and continue.
    */
-  if ((util_scoreboard_fd = open(util_scoreboard_file, flags)) < 0)
+  util_scoreboard_fd = open(util_scoreboard_file, flags);
+  if (util_scoreboard_fd < 0)
     return -1;
 
   if (fstat(util_scoreboard_fd, &st) < 0) {
@@ -169,7 +167,8 @@ int util_open_scoreboard(int flags) {
   }
 
   /* Check the header of this scoreboard file. */
-  if ((res = read_scoreboard_header(&util_header)) < 0)
+  res = read_scoreboard_header(&util_header);
+  if (res < 0)
     return res;
 
   return 0;
@@ -221,7 +220,7 @@ time_t util_scoreboard_get_daemon_uptime(void) {
   return util_header.sch_uptime;
 }
 
-pr_scoreboard_entry_t *util_scoreboard_read_entry(void) {
+pr_scoreboard_entry_t *util_scoreboard_entry_read(void) {
   static pr_scoreboard_entry_t scan_entry;
   int res = 0;
 
@@ -238,18 +237,22 @@ pr_scoreboard_entry_t *util_scoreboard_read_entry(void) {
 
   /* NOTE: use readv(2)? */
   errno = 0;
-  while (TRUE) {
+  while (scan_entry.sce_pid == 0) {
     while ((res = read(util_scoreboard_fd, &scan_entry,
         sizeof(scan_entry))) <= 0) {
-      if (res < 0 && errno == EINTR)
-        continue;
 
-      else {
+      if (res < 0 &&
+          errno == EINTR) {
+        continue;
+ 
+      } else {
         unlock_scoreboard();
 
-        if (errno)
+        if (errno) {
           fprintf(stdout, "error reading scoreboard entry: %s\n",
             strerror(errno));
+        }
+
         return NULL;
       }
     }
@@ -257,11 +260,101 @@ pr_scoreboard_entry_t *util_scoreboard_read_entry(void) {
     if (scan_entry.sce_pid) {
       unlock_scoreboard();
       return &scan_entry;
-
-    } else
-      continue;
+    }
   }
 
   unlock_scoreboard();
   return NULL;
+}
+
+int util_scoreboard_scrub(int verbose) {
+  int fd = -1;
+  off_t curr_offset = 0;
+  struct flock lock;
+  pr_scoreboard_entry_t sce;
+
+  if (verbose) {
+    fprintf(stdout, "scrubbing ScoreboardFile %s\n", util_get_scoreboard());
+  }
+
+  /* Manually open the scoreboard.  It won't hurt if the process already
+   * has a descriptor opened on the scoreboard file.
+   */
+  fd = open(util_get_scoreboard(), O_RDWR);
+  if (fd < 0) {
+    return -1;
+  }
+
+  /* Lock the entire scoreboard. */
+  lock.l_type = F_WRLCK;
+  lock.l_whence = 0;
+
+  lock.l_start = 0;
+  lock.l_len = 0;
+
+  /* We can afford to block/wait until we obtain our lock on the file. */
+  while (fcntl(fd, F_SETLKW, &lock) < 0) {
+    if (errno == EINTR) {
+      continue;
+    }
+
+    return -1;
+  }
+
+  /* Skip past the scoreboard header. */
+  curr_offset = lseek(fd, sizeof(pr_scoreboard_header_t), SEEK_SET);
+
+  memset(&sce, 0, sizeof(sce));
+
+  while (read(fd, &sce, sizeof(sce)) == sizeof(sce)) {
+
+    /* Check to see if the PID in this entry is valid.  If not, erase
+     * the slot.
+     */
+    if (sce.sce_pid &&
+        kill(sce.sce_pid, 0) < 0 &&
+        errno == ESRCH) {
+
+      /* OK, the recorded PID is no longer valid. */
+      if (verbose) {
+        fprintf(stdout, "scrubbing scoreboard slot for PID %u",
+          (unsigned int) sce.sce_pid);
+      }
+
+      /* Rewind to the start of this slot. */
+      lseek(fd, curr_offset, SEEK_SET);
+
+      memset(&sce, 0, sizeof(sce));
+      while (write(fd, &sce, sizeof(sce)) != sizeof(sce)) {
+        if (errno == EINTR) {
+          continue;
+        }
+
+        if (verbose) {
+          fprintf(stdout, "error scrubbing scoreboard: %s",
+            strerror(errno));
+        }
+      }
+    }
+
+    /* Mark the current offset. */
+    curr_offset = lseek(fd, 0, SEEK_CUR);
+  }
+
+  /* Release the scoreboard. */
+  lock.l_type = F_UNLCK;
+  lock.l_whence = SEEK_SET;
+  lock.l_start = 0;
+  lock.l_len = 0;
+
+  while (fcntl(fd, F_SETLKW, &lock) < 0) {
+    if (errno == EINTR) {
+      continue;
+    }
+  }
+
+  /* Don't need the descriptor anymore. */
+  (void) close(fd);
+
+  return 0;
 }

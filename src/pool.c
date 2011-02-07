@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2006 The ProFTPD Project team
+ * Copyright (c) 2001-2010 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,9 +24,8 @@
  * the source code for OpenSSL in the source distribution.
  */
 
-/*
- * Resource allocation code
- * $Id: pool.c,v 1.47 2007/01/11 04:09:37 castaglia Exp $
+/* Resource allocation code
+ * $Id: pool.c,v 1.56 2010/02/04 17:24:16 castaglia Exp $
  */
 
 #include "conf.h"
@@ -65,6 +64,25 @@ union block_hdr *block_freelist = NULL;
 static unsigned int stat_malloc = 0;	/* incr when malloc required */
 static unsigned int stat_freehit = 0;	/* incr when freelist used */
 
+#ifdef PR_USE_DEVEL
+/* Debug flags */
+static int debug_flags = 0;
+
+static void oom_printf(const char *fmt, ...) {
+  char buf[PR_TUNABLE_BUFFER_SIZE];
+  va_list msg;
+
+  memset(buf, '\0', sizeof(buf));
+
+  va_start(msg, fmt);
+  vsnprintf(buf, sizeof(buf), fmt, msg);
+  va_end(msg);
+
+  buf[sizeof(buf)-1] = '\0';
+  fprintf(stderr, "%s\n", buf);
+}
+#endif /* PR_USE_DEVEL */
+
 /* Lowest level memory allocation functions
  */
 
@@ -73,8 +91,14 @@ static void *null_alloc(size_t size) {
 
   if (size == 0)
     ret = malloc(size);
-  if (ret == 0) {
+
+  if (ret == NULL) {
     pr_log_pri(PR_LOG_ERR, "fatal: Memory exhausted");
+#ifdef PR_USE_DEVEL
+    if (debug_flags & PR_POOL_DEBUG_FL_OOM_DUMP_POOLS) {
+      pr_pool_debug_memory(oom_printf);
+    }
+#endif
     exit(1);
   }
 
@@ -105,23 +129,26 @@ static union block_hdr *malloc_block(int size) {
   return blok;
 }
 
-static void chk_on_blk_list(union block_hdr *blok, union block_hdr *free_blk) {
+static void chk_on_blk_list(union block_hdr *blok, union block_hdr *free_blk,
+    const char *pool_tag) {
+
   /* Debug code */
 
   while (free_blk) {
-    if (free_blk == blok) {
-      pr_log_pri(PR_LOG_ERR, "Fatal: DEBUG: Attempt to free already free block "
-       "in chk_on_blk_list()");
-      exit(1);
+    if (free_blk != blok) {
+      free_blk = free_blk->h.next;
+      continue;
     }
 
-    free_blk = free_blk->h.next;
+    pr_log_pri(PR_LOG_ERR, "Fatal: DEBUG: Attempt to free already free block "
+     "in pool '%s'", pool_tag ? pool_tag : "<unnamed>");
+    exit(1);
   }
 }
 
 /* Free a chain of blocks -- _must_ call with alarms blocked. */
 
-static void free_blocks(union block_hdr *blok) {
+static void free_blocks(union block_hdr *blok, const char *pool_tag) {
   /* Puts new blocks at head of block list, point next pointer of
    * last block in chain to free blocks we already had.
    */
@@ -136,12 +163,12 @@ static void free_blocks(union block_hdr *blok) {
   /* Adjust first_avail pointers */
 
   while (blok->h.next) {
-    chk_on_blk_list(blok, old_free_list);
+    chk_on_blk_list(blok, old_free_list, pool_tag);
     blok->h.first_avail = (char *) (blok + 1);
     blok = blok->h.next;
   }
 
-  chk_on_blk_list(blok, old_free_list);
+  chk_on_blk_list(blok, old_free_list, pool_tag);
   blok->h.first_avail = (char *) (blok + 1);
   blok->h.next = old_free_list;
 }
@@ -216,6 +243,17 @@ pool *global_config_pool = NULL;
 
 #ifdef PR_USE_DEVEL
 
+static unsigned long blocks_in_block_list(union block_hdr *blok) {
+  unsigned long count = 0;
+
+  while (blok) {
+    count++;
+    blok = blok->h.next;
+  }
+
+  return count;
+}
+
 static unsigned long bytes_in_block_list(union block_hdr *blok) {
   unsigned long size = 0;
 
@@ -225,6 +263,21 @@ static unsigned long bytes_in_block_list(union block_hdr *blok) {
   }
 
   return size;
+}
+
+static unsigned int subpools_in_pool(pool *p) {
+  unsigned int count = 0;
+  pool *iter;
+
+  if (p->sub_pools == NULL)
+    return 0;
+
+  for (iter = p->sub_pools; iter; iter = iter->sub_next) {
+    /* Count one for the current subpool (iter). */
+    count += (subpools_in_pool(iter) + 1);
+  }
+
+  return count;
 }
 
 /* Walk all pools, starting with top level permanent pool, displaying a
@@ -246,19 +299,31 @@ static long walk_pools(pool *p, int level,
       _levelpad[(level - 1) * 3] = '\0';
   }
 
+  /* The emitted message is:
+   *
+   *  <pool-tag> (n B, m L, r P)
+   *
+   * where n is the number of bytes (B), m is the number of allocated blocks
+   * in the pool list (L), and r is the number of sub-pools (P).
+   */
+
   for (; p; p = p->sub_next) {
     total += bytes_in_block_list(p->first);
-    if (level == 0)
-      debugf("%s (%lu bytes)", p->tag ? p->tag : "[none]",
-        bytes_in_block_list(p->first));
+    if (level == 0) {
+      debugf("%s (%lu B, %lu L, %u P)",
+        p->tag ? p->tag : "<unnamed>", bytes_in_block_list(p->first),
+        blocks_in_block_list(p->first), subpools_in_pool(p));
 
-    else
-      debugf("%s\\- %s (%lu bytes)", _levelpad,
-        p->tag ? p->tag : "[none]", bytes_in_block_list(p->first));
+    } else {
+      debugf("%s + %s (%lu B, %lu L, %u P)", _levelpad,
+        p->tag ? p->tag : "<unnamed>", bytes_in_block_list(p->first),
+        blocks_in_block_list(p->first), subpools_in_pool(p));
+    }
 
     /* Recurse */
-    if (p->sub_pools)
+    if (p->sub_pools) {
       total += walk_pools(p->sub_pools, level+1, debugf);
+    }
   }
 
   return total;
@@ -269,7 +334,7 @@ static void debug_pool_info(void (*debugf)(const char *, ...)) {
     debugf("Free block list: %lu bytes",
       bytes_in_block_list(block_freelist));
   else
-    debugf("Free block list: EMPTY");
+    debugf("Free block list: empty");
 
   debugf("%u count blocks allocated", stat_malloc);
   debugf("%u count blocks reused", stat_freehit);
@@ -280,6 +345,12 @@ void pr_pool_debug_memory(void (*debugf)(const char *, ...)) {
   debugf("Total %lu bytes allocated", walk_pools(permanent_pool, 0, debugf));
   debug_pool_info(debugf);
 }
+
+int pr_pool_debug_set_flags(int flags) {
+  debug_flags = flags;
+  return 0;
+}
+
 #endif /* PR_USE_DEVEL */
 
 void pr_pool_tag(pool *p, const char *tag) {
@@ -396,7 +467,7 @@ static void clear_pool(struct pool *p) {
     destroy_pool(p->sub_pools);
   p->sub_pools = NULL;
 
-  free_blocks(p->first->h.next);
+  free_blocks(p->first->h.next, p->tag);
   p->first->h.next = NULL;
 
   p->last = p->first;
@@ -422,7 +493,7 @@ void destroy_pool(pool *p) {
       p->sub_next->sub_prev = p->sub_prev;
   }
   clear_pool(p);
-  free_blocks(p->first);
+  free_blocks(p->first, p->tag);
 
   pr_alarms_unblock();
 }
@@ -488,115 +559,23 @@ void *pcallocsz(struct pool *p, int sz) {
   return res;
 }
 
-char *pstrdup(struct pool *p, const char *s) {
-  char *res;
-  size_t len;
-
-  if (!p || !s) {
-    errno = EINVAL;
-    return NULL;
-  }
-
-  len = strlen(s) + 1;
-
-  res = palloc(p, len);
-  sstrncpy(res, s, len);
-  return res;
-}
-
-char *pstrndup(struct pool *p, const char *s, int n) {
-  char *res;
-
-  if (!p || !s) {
-    errno = EINVAL;
-    return NULL;
-  }
-
-  res = palloc(p, n + 1);
-  sstrncpy(res, s, n + 1);
-  return res;
-}
-
-char *pdircat(pool *p, ...) {
-  char *argp, *res;
-  char last;
-
-  int len = 0, count = 0;
-  va_list dummy;
-
-  va_start(dummy, p);
-
-  last = 0;
-
-  while ((res = va_arg(dummy, char *)) != NULL) {
-    /* If the first argument is "", we have to account for a leading /
-     * which must be added.
-     */
-    if (!count++ && !*res)
-      len++;
-    else if (last && last != '/' && *res != '/')
-      len++;
-    else if (last && last == '/' && *res == '/')
-      len--;
-    len += strlen(res);
-    last = (*res ? res[strlen(res) - 1] : 0);
-  }
-
-  va_end(dummy);
-  res = (char *) pcalloc(p, len + 1);
-
-  va_start(dummy, p);
-
-  last = 0;
-
-  while ((argp = va_arg(dummy, char *)) != NULL) {
-    if (last && last == '/' && *argp == '/')
-      argp++;
-    else if (last && last != '/' && *argp != '/')
-      sstrcat(res, "/", len + 1);
-
-    sstrcat(res, argp, len + 1);
-    last = (*res ? res[strlen(res) - 1] : 0);
-  }
-
-  va_end(dummy);
-
-  return res;
-}
-
-char *pstrcat(pool *p, ...) {
-  char *argp, *res;
-
-  size_t len = 0;
-  va_list dummy;
-
-  va_start(dummy, p);
-
-  while ((res = va_arg(dummy, char *)) != NULL)
-    len += strlen(res);
-
-  va_end(dummy);
-
-  res = (char *) pcalloc(p, len + 1);
-
-  va_start(dummy, p);
-
-  while ((argp = va_arg(dummy, char *)) != NULL)
-    sstrcat(res, argp, len + 1);
-
-  va_end(dummy);
-
-  return res;
-}
-
 /*
  * Array functions
  */
 
-array_header *make_array(pool *p, int nelts, int elt_size) {
-  array_header *res = (array_header *) palloc(p, sizeof(array_header));
+array_header *make_array(pool *p, unsigned int nelts, size_t elt_size) {
+  array_header *res;
 
-  if (nelts < 1) nelts = 1;
+  if (p == NULL ||
+      elt_size == 0) {
+    errno = EINVAL;
+    return NULL;
+  }
+
+  res = palloc(p, sizeof(array_header));
+
+  if (nelts < 1)
+    nelts = 1;
 
   res->elts = pcalloc(p, nelts * elt_size);
   res->pool = p;
@@ -607,7 +586,21 @@ array_header *make_array(pool *p, int nelts, int elt_size) {
   return res;
 }
 
+void clear_array(array_header *arr) {
+  if (arr == NULL) {
+    return;
+  }
+
+  arr->elts = pcalloc(arr->pool, arr->nalloc * arr->elt_size);
+  arr->nelts = 0;
+}
+
 void *push_array(array_header *arr) {
+  if (arr == NULL) {
+    errno = EINVAL;
+    return NULL;
+  }
+
   if (arr->nelts == arr->nalloc) {
     char *new_data = pcalloc(arr->pool, arr->nalloc * arr->elt_size * 2);
 
@@ -617,19 +610,27 @@ void *push_array(array_header *arr) {
   }
 
   ++arr->nelts;
-  return ((char *)arr->elts) + (arr->elt_size * (arr->nelts - 1));
+  return ((char *) arr->elts) + (arr->elt_size * (arr->nelts - 1));
 }
 
 void array_cat(array_header *dst, const array_header *src) {
-  int elt_size = dst->elt_size;
+  size_t elt_size;
+
+  if (dst == NULL ||
+      src == NULL) {
+    return;
+  }
+
+  elt_size = dst->elt_size;
 
   if (dst->nelts + src->nelts > dst->nalloc) {
     int new_size = dst->nalloc * 2;
     char *new_data;
 
-    if (new_size == 0) ++new_size;
+    if (new_size == 0)
+      ++new_size;
 
-    while (dst->nelts + src->nelts > new_size)
+    while ((dst->nelts + src->nelts) > new_size)
       new_size *= 2;
 
     new_data = pcalloc(dst->pool, elt_size * new_size);
@@ -639,13 +640,21 @@ void array_cat(array_header *dst, const array_header *src) {
     dst->nalloc = new_size;
   }
 
-  memcpy(((char *)dst->elts) + dst->nelts * elt_size, (char *)src->elts,
+  memcpy(((char *) dst->elts) + (dst->nelts * elt_size), (char *) src->elts,
          elt_size * src->nelts);
   dst->nelts += src->nelts;
 }
 
 array_header *copy_array(pool *p, const array_header *arr) {
-  array_header *res = make_array(p,arr->nalloc,arr->elt_size);
+  array_header *res;
+
+  if (p == NULL ||
+      arr == NULL) {
+    errno = EINVAL;
+    return NULL;
+  }
+
+  res = make_array(p, arr->nalloc, arr->elt_size);
 
   memcpy(res->elts, arr->elts, arr->elt_size * arr->nelts);
   res->nelts = arr->nelts;
@@ -654,17 +663,33 @@ array_header *copy_array(pool *p, const array_header *arr) {
 
 /* copy an array that is assumed to consist solely of strings */
 array_header *copy_array_str(pool *p, const array_header *arr) {
-  array_header *res = copy_array(p,arr);
-  int i;
+  register unsigned int i;
+  array_header *res;
+
+  if (p == NULL ||
+      arr == NULL) {
+    errno = EINVAL;
+    return NULL;
+  }
+
+  res = copy_array(p, arr);
 
   for (i = 0; i < arr->nelts; i++)
-    ((char **)res->elts)[i] = pstrdup(p, ((char **)res->elts)[i]);
+    ((char **) res->elts)[i] = pstrdup(p, ((char **) res->elts)[i]);
 
   return res;
 }
 
 array_header *copy_array_hdr(pool *p, const array_header *arr) {
-  array_header *res = (array_header *)palloc(p,sizeof(array_header));
+  array_header *res;
+
+  if (p == NULL ||
+      arr == NULL) {
+    errno = EINVAL;
+    return NULL;
+  }
+
+  res = palloc(p, sizeof(array_header));
 
   res->elts = arr->elts;
   res->pool = p;
@@ -677,7 +702,16 @@ array_header *copy_array_hdr(pool *p, const array_header *arr) {
 
 array_header *append_arrays(pool *p, const array_header *first,
     const array_header *second) {
-  array_header *res = copy_array_hdr(p, first);
+  array_header *res;
+
+  if (p == NULL ||
+      first == NULL ||
+      second == NULL) {
+    errno = EINVAL;
+    return NULL;
+  }
+
+  res = copy_array_hdr(p, first);
 
   array_cat(res, second);
   return res;

@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2003-2006 The ProFTPD Project team
+ * Copyright (c) 2003-2010 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@
  */
 
 /* Network ACL routines
- * $Id: netacl.c,v 1.14 2006/12/18 23:09:42 castaglia Exp $
+ * $Id: netacl.c,v 1.21 2010/02/11 22:35:32 castaglia Exp $
  */
 
 #include "conf.h"
@@ -46,68 +46,154 @@ pr_netacl_type_t pr_netacl_get_type(pr_netacl_t *acl) {
   return acl->type;
 }
 
+/* Returns 1 if there was a positive match, -1 if there was a negative
+ * match, -2 if there was an error, and zero if there was no match at all.
+ */
 int pr_netacl_match(pr_netacl_t *acl, pr_netaddr_t *addr) {
+  pool *tmp_pool;
 
-  if (!acl || !addr)
+  if (acl == NULL ||
+      addr == NULL) {
+    errno = EINVAL;
     return -2;
+  }
+
+  tmp_pool = make_sub_pool(permanent_pool);
 
   switch (acl->type) {
     case PR_NETACL_TYPE_ALL:
-      pr_trace_msg(trace_channel, 10, "addr '%s' matched rule 'ALL'",
-        pr_netaddr_get_ipstr(addr));
+      pr_trace_msg(trace_channel, 10, "addr '%s' matched rule 'ALL' ('%s')",
+        pr_netaddr_get_ipstr(addr), pr_netacl_get_str(tmp_pool, acl));
+      destroy_pool(tmp_pool);
       return 1;
 
     case PR_NETACL_TYPE_NONE:
       pr_trace_msg(trace_channel, 10, "addr '%s' matched rule 'NONE'",
         pr_netaddr_get_ipstr(addr));
+      destroy_pool(tmp_pool);
       return -1;
 
     case PR_NETACL_TYPE_IPMASK:
+      pr_trace_msg(trace_channel, 10,
+        "checking addr '%s' against IP mask rule '%s'",
+        pr_netaddr_get_ipstr(addr), acl->aclstr);
+
       if (pr_netaddr_ncmp(addr, acl->addr, acl->masklen) == 0) {
         pr_trace_msg(trace_channel, 10, "addr '%s' matched IP mask rule '%s'",
           pr_netaddr_get_ipstr(addr), acl->aclstr);
+        destroy_pool(tmp_pool);
+
+        if (acl->negated)
+          return -1;
+
         return 1;
+
+      } else {
+        if (acl->negated) {
+          destroy_pool(tmp_pool);
+          return 1;
+        }
       }
       break;
 
     case PR_NETACL_TYPE_IPMATCH:
+      pr_trace_msg(trace_channel, 10,
+        "checking addr '%s' against IP address rule '%s'",
+        pr_netaddr_get_ipstr(addr), acl->aclstr);
+
       if (pr_netaddr_cmp(addr, acl->addr) == 0) {
         pr_trace_msg(trace_channel, 10,
           "addr '%s' matched IP address rule '%s'",
           pr_netaddr_get_ipstr(addr), acl->aclstr);
+        destroy_pool(tmp_pool);
+
+        if (acl->negated)
+          return -1;
+
         return 1;
+
+      } else {
+        if (acl->negated) {
+          destroy_pool(tmp_pool);
+          return 1;
+        }
       }
       break;
  
     case PR_NETACL_TYPE_DNSMATCH:
+      pr_trace_msg(trace_channel, 10,
+        "checking addr '%s' against DNS name rule '%s'",
+        pr_netaddr_get_dnsstr(addr), acl->pattern);
+
       if (strcmp(pr_netaddr_get_dnsstr(addr), acl->pattern) == 0) {
         pr_trace_msg(trace_channel, 10,
           "addr '%s' (%s) matched DNS name rule '%s'",
           pr_netaddr_get_ipstr(addr), pr_netaddr_get_dnsstr(addr),
           acl->aclstr);
+        destroy_pool(tmp_pool);
+
+        if (acl->negated)
+          return -1;
+
         return 1;
+
+      } else {
+        if (acl->negated) {
+          destroy_pool(tmp_pool);
+          return 1;
+        }
       }
       break;
 
     case PR_NETACL_TYPE_IPGLOB:
+      pr_trace_msg(trace_channel, 10,
+        "checking addr '%s' against IP glob rule '%s'",
+        pr_netaddr_get_ipstr(addr), acl->aclstr);
+
       if (pr_netaddr_fnmatch(addr, acl->pattern,
           PR_NETADDR_MATCH_IP) == TRUE) {
         pr_trace_msg(trace_channel, 10,
           "addr '%s' matched IP glob rule '%s'",
           pr_netaddr_get_ipstr(addr), acl->aclstr);
+        destroy_pool(tmp_pool);
+
+        if (acl->negated)
+          return -1;
+
         return 1;
+
+      } else {
+        if (acl->negated) {
+          destroy_pool(tmp_pool);
+          return 1;
+        }
       }
       break;
 
     case PR_NETACL_TYPE_DNSGLOB:
       if (ServerUseReverseDNS) {
+        pr_trace_msg(trace_channel, 10,
+          "checking addr '%s' against DNS glob rule '%s'",
+          pr_netaddr_get_ipstr(addr), acl->pattern);
+
         if (pr_netaddr_fnmatch(addr, acl->pattern,
             PR_NETADDR_MATCH_DNS) == TRUE) {
           pr_trace_msg(trace_channel, 10,
             "addr '%s' (%s) matched DNS glob rule '%s'",
             pr_netaddr_get_ipstr(addr), pr_netaddr_get_dnsstr(addr),
             acl->aclstr);
+          destroy_pool(tmp_pool);
+
+          if (acl->negated)
+            return -1;
+
           return 1;
+
+        } else {
+          if (acl->negated) {
+            destroy_pool(tmp_pool);
+            return 1;
+          }
         }
 
       } else {
@@ -117,11 +203,9 @@ int pr_netacl_match(pr_netacl_t *acl, pr_netaddr_t *addr) {
           pr_netaddr_get_dnsstr(addr), acl->aclstr);
       }
       break;
-
-    default:
-     break; 
   }
 
+  destroy_pool(tmp_pool);
   return 0;
 }
 
@@ -129,7 +213,13 @@ pr_netacl_t *pr_netacl_create(pool *p, char *aclstr) {
   pr_netacl_t *acl;
   char *cp, *aclstr_dup;
 
-  if (!p || !aclstr) {
+  if (p == NULL ||
+      aclstr == NULL) {
+    errno = EINVAL;
+    return NULL;
+  }
+
+  if (strlen(aclstr) == 0) {
     errno = EINVAL;
     return NULL;
   }
@@ -140,9 +230,11 @@ pr_netacl_t *pr_netacl_create(pool *p, char *aclstr) {
   aclstr_dup = pstrdup(p, aclstr);
 
   if (strcasecmp(aclstr, "all") == 0) {
+    aclstr_dup = pstrdup(p, "all");
     acl->type = PR_NETACL_TYPE_ALL;
 
   } else if (strcasecmp(aclstr, "none") == 0) {
+    aclstr_dup = pstrdup(p, "none");
     acl->type = PR_NETACL_TYPE_NONE;
 
   } else if ((cp = strchr(aclstr, '/')) != NULL) {
@@ -223,10 +315,34 @@ pr_netacl_t *pr_netacl_create(pool *p, char *aclstr) {
 
 #ifdef PR_USE_IPV6
   } else if (pr_netaddr_use_ipv6() &&
-             strspn(aclstr, "0123456789ABCDEFabcdef.:") != strlen(aclstr)) {
+             strspn(aclstr, "0123456789ABCDEFabcdef.:!") != strlen(aclstr)) {
 #else
-  } else if (strspn(aclstr, "0123456789.") != strlen(aclstr)) {
+  } else if (strspn(aclstr, "0123456789.!") != strlen(aclstr)) {
 #endif /* PR_USE_IPV6 */
+
+    /* Check if the given rule is negated. */
+    if (*aclstr == '!') {
+      acl->negated = TRUE;
+      aclstr++;
+    }
+
+    /* If there are any glob characters (e.g. '{', '[', '*', or '?'), or if the
+     * first character is a '.', then treat the rule as a glob.
+     */
+    if (strpbrk(aclstr, "{[*?")) {
+      acl->type = PR_NETACL_TYPE_DNSGLOB;
+      acl->pattern = pstrdup(p, aclstr);
+
+    } else if (*aclstr == '.') {
+      acl->type = PR_NETACL_TYPE_DNSGLOB;
+      acl->pattern = pstrcat(p, "*", aclstr, NULL);
+
+    } else {
+      acl->type = PR_NETACL_TYPE_DNSMATCH;
+      acl->pattern = pstrdup(p, aclstr);
+    }
+
+  } else if (strchr(aclstr, '.') == NULL) {
 
     /* Check if the given rule is negated. */
     if (*aclstr == '!') {
@@ -258,17 +374,55 @@ pr_netacl_t *pr_netacl_create(pool *p, char *aclstr) {
       aclstr++;
     }
 
-    /* If the last character is a '.', then treat the rule as a glob. */
+    /* If the last character is a '.', then treat the rule as an IP glob. */
     if (aclstr[strlen(aclstr)-1] == '.') {
       acl->type = PR_NETACL_TYPE_IPGLOB;
       acl->pattern = pstrcat(p, aclstr, "*", NULL);
 
     } else {
-      acl->type = PR_NETACL_TYPE_IPMATCH;
-      acl->addr = pr_netaddr_get_addr(p, aclstr, NULL);
+      register unsigned int i;
+      int use_dns = FALSE;
 
-      if (!acl->addr) 
-        return NULL;
+      /* If there are only digits and periods, it's an IP match.  Otherwise,
+       * it is a DNS glob (if there are glob characters) or a DNS match.
+       */
+      for (i = 0; i < strlen(aclstr); i++) {
+        if (aclstr[i] == '.') {
+          continue;
+        }
+
+        if (isdigit((int) aclstr[i]) == 0) {
+          /* Not a digit. */
+          use_dns = TRUE;
+          break;
+        }
+      }
+
+      if (!use_dns) {
+        acl->type = PR_NETACL_TYPE_IPMATCH;
+        acl->addr = pr_netaddr_get_addr(p, aclstr, NULL);
+
+        if (!acl->addr) 
+           return NULL;
+
+      } else {
+
+        /* If there are any glob characters (e.g. '{', '[', '*', or '?'), or
+         * if the first character is a '.', then treat the rule as a glob.
+         */
+        if (strpbrk(aclstr, "{[*?")) {
+          acl->type = PR_NETACL_TYPE_DNSGLOB;
+          acl->pattern = pstrdup(p, aclstr);
+
+        } else if (*aclstr == '.') {
+          acl->type = PR_NETACL_TYPE_DNSGLOB;
+          acl->pattern = pstrcat(p, "*", aclstr, NULL);
+
+        } else {
+          acl->type = PR_NETACL_TYPE_DNSMATCH;
+          acl->pattern = pstrdup(p, aclstr);
+        }
+      }
     }
   }
 
@@ -317,3 +471,64 @@ int pr_netacl_get_negated(pr_netacl_t *acl) {
 
   return acl->negated;
 }
+
+const char *pr_netacl_get_str(pool *p, pr_netacl_t *acl) {
+  char *res = "";
+
+  if (!p || !acl) {
+    errno = EINVAL;
+    return NULL;
+  }
+
+
+  switch (acl->type) {
+    case PR_NETACL_TYPE_ALL:
+      res = pstrcat(p, res, acl->aclstr, NULL);
+      res = pstrcat(p, res, " <all>", NULL);
+      return res;
+
+    case PR_NETACL_TYPE_NONE:
+      res = pstrcat(p, res, acl->aclstr, NULL);
+      res = pstrcat(p, res, " <none>", NULL);
+      return res;
+
+    case PR_NETACL_TYPE_IPMASK: {
+      char masklenstr[64];
+
+      res = pstrcat(p, res, acl->aclstr, NULL);
+      memset(masklenstr, '\0', sizeof(masklenstr));
+      snprintf(masklenstr, sizeof(masklenstr)-1, "%u", acl->masklen);
+      res = pstrcat(p, res, " <IP address mask, ", masklenstr, "-bit mask",
+        NULL);
+      break;
+    }
+
+    case PR_NETACL_TYPE_IPMATCH:
+      res = pstrcat(p, res, acl->aclstr, NULL);
+      res = pstrcat(p, res, " <IP address match", NULL);
+      break;
+
+    case PR_NETACL_TYPE_DNSMATCH:
+      res = pstrcat(p, res, acl->aclstr, NULL);
+      res = pstrcat(p, res, " <DNS hostname match", NULL);
+      break;
+
+    case PR_NETACL_TYPE_IPGLOB:
+      res = pstrcat(p, res, acl->pattern, NULL);
+      res = pstrcat(p, res, " <IP address glob", NULL);
+      break;
+
+    case PR_NETACL_TYPE_DNSGLOB:
+      res = pstrcat(p, res, acl->pattern, NULL);
+      res = pstrcat(p, res, " <DNS hostname glob", NULL);
+      break;
+  }
+
+  if (!acl->negated)
+    res = pstrcat(p, res, ">", NULL);
+  else
+    res = pstrcat(p, res, ", inverted>", NULL);
+
+  return res;
+}
+

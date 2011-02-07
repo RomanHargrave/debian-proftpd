@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2006 The ProFTPD Project team
+ * Copyright (c) 2001-2009 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -27,7 +27,7 @@
 /*
  * Configuration structure, server, command and associated prototypes.
  *
- * $Id: dirtree.h,v 1.66 2007/01/11 04:05:07 castaglia Exp $
+ * $Id: dirtree.h,v 1.74 2009/03/24 06:23:27 castaglia Exp $
  */
 
 #ifndef PR_DIRTREE_H
@@ -157,11 +157,6 @@ struct config_struc {
 #define ORDER_ALLOWDENY		0
 #define ORDER_DENYALLOW		1
 
-/* For the different types of expressions: AND, OR, and REGEX. */
-#define PR_EXPR_EVAL_AND	0
-#define PR_EXPR_EVAL_OR		1
-#define PR_EXPR_EVAL_REGEX	2
-
 /* The following macro determines the "highest" level available for
  * configuration directives.  If a current dir_config is available, it's
  * subset is used, otherwise anon config or main server
@@ -178,9 +173,6 @@ extern int			SocketBindTight;
 extern char			ServerType;
 extern int			ServerMaxInstances;
 extern int			ServerUseReverseDNS;
-extern int			TimeoutIdle;
-extern int			TimeoutNoXfer;
-extern int			TimeoutStalled;
 
 /* These macros are used to help handle configuration in modules */
 #define CONF_ERROR(x, s)	return PR_ERROR_MSG((x),NULL,pstrcat((x)->tmp_pool, \
@@ -221,7 +213,7 @@ extern int			TimeoutStalled;
 void kludge_disable_umask(void);
 void kludge_enable_umask(void);
 
-int pr_define_add(const char *);
+int pr_define_add(const char *, int);
 unsigned char pr_define_exists(const char *);
 
 void init_config(void);
@@ -245,6 +237,10 @@ int remove_config(xaset_t *, const char *, int);
  */
 unsigned int pr_config_get_id(const char *name);
 
+/* Returns the buffer size to use for data transfers.
+ */
+int pr_config_get_xfer_bufsz(void);
+
 /* Assigns a unique ID for the given configuration directive.  The
  * mapping of directive to ID is stored in a lookup table, so that
  * searching of the config database by directive name can be done using
@@ -255,32 +251,17 @@ unsigned int pr_config_get_id(const char *name);
  */
 unsigned int pr_config_set_id(const char *name);
 
-cmd_rec *pr_cmd_alloc(pool *, int, ...);
-
-/* Expression API.  (XXX These should be in their own header/src files). */
-array_header *pr_expr_create(pool *, int *, char **);
-unsigned char pr_expr_eval_class_and(char **);
-unsigned char pr_expr_eval_class_or(char **);
-unsigned char pr_expr_eval_group_and(char **);
-unsigned char pr_expr_eval_group_or(char **);
-unsigned char pr_expr_eval_user_and(char **);
-unsigned char pr_expr_eval_user_or(char **);
-
 void *get_param_ptr(xaset_t *, const char *, int);
 void *get_param_ptr_next(const char *, int);
 xaset_t *get_dir_ctxt(pool *, char *);
 
-char *pr_str_get_word(char **, int);
-#define PR_STR_FL_PRESERVE_COMMENTS		0x0001
-#define PR_STR_FL_PRESERVE_WHITESPACE		0x0002
-
 config_rec *dir_match_path(pool *, char *);
-void build_dyn_config(pool *, char *, struct stat *, unsigned char);
+void build_dyn_config(pool *, const char *, struct stat *, unsigned char);
 unsigned char dir_hide_file(const char *);
-int dir_check_full(pool *, char *, char *, char *, int *);
-int dir_check_limits(config_rec *, char *, int);
-int dir_check(pool *, char *, char *, char *, int *);
-int dir_check_canon(pool *, char *, char *, char *, int *);
+int dir_check_full(pool *, cmd_rec *, const char *, const char *, int *);
+int dir_check_limits(cmd_rec *, config_rec *, const char *, int);
+int dir_check(pool *, cmd_rec *, const char *, const char *, int *);
+int dir_check_canon(pool *, cmd_rec *, const char *, const char *, int *);
 int is_dotdir(const char *);
 int is_fnmatch(const char *);
 int login_check_limits(xaset_t *, int, int, int *);
@@ -290,7 +271,6 @@ void resolve_deferred_dirs(server_rec *);
 void fixup_dirs(server_rec *, int);
 unsigned char check_context(cmd_rec *, int);
 char *get_context_name(cmd_rec *);
-int pr_is_boolean(const char *);
 int get_boolean(cmd_rec *, int);
 char *get_full_cmd(cmd_rec *);
 

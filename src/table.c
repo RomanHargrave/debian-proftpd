@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2004, 2005 The ProFTPD Project team
+ * Copyright (c) 2004-2010 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@
  */
 
 /* Table API implementation
- * $Id: table.c,v 1.9 2006/05/26 16:43:15 castaglia Exp $
+ * $Id: table.c,v 1.16.2.1 2010/03/30 21:17:56 castaglia Exp $
  */
 
 #include "conf.h"
@@ -47,7 +47,7 @@ struct table_rec {
   pr_table_entry_t *tab_iter_ent;
 
   /* For iterating through all of the possible multiple values for a single
-   * key.
+   * key.  Only used if the PR_TABLE_FL_MULTI_VALUE flag is set.
    */
   pr_table_entry_t *val_iter_ent;
 
@@ -62,6 +62,8 @@ struct table_rec {
   void (*entinsert)(pr_table_entry_t **, pr_table_entry_t *);
   void (*entremove)(pr_table_entry_t **, pr_table_entry_t *);
 };
+
+static int handling_signal = FALSE;
 
 /* Default table callbacks
  */
@@ -81,8 +83,10 @@ static unsigned int key_hash(const void *key, size_t keysz) {
     unsigned int c = *k;
     k++;
 
-    /* Always handle signals in potentially long-running while loops. */
-    pr_signals_handle();
+    if (!handling_signal) {
+      /* Always handle signals in potentially long-running while loops. */
+      pr_signals_handle();
+    }
 
     i = (i * 33) + c;
   }
@@ -106,19 +110,23 @@ static void entry_insert(pr_table_entry_t **h, pr_table_entry_t *e) {
 /* Default removal is simply to remove the entry from the chain. */
 static void entry_remove(pr_table_entry_t **h, pr_table_entry_t *e) {
 
-  if (e->next)
+  if (e->next) {
     e->next->prev = e->prev;
+  }
 
-  if (e->prev)
+  if (e->prev) {
     e->prev->next = e->next;
+  }
 
-  if (e == *h &&
-      e->next == NULL)
-    /* This entry is the head, and is the only entry in this chain. */
-    *h = NULL;
+  if (e == *h) {
+    if (e->next == NULL) {
+      /* This entry is the head, and is the only entry in this chain. */
+      *h = NULL;
 
-  else 
-    *h = e->next;
+    } else {
+      *h = e->next;
+    }
+  }
 
   e->prev = e->next = NULL;
   return;
@@ -155,7 +163,10 @@ static void tab_key_free(pr_table_t *tab, pr_table_key_t *k) {
 
     /* Scan to the end of the list. */
     while (i->next != NULL) {
-      pr_signals_handle();
+      if (!handling_signal) {
+        pr_signals_handle();
+      }
+
       i = i->next;
     }
 
@@ -196,7 +207,10 @@ static void tab_entry_free(pr_table_t *tab, pr_table_entry_t *e) {
 
     /* Scan to the end of the list. */
     while (i->next != NULL) {
-      pr_signals_handle();
+      if (!handling_signal) {
+        pr_signals_handle();
+      }
+
       i = i->next;
     }
 
@@ -264,7 +278,9 @@ static pr_table_entry_t *tab_entry_next(pr_table_t *tab) {
 }
 
 static void tab_entry_remove(pr_table_t *tab, pr_table_entry_t *e) {
-  pr_table_entry_t *h = tab->chains[e->idx];
+  pr_table_entry_t *h;
+
+  h = tab->chains[e->idx];
 
   tab->entremove(&h, e);
   tab->chains[e->idx] = h;
@@ -286,7 +302,9 @@ int pr_table_kadd(pr_table_t *tab, const void *key_data, size_t key_datasz,
   unsigned int h, idx;
   pr_table_entry_t *e, *n;
 
-  if (!tab || !key_data) {
+  if (tab == NULL ||
+      key_data == NULL ||
+      (value_datasz > 0 && value_data == NULL)) {
     errno = EINVAL;
     return -1;
   }
@@ -394,7 +412,8 @@ int pr_table_kexists(pr_table_t *tab, const void *key_data, size_t key_datasz) {
   }
 
   for (ent = head; ent; ent = ent->next) {
-    if (ent->key->hash != h)
+    if (ent->key == NULL ||
+        ent->key->hash != h)
       continue;
 
     /* Matching hashes.  Now to see if the keys themselves match. */
@@ -456,11 +475,10 @@ void *pr_table_kget(pr_table_t *tab, const void *key_data, size_t key_datasz,
              tab->cache_ent->key->key_data == key_data) {
 
      /* If the cached lookup entry matches, we'll use it. */
-     head = tab->cache_ent;
+     head = tab->cache_ent->next;
 
   } else {
     unsigned int idx = h % tab->nchains;
-
     head = tab->chains[idx];
   }
 
@@ -473,7 +491,8 @@ void *pr_table_kget(pr_table_t *tab, const void *key_data, size_t key_datasz,
   }
 
   for (ent = head; ent; ent = ent->next) {
-    if (ent->key->hash != h)
+    if (ent->key == NULL ||
+        ent->key->hash != h)
       continue;
 
     /* Matching hashes.  Now to see if the keys themselves match. */
@@ -483,7 +502,8 @@ void *pr_table_kget(pr_table_t *tab, const void *key_data, size_t key_datasz,
       if (tab->flags & PR_TABLE_FL_USE_CACHE) 
         tab->cache_ent = ent;
 
-      tab->val_iter_ent = ent;
+      if (tab->flags & PR_TABLE_FL_MULTI_VALUE)
+        tab->val_iter_ent = ent;
 
       if (value_datasz)
         *value_datasz = ent->value_datasz;
@@ -546,7 +566,8 @@ void *pr_table_kremove(pr_table_t *tab, const void *key_data,
   }
 
   for (ent = head; ent; ent = ent->next) {
-    if (ent->key->hash != h)
+    if (ent->key == NULL ||
+        ent->key->hash != h)
       continue;
 
     /* Matching hashes.  Now to see if the keys themselves match. */
@@ -578,7 +599,9 @@ int pr_table_kset(pr_table_t *tab, const void *key_data, size_t key_datasz,
 
   /* XXX Should callers be allowed to set NULL values for keys? */
 
-  if (!tab || !key_data || !value_data) {
+  if (tab == NULL ||
+      key_data == NULL ||
+      (value_datasz > 0 && value_data == NULL)) {
     errno = EINVAL;
     return -1;
   }
@@ -620,7 +643,8 @@ int pr_table_kset(pr_table_t *tab, const void *key_data, size_t key_datasz,
   }
 
   for (ent = head; ent; ent = ent->next) {
-    if (ent->key->hash != h)
+    if (ent->key == NULL ||
+        ent->key->hash != h)
       continue;
 
     /* Matching hashes.  Now to see if the keys themselves match. */
@@ -638,7 +662,8 @@ int pr_table_kset(pr_table_t *tab, const void *key_data, size_t key_datasz,
       if (tab->flags & PR_TABLE_FL_USE_CACHE)
         tab->cache_ent = ent;
 
-      tab->val_iter_ent = ent;
+      if (tab->flags & PR_TABLE_FL_MULTI_VALUE)
+        tab->val_iter_ent = ent;
 
       return 0;
     }
@@ -654,12 +679,14 @@ int pr_table_kset(pr_table_t *tab, const void *key_data, size_t key_datasz,
 int pr_table_add(pr_table_t *tab, const char *key_data, void *value_data,
     size_t value_datasz) {
 
-  if (!tab || !key_data) {
+  if (tab == NULL ||
+      key_data == NULL) {
     errno = EINVAL;
     return -1;
   }
 
-  if (value_data && value_datasz == 0)
+  if (value_data &&
+      value_datasz == 0)
     value_datasz = strlen((char *) value_data) + 1;
 
   return pr_table_kadd(tab, key_data, strlen(key_data) + 1, value_data,
@@ -680,6 +707,9 @@ int pr_table_add_dup(pr_table_t *tab, const char *key_data, void *value_data,
     return -1;
   }
 
+  if (value_data && value_datasz == 0)
+    value_datasz = strlen((char *) value_data) + 1;
+
   dup_data = pcalloc(tab->pool, value_datasz);
   memcpy(dup_data, value_data, value_datasz);
  
@@ -690,7 +720,8 @@ pr_table_t *pr_table_nalloc(pool *p, int flags, unsigned int nchains) {
   pr_table_t *tab;
   pool *tab_pool;
 
-  if (!p) {
+  if (p == NULL ||
+      nchains == 0) {
     errno = EINVAL;
     return NULL;
   }
@@ -744,8 +775,10 @@ int pr_table_do(pr_table_t *tab, int (*cb)(const void *key_data,
 
     while (ent) {
       int res;
- 
-      pr_signals_handle();
+
+      if (!handling_signal) { 
+        pr_signals_handle();
+      }
 
       res = cb(ent->key->key_data, ent->key->key_datasz, ent->value_data,
         ent->value_datasz, user_data);
@@ -777,7 +810,9 @@ int pr_table_empty(pr_table_t *tab) {
     pr_table_entry_t *e = tab->chains[i];
 
     while (e) {
-      pr_signals_handle();
+      if (!handling_signal) {
+        pr_signals_handle();
+      }
 
       tab_entry_remove(tab, e);
       tab_entry_free(tab, e);
@@ -843,7 +878,9 @@ void *pr_table_next(pr_table_t *tab) {
 
   ent = tab_entry_next(tab);
   while (ent) {
-    pr_signals_handle();
+    if (!handling_signal) {
+      pr_signals_handle();
+    }
 
     if (prev &&
         ent->key == prev->key) {
@@ -890,6 +927,10 @@ int pr_table_set(pr_table_t *tab, const char *key_data, void *value_data,
     errno = EINVAL;
     return -1;
   }
+
+  if (value_data &&
+      value_datasz == 0)
+    value_datasz = strlen((char *) value_data) + 1;
 
   return pr_table_kset(tab, key_data, strlen(key_data) + 1, value_data,
     value_datasz);
@@ -942,8 +983,21 @@ int pr_table_ctl(pr_table_t *tab, int cmd, void *arg) {
         (void (*)(pr_table_entry_t **, pr_table_entry_t *)) entry_remove;
       return 0;
 
-    case PR_TABLE_CTL_SET_NCHAINS:
-      tab->nchains = *((unsigned int *) arg);
+    case PR_TABLE_CTL_SET_NCHAINS: {
+      unsigned int new_nchains;
+
+      if (arg == NULL) {
+        errno = EINVAL;
+        return -1;
+      }
+
+      new_nchains = *((unsigned int *) arg);
+      if (new_nchains == 0) {
+        errno = EINVAL;
+        return -1;
+      }
+
+      tab->nchains = new_nchains;
       
       /* Note: by not freeing the memory of the previously allocated
        * chains, this constitutes a minor leak of the table's memory pool.
@@ -951,13 +1005,12 @@ int pr_table_ctl(pr_table_t *tab, int cmd, void *arg) {
       tab->chains = pcalloc(tab->pool,
         sizeof(pr_table_entry_t *) * tab->nchains);
       return 0;
+    }
 
     default:
       errno = EINVAL;
-      return -1;
   }
 
-  errno = EACCES;
   return -1;
 }
 
@@ -974,7 +1027,8 @@ void *pr_table_pcalloc(pr_table_t *tab, size_t sz) {
 void pr_table_dump(void (*dumpf)(const char *fmt, ...), pr_table_t *tab) {
   register unsigned int i;
 
-  if (!tab)
+  if (tab == NULL ||
+      dumpf == NULL)
     return;
 
   if (tab->flags == 0)
@@ -1006,7 +1060,9 @@ void pr_table_dump(void (*dumpf)(const char *fmt, ...), pr_table_t *tab) {
     pr_table_entry_t *ent = tab->chains[i];
 
     while (ent) {
-      pr_signals_handle();
+      if (!handling_signal) {
+        pr_signals_handle();
+      }
 
       dumpf("[chain %u#%u] '%s' => '%s' (%u)", i, j++, ent->key->key_data,
         ent->value_data, ent->value_datasz);
@@ -1015,4 +1071,15 @@ void pr_table_dump(void (*dumpf)(const char *fmt, ...), pr_table_t *tab) {
   }
 
   return;
+}
+
+int table_handling_signal(int bool) {
+  if (bool == TRUE ||
+      bool == FALSE) {
+    handling_signal = bool;
+    return 0;
+  }
+
+  errno = EINVAL;
+  return -1;
 }

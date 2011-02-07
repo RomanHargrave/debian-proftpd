@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001, 2002, 2003 The ProFTPD Project team
+ * Copyright (c) 2001-2010 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,11 +26,11 @@
 
 /* Scoreboard routines.
  *
- * $Id: utils.h,v 1.20 2004/11/02 18:18:59 castaglia Exp $
+ * $Id: utils.h,v 1.25.2.1 2010/03/25 17:37:49 castaglia Exp $
  */
 
-#ifndef UTIL_SCOREBOARD_H
-#define UTIL_SCOREBOARD_H
+#ifndef UTILS_UTILS_H
+#define UTILS_UTILS_H
 
 #include "config.h"
 #include "version.h"
@@ -85,7 +85,7 @@
 
 /* UTIL_SCOREBOARD_VERSION is used for checking for scoreboard compatibility
  */
-#define UTIL_SCOREBOARD_VERSION        0x01040002
+#define UTIL_SCOREBOARD_VERSION        0x01040003
 
 /* Structure used as a header for scoreboard files.
  */
@@ -127,9 +127,10 @@ typedef struct {
   char sce_client_name[PR_TUNABLE_SCOREBOARD_BUFFER_SIZE];
 
   char sce_class[32];
+  char sce_protocol[32];
   char sce_cwd[PR_TUNABLE_SCOREBOARD_BUFFER_SIZE];
 
-  char sce_cmd[5];
+  char sce_cmd[65];
   char sce_cmd_arg[PR_TUNABLE_SCOREBOARD_BUFFER_SIZE];
 
   time_t sce_begin_idle, sce_begin_session;
@@ -149,10 +150,13 @@ char *util_sstrncpy(char *, const char *, size_t);
 const char *util_get_scoreboard(void);
 int util_set_scoreboard(const char *);
 
+char *util_scan_config(const char *, const char *);
+
 int util_close_scoreboard(void);
 int util_open_scoreboard(int);
 pid_t util_scoreboard_get_daemon_pid(void);
 time_t util_scoreboard_get_daemon_uptime(void);
-pr_scoreboard_entry_t *util_scoreboard_read_entry(void);
+pr_scoreboard_entry_t *util_scoreboard_entry_read(void);
+int util_scoreboard_scrub(int);
 
-#endif /* UTIL_SCOREBOARD_H */
+#endif /* UTILS_UTILS_H */
