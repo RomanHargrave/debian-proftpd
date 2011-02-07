@@ -25,7 +25,7 @@
  */
 
 /* Directory listing module for ProFTPD.
- * $Id: mod_ls.c,v 1.172.2.1 2010/06/22 16:37:28 castaglia Exp $
+ * $Id: mod_ls.c,v 1.172.2.4 2010/11/05 03:26:24 castaglia Exp $
  */
 
 #include "conf.h"
@@ -303,7 +303,8 @@ static int sendline(int flags, char *fmt, ...) {
         errno != 0) {
       int xerrno = errno;
 
-      if (session.d) {
+      if (session.d &&
+          session.d->outstrm) {
         xerrno = PR_NETIO_ERRNO(session.d->outstrm);
       }
 
@@ -1677,8 +1678,14 @@ static int dolist(cmd_rec *cmd, const char *opt, int clearflags) {
             target_mode = lmode;
           }
 
+          /* If the -d option is used or the file is not a directory, OR
+           * if the -R option is NOT used AND the file IS a directory AND,
+           * the file is NOT the target/given parameter, then list the file
+           * as is.
+           */
           if (opt_d ||
-              !(S_ISDIR(target_mode))) {
+              !(S_ISDIR(target_mode)) ||
+              (!opt_R && S_ISDIR(target_mode) && strcmp(*path, target) != 0)) {
 
             if (listfile(cmd, cmd->tmp_pool, *path) < 0) {
               ls_terminate();
@@ -1733,6 +1740,7 @@ static int dolist(cmd_rec *cmd, const char *opt, int clearflags) {
             }
           }
 
+          /* Recurse into the directory. */
           push_cwd(cwd_buf, &symhold);
 
           if (!pr_fsio_chdir_canon(*path, !opt_L && list_show_symlinks)) {
@@ -1764,6 +1772,14 @@ static int dolist(cmd_rec *cmd, const char *opt, int clearflags) {
         }
 
         path++;
+      }
+
+      if (outputfiles(cmd) < 0) {
+        ls_terminate();
+        if (use_globbing && globbed) {
+          pr_fs_globfree(&g);
+        }
+        return -1;
       }
 
     } else if (!skiparg) {
