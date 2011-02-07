@@ -1,4 +1,4 @@
-$Id: NEWS,v 1.1133.2.49 2010/07/01 15:14:23 castaglia Exp $
+$Id: NEWS,v 1.1133.2.81 2010/12/18 00:47:26 castaglia Exp $
 
 -----------------------------------------------------------------------------
   More details on the bugs listed below can be found by using the bug number
@@ -8,6 +8,56 @@ $Id: NEWS,v 1.1133.2.49 2010/07/01 15:14:23 castaglia Exp $
 
   where `N' is the bug number.
 -----------------------------------------------------------------------------
+
+1.3.3d - Released 17-Dec-2010
+--------------------------------
+- Bug 3522 - Error when handling SSH DISCONNECT messages with no language tag.
+- Bug 3525 - Default syslog logging causes logging to the wrong syslog
+  facilities.
+- Bug 3528 - ExtendedLog %s variable not expanded properly for successful PASS
+  commands.
+- Bug 3529 - "LIST /*" now lists more than the expected directory.
+- Bug 3526 - CPU usage at 100% when checking HideFiles pattern.  Credit goes
+  to Thomas Shinnick for providing the fix for this; it addresses a more
+  general problem of high memory and CPU consumption when proftpd searches
+  for .ftpaccess files.
+- Bug 3530 - Conflicting interactions among HideUser, HideGroup, and
+  HideNoAccess directives.
+- Bug 3536 - mod_sql has insufficient bounds checking in sql_prepare_where()
+  function.
+- Bug 3547 - Multiple AllowClass directives not handled properly.
+- Bug 3548 - Null pointer segfault in mod_sftp when handling aborted connection.
+- Bug 3551 - SQLAuthType Crypt implementation needs to handle NULL return value
+  from crypt(3).
+- Bug 3550 - SFTP compressed uploads can cause corrupted uploaded files.
+- Bug 3560 - ExtendedLog shows incorrect byte size for first file downloaded
+  via SFTP in some cases.
+
+1.3.3c - Released 29-Oct-2010
+--------------------------------
+- Bug 3511 - SQLAuthType Backend not properly rejected by mod_sql_sqlite.
+- Bug 3513 - EPERM error logged unnecessarily for SFTP logins on Linux.
+- Bug 3517 - mod_quotatab decrements file tally improperly for failed DELE
+  commands.
+- Bug 3518 - Support SiteMiscEngine directive, for disabling mod_site_misc
+  functionality via proftpd.conf.
+- Bug 3519 - Inappropriate directory traversal allowed by mod_site_misc.
+- Bug 3521 - Telnet IAC processing stack overflow.
+
+1.3.3b - Released 09-Sep-2010
+--------------------------------
+- Bug 3481 - Problem with SFTP directory listings.
+- Bug 3483 - NULL pointer dereference handling SITE command in mod_quotatab.
+- Bug 3485 - Disabling IPv6 via -4 or --ipv4 command-line options does not work.
+- Bug 3487 - Null pointer dereference with EPRT/EPSV/PASV/PORT command during
+  data transfer.
+- Bug 3482 - ProFTPD corrupts utmpx log files on FreeBSD 9.0/HEAD.
+- Bug 3491 - Directory pattern not matching as expected.
+- Bug 3492 - Null pointer dereference during data transfer due to RNFR/RNTO.
+- Bug 3494 - Null pointer dereference for IPv6-enabled proftpd when no
+  DefaultServer configured.
+- Bug 3501 - <Anonymous> logins with "AuthAliasOnly on" still handled as
+  anonymous logins.
 
 1.3.3a - Released 01-Jul-2010
 --------------------------------
@@ -81,14 +131,6 @@ $Id: NEWS,v 1.1133.2.49 2010/07/01 15:14:23 castaglia Exp $
   sections.
 - Bug 3397 - HideFiles none does not work properly on a per-user basis.
 - Bug 3400 - Add Japanese translation.
-- Bug 3401 - mod_sftp does not compile with pre-0.9.7 OpenSSL.
-- Bug 3402 - mod_tls does not compile with pre-0.9.7 OpenSSL due to Bug#3349.
-- Bug 3403 - File upload followed by MLSD leads to wrong file size entries in
-  TransferLog.
-- Bug 3405 - Multiple SFTPAuthorizedUserKeys stores causes segfault on 64-bit
-  platforms.
-- Bug 3354 - Renaming a file across mount points to a full disk does not fail
-  as expected.
 
 1.3.3rc4 - Released 12-Feb-2010
 --------------------------------

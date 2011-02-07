@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: fxp.c,v 1.88.2.11 2010/06/15 16:02:49 castaglia Exp $
+ * $Id: fxp.c,v 1.88.2.16 2010/12/17 03:25:02 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -2120,6 +2120,13 @@ static int fxp_handle_abort(const void *key_data, size_t key_datasz,
     }
 
     fxh->dirh = NULL;
+    return 0;
+  }
+
+  /* This filehandle may already have been closed.  If so, just move on to
+   * the next one.
+   */
+  if (fxh->fh == NULL) {
     return 0;
   }
 
@@ -5767,6 +5774,15 @@ static int fxp_handle_open(struct fxp_packet *fxp) {
       if (xerrno != ENOENT &&
           xerrno != EACCES &&
           xerrno != EPERM &&
+#if defined(EDQUOT)
+          xerrno != EDQUOT &&
+#endif /* EDQUOT */
+#if defined(EFBIG)
+          xerrno != EFBIG &&
+#endif /* EFBIG */
+#if defined(ENOSPC)
+          xerrno != ENOSPC &&
+#endif /* ENOSPC */
           xerrno != EINVAL) {
         xerrno = EACCES;
       }
@@ -5939,6 +5955,12 @@ static int fxp_handle_open(struct fxp_packet *fxp) {
   sftp_msg_write_int(&buf, &buflen, fxp->request_id);
   sftp_msg_write_string(&buf, &buflen, fxh->name);
 
+  /* Clear out any transfer-specific data. */
+  if (session.xfer.p) {
+    destroy_pool(session.xfer.p);
+  }
+  memset(&session.xfer, 0, sizeof(session.xfer));
+
   session.xfer.p = pr_pool_create_sz(fxp_pool, 64);
   session.xfer.path = pstrdup(session.xfer.p, path);
   memset(&session.xfer.start_time, 0, sizeof(session.xfer.start_time));
@@ -6094,12 +6116,7 @@ static int fxp_handle_opendir(struct fxp_packet *fxp) {
 
   fxh = fxp_handle_create(fxp_pool);
   fxh->dirh = dirh;
-
-  if (strcmp(path, pr_fs_getvwd()) != 0) {
-    fxh->dir = pstrdup(fxh->pool, path);
-  } else {
-    fxh->dir = "";
-  }
+  fxh->dir = pstrdup(fxh->pool, path);
 
   if (fxp_handle_add(fxp->channel_id, fxh) < 0) {
     uint32_t status_code;
@@ -6136,10 +6153,21 @@ static int fxp_handle_opendir(struct fxp_packet *fxp) {
   sftp_msg_write_int(&buf, &buflen, fxp->request_id);
   sftp_msg_write_string(&buf, &buflen, fxh->name);
 
-  session.xfer.p = pr_pool_create_sz(fxp_pool, 64);
-  memset(&session.xfer.start_time, 0, sizeof(session.xfer.start_time));
-  gettimeofday(&session.xfer.start_time, NULL);
-  session.xfer.direction = PR_NETIO_IO_WR;
+  /* If there is any existing transfer-specific data, leave it alone.
+   *
+   * Unlike FTP, SFTP allows for file downloads whilst in the middle of
+   * a directory listing.  Thus this OPENDIR could arrive while a file
+   * is being read/written.  Assume that the per-file stats are more
+   * important.
+   */
+  if (session.xfer.p == NULL) {
+    memset(&session.xfer, 0, sizeof(session.xfer));
+
+    session.xfer.p = pr_pool_create_sz(fxp_pool, 64);
+    memset(&session.xfer.start_time, 0, sizeof(session.xfer.start_time));
+    gettimeofday(&session.xfer.start_time, NULL);
+    session.xfer.direction = PR_NETIO_IO_WR;
+  }
 
   pr_timer_remove(PR_TIMER_STALLED, ANY_MODULE);
 
@@ -6581,8 +6609,12 @@ static int fxp_handle_readdir(struct fxp_packet *fxp) {
 
   /* Change into the directory being read, so that ".", "..", and relative
    * paths (e.g. for symlinks) get resolved properly.
+   *
+   * We need to dup the string returned by pr_fs_getvwd(), since it returns
+   * a pointer to a static string which is changed by the call we make
+   * to pr_fsio_chdir().
    */
-  vwd = pr_fs_getvwd();
+  vwd = pstrdup(fxp->pool, pr_fs_getvwd());
 
   res = pr_fsio_chdir(fxh->dir, FALSE);
   if (res < 0) {

@@ -21,7 +21,7 @@
  * with OpenSSL, and distribute the resulting executable, without including
  * the source code for OpenSSL in the source distribution.
  *
- * $Id: mod_sql_sqlite.c,v 1.16.2.1 2010/06/23 14:41:46 castaglia Exp $
+ * $Id: mod_sql_sqlite.c,v 1.16.2.3 2010/12/03 23:00:22 castaglia Exp $
  * $Libraries: -lsqlite3 $
  */
 
@@ -195,7 +195,7 @@ static int exec_stmt(cmd_rec *cmd, db_conn_t *conn, char *stmt, char **errstr) {
     *errstr = pstrdup(cmd->pool, ptr);
     sqlite3_free(ptr);
 
-    sql_log(DEBUG_FUNC, "error executing '%s': (%d) %s", stmt, res, errstr);
+    sql_log(DEBUG_FUNC, "error executing '%s': (%d) %s", stmt, res, *errstr);
     return -1;
   }
 
@@ -971,12 +971,13 @@ MODRET sql_sqlite_checkauth(cmd_rec *cmd) {
     return PR_ERROR_MSG(cmd, MOD_SQL_SQLITE_VERSION, "badly formed request");
   }
 
-  /* This mod_sql backend doesn't support any database-specific password
-   * checking mechanisms.
-   */
-
+  sql_log(DEBUG_WARN, MOD_SQL_SQLITE_VERSION
+    ": SQLite does not support the 'Backend' SQLAuthType");
   sql_log(DEBUG_FUNC, "%s", "exiting \tsqlite cmd_checkauth");
-  return PR_DECLINED(cmd);
+
+  /* SQLite doesn't provide this functionality. */
+  return PR_ERROR_MSG(cmd, MOD_SQL_SQLITE_VERSION,
+    "SQLite does not support the 'Backend' SQLAuthType");
 }
 
 MODRET sql_sqlite_identify(cmd_rec * cmd) {

@@ -23,7 +23,7 @@
  */
 
 /* Display of files
- * $Id: display.h,v 1.2.4.1 2010/04/07 23:30:04 castaglia Exp $
+ * $Id: display.h,v 1.2.4.3 2010/11/08 00:57:03 castaglia Exp $
  */
 
 #ifndef PR_DISPLAY_H
@@ -41,7 +41,7 @@ struct fh_rec;
 /* Used to read the file handle given by fh, located on the filesystem fs, and
  * return the results, with variables expanded, to the client, using the
  * response code given by code.  Returns 0 if the file handle's contents
- * are displayed without * issue, -1 otherwise (with errno set appropriately).
+ * are displayed without issue, -1 otherwise (with errno set appropriately).
  */
 int pr_display_fh(struct fh_rec *fh, const char *fs, const char *code,
   int flags);
@@ -53,5 +53,8 @@ int pr_display_fh(struct fh_rec *fh, const char *fs, const char *code,
  */
 int pr_display_file(const char *path, const char *fs, const char *code,
   int flags);
+
+int pr_display_add_line(pool *p, const char *code, const char *msg);
+int pr_display_flush_lines(pool *p, const char *code, int flags);
 
 #endif /* PR_DISPLAY_H */

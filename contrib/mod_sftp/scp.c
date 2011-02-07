@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: scp.c,v 1.37.2.5 2010/05/06 01:37:59 castaglia Exp $
+ * $Id: scp.c,v 1.37.2.6 2010/09/08 17:48:48 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -1863,7 +1863,7 @@ int sftp_scp_set_params(pool *p, uint32_t channel_id, array_header *req) {
   opterr = 1;
   optind = 1;
 
-#elif defined(SOLARIS2)
+#elif defined(SOLARIS2) || defined(HPUX11)
   opterr = 0;
   optind = 1;
 
