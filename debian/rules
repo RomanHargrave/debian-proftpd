@@ -22,8 +22,7 @@ DH_VERBOSE=1
 export DH_VERBOSE
 endif
 
-# the dpatch rules
-include /usr/share/dpatch/dpatch.make
+include /usr/share/quilt/quilt.make
 
 #
 # dpkg-arch rules
@@ -55,8 +54,8 @@ debian/control: debian/control.in
 
 debian/proftpd-substvars: debian/proftpd-substvars.in
 	sed -e 's/@VERSION@/$(VERSION)/' $< >$@
-	
-build: configure-stamp build-stamp
+
+build: $(QUILT_STAMPFN) configure-stamp build-stamp
 build-stamp: 
 	dh_testdir
 	

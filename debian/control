@@ -2,10 +2,10 @@ Source: proftpd-dfsg
 Section: net
 Priority: optional
 Maintainer: Francesco Paolo Lovergine <frankie@debian.org>
-Standards-Version: 3.9.0
+Standards-Version: 3.9.1
 Build-Depends: libmysqlclient-dev, libpam-dev, debhelper (>= 7), zlib1g-dev, 
  libpq-dev, libldap2-dev, libssl-dev (>= 0.9.8l), libwrap0-dev, libcap-dev [linux-any], 
- autotools-dev, libncurses5-dev, dpatch, libacl1-dev, libattr1-dev, unixodbc-dev, libsqlite3-dev
+ autotools-dev, libncurses5-dev, quilt (>= 0.46-7), libacl1-dev, libattr1-dev, unixodbc-dev, libsqlite3-dev
 Homepage: http://www.proftpd.org/
 
 Package: proftpd-basic
@@ -14,7 +14,7 @@ Depends: netbase (>= 4.13), ${shlibs:Depends}, ${misc:Depends}, debconf (>= 0.5.
  ucf (>= 0.30), debianutils (>= 1.21.0), libpam-runtime (>= 0.76-13.1),  sed (>= 4.1.5), update-inetd
 Conflicts: ftp-server, proftpd (<< 1.3.2)
 Replaces: proftpd (<< 1.3.2)
-Provides: ftp-server, proftpd, proftpd-abi-1.3.3a
+Provides: ftp-server, proftpd, proftpd-abi-1.3.3d
 Suggests: proftpd-doc, openssl, proftpd-mod-mysql, proftpd-mod-pgsql, proftpd-mod-ldap, proftpd-mod-odbc, proftpd-mod-sqlite, openbsd-inetd | inet-superserver
 Description: Versatile, virtual-hosting FTP daemon - binaries
  ProFTPd is a powerful replacement for wu-ftpd. This File Transfer Protocol
