@@ -1,13 +1,7 @@
-#! /bin/sh /usr/share/dpatch/dpatch-run
-## xferstats.holger-preiss.dpatch by Francesco Paolo Lovergine <frankie@debian.org>
-##
-## All lines beginning with `## DP:' are a description of the patch.
-## DP: Fixes format in xferstats, this patch should go upstream.
-
-@DPATCH@
-diff -urNad trunk~/contrib/xferstats.holger-preiss trunk/contrib/xferstats.holger-preiss
---- trunk~/contrib/xferstats.holger-preiss	2008-08-08 16:05:07.000000000 +0200
-+++ trunk/contrib/xferstats.holger-preiss	2008-09-13 16:10:21.000000000 +0200
+Index: proftpd-dfsg/contrib/xferstats.holger-preiss
+===================================================================
+--- proftpd-dfsg.orig/contrib/xferstats.holger-preiss	2011-02-08 13:28:11.000000000 +0100
++++ proftpd-dfsg/contrib/xferstats.holger-preiss	2011-02-08 13:28:41.000000000 +0100
 @@ -250,14 +250,14 @@
  
  Total Transfers from each Archive Section (By bytes)
