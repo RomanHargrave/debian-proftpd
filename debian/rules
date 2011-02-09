@@ -22,8 +22,6 @@ DH_VERBOSE=1
 export DH_VERBOSE
 endif
 
-include /usr/share/quilt/quilt.make
-
 #
 # dpkg-arch rules
 # 
@@ -87,7 +85,7 @@ configure-stamp: $(QUILT_STAMPFN)
 	
 	touch $@
 
-clean: debian/control debian/proftpd-substvars myclean unpatch
+clean: debian/control debian/proftpd-substvars myclean 
 myclean:
 	dh_testdir
 	dh_clean
@@ -173,5 +171,5 @@ checkroot:
 	dh_testdir
 	dh_testroot
 
-.PHONY: binary binary-arch binary-indep clean checkroot patch unpatch myclean install configure
+.PHONY: binary binary-arch binary-indep clean checkroot myclean install configure
 
