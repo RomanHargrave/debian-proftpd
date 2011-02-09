@@ -1,12 +1,15 @@
 Source: proftpd-dfsg
 Section: net
 Priority: optional
-Maintainer: Francesco Paolo Lovergine <frankie@debian.org>
+Maintainer: ProFTPD Maintainance Team <pkg-proftpd-maintainers@lists.alioth.debian.org>
+Uploaders: Francesco Paolo Lovergine <frankie@debian.org>
 Standards-Version: 3.9.1
 Build-Depends: libmysqlclient-dev, libpam-dev, debhelper (>= 7), zlib1g-dev, 
  libpq-dev, libldap2-dev, libssl-dev (>= 0.9.8l), libwrap0-dev, libcap-dev [linux-any], 
  autotools-dev, libncurses5-dev, quilt (>= 0.46-7), libacl1-dev, libattr1-dev, unixodbc-dev, libsqlite3-dev
 Homepage: http://www.proftpd.org/
+Vcs-Git: git://git.debian.org/pkg-proftpd/proftpd-dfsg.git
+Vcs-Browser: http://git.debian.org/?p=pkg-proftpd/proftpd-dfsg.git
 
 Package: proftpd-basic
 Architecture: any
