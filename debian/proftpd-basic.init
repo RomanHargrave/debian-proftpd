@@ -130,17 +130,17 @@ case "$1" in
 	    start
 	else
 	    if [ "x$INETD" = "xyes" ] ; then
-		echo "ProFTPd is started from inetd/xinetd."
+		echo "ProFTPD is started from inetd/xinetd."
 		inetd_check
 	    else 
-	    	echo "ProFTPd warning: cannot start neither in standalone nor in inetd/xinetd mode. Check your configuration."
+	    	echo "ProFTPD warning: cannot start neither in standalone nor in inetd/xinetd mode. Check your configuration."
 	    fi
 	fi
 	;;
 
     force-start)
 	if [ "x$INETD" = "xyes" ] ; then
-	    echo "Warning: ProFTPd is started from inetd/xinetd (trying to start anyway)."
+	    echo "Warning: ProFTPD is started from inetd/xinetd (trying to start anyway)."
 		inetd_check
 	fi
 	start
@@ -151,17 +151,17 @@ case "$1" in
 	    signal stop 0
 	else
 	    if [ "x$INETD" = "xyes" ] ; then
-		echo "ProFTPd is started from inetd/xinetd."
+		echo "ProFTPD is started from inetd/xinetd."
 		inetd_check
 	    else 
-	    	echo "ProFTPd warning: cannot start neither in standalone nor in inetd/xinetd mode. Check your configuration."
+	    	echo "ProFTPD warning: cannot start neither in standalone nor in inetd/xinetd mode. Check your configuration."
 	    fi
 	fi
 	;;
 
     force-stop)
 	if [ "x$INETD" = "xyes" ] ; then
-	    echo "Warning: ProFTPd is started from inetd/xinetd (trying to kill anyway)."
+	    echo "Warning: ProFTPD is started from inetd/xinetd (trying to kill anyway)."
 		inetd_check
 	fi
 	signal stop 0
@@ -178,17 +178,17 @@ case "$1" in
 	    start
 	else
 	    if [ "x$INETD" = "xyes" ] ; then
-		echo "ProFTPd is started from inetd/xinetd."
+		echo "ProFTPD is started from inetd/xinetd."
 		inetd_check
 	    else 
-	    	echo "ProFTPd warning: cannot start neither in standalone nor in inetd/xinetd mode. Check your configuration."
+	    	echo "ProFTPD warning: cannot start neither in standalone nor in inetd/xinetd mode. Check your configuration."
 	    fi
 	fi
 	;;
 
     status)
 	if [ "x$INETD" = "xyes" ] ; then
-	    echo "ProFTPd is started from inetd/xinetd."
+	    echo "ProFTPD is started from inetd/xinetd."
 		inetd_check
 		exit 0
 	else 
@@ -198,17 +198,17 @@ case "$1" in
 	    	pid="x"
 	    fi
 	    if [ `pidof proftpd|grep "$pid"|wc -l` -ne 0 ] ; then
-	    	echo "ProFTPd is started in standalone mode, currently running."
+	    	echo "ProFTPD is started in standalone mode, currently running."
 			exit 0
 	    else
-	    	echo "ProFTPd is started in standalone mode, currently not running."
+	    	echo "ProFTPD is started in standalone mode, currently not running."
 			exit 3
 	    fi
 	fi
 	;;
 
     check-config)
-        $DAEMON -t >/dev/null && echo "ProFTPd configuration OK" && exit 0
+        $DAEMON -t >/dev/null && echo "ProFTPD configuration OK" && exit 0
         exit 1
         ;;
 

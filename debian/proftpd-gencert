@@ -49,7 +49,7 @@ chmod 0600 $KEY
 chmod 0644 $CERT
 cat <<EOF
 
-Use the following information in your ProFTPd configuration:
+Use the following information in your ProFTPD configuration:
 
 TLSRSACertificateFile    $CERT
 TLSRSACertificateKeyFile $KEY

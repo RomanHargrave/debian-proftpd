@@ -15,6 +15,7 @@ msgstr ""
 "Last-Translator: Flamarion Jorge <jorge.flamarion@gmail.com>\n"
 "Language-Team: Brazilian Portuguese <debian-l10n-portuguese@lists.debian."
 "org>\n"
+"Language: pt_BR\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -30,7 +31,6 @@ msgstr "a partir do inetd"
 #. Type: select
 #. Choices
 #: ../proftpd-basic.templates:2001
-#| msgid "inetd, standalone"
 msgid "standalone"
 msgstr "autônomo"
 
@@ -44,29 +44,29 @@ msgstr "Executar o proftpd:"
 #. Description
 #: ../proftpd-basic.templates:2002
 msgid ""
-"ProFTPd can be run either as a service from inetd, or as a standalone "
+"ProFTPD can be run either as a service from inetd, or as a standalone "
 "server. Each choice has its own benefits. With only a few FTP connections "
-"per day, it is probably better to run ProFTPd from inetd in order to save "
+"per day, it is probably better to run ProFTPD from inetd in order to save "
 "resources."
 msgstr ""
-"O ProFTPd pode ser executado como um serviço a partir do inetd ou como um "
+"O ProFTPD pode ser executado como um serviço a partir do inetd ou como um "
 "servidor autônomo. Cada escolha tem seus próprios benefícios. Com apenas "
-"algumas conexões FTP por dia, provavelmente é melhor executar o ProFTPd a "
+"algumas conexões FTP por dia, provavelmente é melhor executar o ProFTPD a "
 "partir do inetd para economizar recursos."
 
 #. Type: select
 #. Description
 #: ../proftpd-basic.templates:2002
 msgid ""
-"On the other hand, with higher traffic, ProFTPd should run as a standalone "
+"On the other hand, with higher traffic, ProFTPD should run as a standalone "
 "server to avoid spawning a new process for each incoming connection."
 msgstr ""
-"Por outro lado, com um alto tráfego, o ProFTPd deveria executar como um "
+"Por outro lado, com um alto tráfego, o ProFTPD deveria executar como um "
 "servidor autônomo para evitar a criação de um novo processo para cada "
 "conexão de entrada."
 
-#~ msgid "Warning on syntax changes in ProFTPd configuration."
-#~ msgstr "Aviso sobre a sintaxe de mudanas na configurao do ProFTPd."
+#~ msgid "Warning on syntax changes in ProFTPD configuration."
+#~ msgstr "Aviso sobre a sintaxe de mudanas na configurao do ProFTPD."
 
 #, fuzzy
 #~ msgid ""
@@ -85,12 +85,12 @@ msgstr ""
 #~ msgid ""
 #~ "Unfortunately, it is nearly impossible currently to convert your setup "
 #~ "automatically, but for some basic issues. You will have to do  it "
-#~ "yourself. ProFTPd could also be unable to use the resulting  "
+#~ "yourself. ProFTPD could also be unable to use the resulting  "
 #~ "configuration, and it would not restart after upgrading."
 #~ msgstr ""
 #~ "Infelizmente,  quase impossvel converter sua configurao antiga "
 #~ "automaticamente, salvo alguns detalhes elementares. Voce ter que fazer "
-#~ "isso manualmente. O ProFTPd poder tambm no ser capaz de usar a configurao "
+#~ "isso manualmente. O ProFTPD poder tambm no ser capaz de usar a configurao "
 #~ "resultante e no conseguir reiniciar aps a atualizao."
 
 #~ msgid "Run proftpd from inetd or standalone?"
@@ -119,8 +119,8 @@ msgstr ""
 #~ "para administradores de sistemas paranicos. Somente habilite essa opo se "
 #~ "voce realmente sabe o que isso pode acarretar."
 
-#~ msgid "Using SQL with ProFTPd."
-#~ msgstr "Usando SQL com ProFTPd."
+#~ msgid "Using SQL with ProFTPD."
+#~ msgstr "Usando SQL com ProFTPD."
 
 #~ msgid ""
 #~ "I found some old sql directives in /etc/proftpd.conf.  This release of "
