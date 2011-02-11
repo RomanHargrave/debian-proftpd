@@ -1,6 +1,5 @@
 proftpd-dfsg (1.3.3d-2) unstable; urgency=low
 
-  * NOT YET RELEASED.
   * Added Vcs-* fields for the new pkg-proftpd alioth project.
   * Now using pkg-proftpd developers list as Maintainer field and
     added me as an Uploader.
@@ -8,8 +7,10 @@ proftpd-dfsg (1.3.3d-2) unstable; urgency=low
   * Changed long description in debian/control* to be more smart and up-to-date.
   * Changed ProFTPd string occurrences in ProFTPD in all templates, as it is the 
     official program name since a long time.
+  * Fixed proftpd-substvars for current version.
+  * Now proftpd-substvars is updated at every build to avoid easy oversights.
 
- -- Francesco Paolo Lovergine <frankie@debian.org>  Thu, 10 Feb 2011 10:06:55 +0100
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Fri, 11 Feb 2011 14:02:32 +0100
 
 proftpd-dfsg (1.3.3d-1) unstable; urgency=low
 
