@@ -150,7 +150,7 @@ if [ "$1" = "configure" ]; then
     done
     
     # update-inetd does not manage hostlist prefix to service, at least avoid to add a duplicated line
-    if [ -f /etc/inetd.conf -a $(grep -q '^([[:alnum:],.]+)?:?ftp[[:space:]]+' /etc/inetd.conf|wc -l) -eq 0 ]; then
+    if [ -f /etc/inetd.conf -a $(grep -qs '^([[:alnum:],.]+)?:?ftp[[:space:]]+' /etc/inetd.conf|wc -l) -eq 0 ]; then
     	update-inetd --group STANDARD --add 'ftp	stream	tcp	nowait	root	/usr/sbin/tcpd /usr/sbin/proftpd' 
     fi
 
