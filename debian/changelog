@@ -1,8 +1,9 @@
 proftpd-dfsg (1.3.3d-3) unstable; urgency=low
 
+  * NOT YET RELEASED.
   * Updated danish template.
     (closes: #599862)
-  * Now grep use --silet to avoid warning at /etc/inetd.conf parsing.
+  * Now grep uses --silet to avoid warning at /etc/inetd.conf parsing.
     (closes: #605781)
 
  -- Francesco Paolo Lovergine <frankie@debian.org>  Sat, 12 Feb 2011 17:35:25 +0100
