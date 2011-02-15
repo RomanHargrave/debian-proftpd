@@ -7,7 +7,8 @@ proftpd-dfsg (1.3.3d-3) unstable; urgency=low
     (closes: #605781)
   * Added commented TZ explicit set in proftpd.conf template. Thanks John Wright.
     (closes: #576888)
-  * [PATCH] prxs.in fixed to avoid using the shell to call libtool.
+  * [PATCH] prxs.in fixed to avoid using the shell to call libtool, which
+    prevents prxs working correctly with any shell.
 
  -- Francesco Paolo Lovergine <frankie@debian.org>  Tue, 15 Feb 2011 12:16:48 +0100
 
