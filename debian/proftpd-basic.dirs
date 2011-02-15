@@ -6,6 +6,7 @@ usr/bin
 usr/sbin
 usr/lib/proftpd
 etc/proftpd
+etc/proftpd/conf.d
 usr/share/proftpd
 usr/share/proftpd/templates
 var/log/proftpd
