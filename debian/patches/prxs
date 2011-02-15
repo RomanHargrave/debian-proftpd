@@ -1,0 +1,48 @@
+Index: proftpd-dfsg/src/prxs.in
+===================================================================
+--- proftpd-dfsg.orig/src/prxs.in	2011-02-15 12:16:15.000000000 +0100
++++ proftpd-dfsg/src/prxs.in	2011-02-15 12:16:31.000000000 +0100
+@@ -49,8 +49,6 @@
+   $libtool = $ENV{LIBTOOL};
+ }
+ 
+-my $shell = q(@SHELL@);
+-
+ my $opts = {};
+ GetOptions($opts, 'c|compile', 'i|install', 'd|clean', 'h|help', 'name=s',
+   'D=s@', 'I=s@', 'L=s@', 'l=s@', 'W=s@');
+@@ -117,7 +115,7 @@
+ 
+   my $cmds = [];
+   foreach my $src (@$srcs) {
+-    push(@$cmds, "$shell $libtool --mode=compile $compiler $cflags -c $src");
++    push(@$cmds, "$libtool --mode=compile $compiler $cflags -c $src");
+   }
+ 
+   run_cmds($cmds);
+@@ -169,14 +167,14 @@
+   }
+ 
+   $cmds = [];
+-  push(@$cmds, "$shell $libtool --mode=link $compiler -o $mod_name.la -rpath $libexecdir $ldflags $objlist $libs");
++  push(@$cmds, "$libtool --mode=link $compiler -o $mod_name.la -rpath $libexecdir $ldflags $objlist $libs");
+ 
+   run_cmds($cmds);
+ }
+ 
+ if (defined($opts->{i})) {
+   my $cmds = [];
+-  push(@$cmds, "$shell $libtool --mode=install $installer $install_strip $mod_name.la $ENV{DESTDIR}$libexecdir");
++  push(@$cmds, "$libtool --mode=install $installer $install_strip $mod_name.la $ENV{DESTDIR}$libexecdir");
+ 
+   run_cmds($cmds);
+ 
+@@ -194,7 +192,7 @@
+ 
+ if (defined($opts->{d})) {
+   my $cmds = [];
+-  push(@$cmds, "$shell $libtool --mode=clean rm -f $mod_name.la *.lo");
++  push(@$cmds, "$libtool --mode=clean rm -f $mod_name.la *.lo");
+ 
+   run_cmds($cmds);
+ }
