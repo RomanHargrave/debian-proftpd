@@ -10,3 +10,4 @@ mod_cap
 odbc
 mod_vroot
 prxs
+silent
