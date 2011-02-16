@@ -1,3 +1,11 @@
+proftpd-dfsg (1.3.3d-4) unstable; urgency=low
+
+    Starting from this version /etc/proftpd/proftpd.conf also includes 
+    all files present at /etc/proftpd/conf.d/ to allow a better customization
+    without need of changing the main system files. 
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Tue, 15 Feb 2011 13:45:18 +0100
+
 proftpd-dfsg (1.3.2e-3) unstable; urgency=low
 
     This version adds the useful contributed module mod_vroot, which is still not
@@ -40,3 +48,14 @@ proftpd-dfsg (1.3.2e-3) unstable; urgency=low
   
 
  -- Francesco Paolo Lovergine <frankie@debian.org>  Tue, 16 Mar 2010 12:13:00 +0100
+proftpd-dfsg (1.3.3d-4) unstable; urgency=low
+
+    This version adds the useful contributed module mod_vroot, which is still not
+    part of the standard modules. It can be used for providing shared
+    directories under chrooted environments, among other useful features.
+    A new template 'virtuals.conf' is provided also to keep things
+    ordered about vhosts/vroots and show some examples.
+
+  
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Tue, 15 Feb 2011 13:45:18 +0100
