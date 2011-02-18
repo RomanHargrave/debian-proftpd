@@ -9,8 +9,10 @@ proftpd-dfsg (1.3.3d-4) unstable; urgency=low
   * [PATCH] silent remove excessive verbosity at startup about conf.d
     directory parsing.
   * Updated debian/NEWS file with information about new conf.d directory.
+  * Now configuration file name can be overriden at run-time.
+    (closes: #613527)
 
- -- Francesco Paolo Lovergine <frankie@debian.org>  Tue, 15 Feb 2011 13:31:52 +0100
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Fri, 18 Feb 2011 19:14:56 +0100
 
 proftpd-dfsg (1.3.3d-3) unstable; urgency=low
 

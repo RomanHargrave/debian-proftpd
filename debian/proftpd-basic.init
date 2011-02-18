@@ -22,8 +22,9 @@ NAME=proftpd
 # Defaults
 RUN="no"
 OPTIONS=""
+CONFIG_FILE=/etc/proftpd/proftpd.conf
 
-PIDFILE=`grep -i 'pidfile' /etc/proftpd/proftpd.conf | sed -e 's/pidfile[\t ]\+//i'`
+PIDFILE=`grep -i 'pidfile' $CONFIG_FILE|sed -e 's/pidfile[\t ]\+//i'`
 if [ "x$PIDFILE" = "x" ];
 then
 	PIDFILE=/var/run/proftpd.pid
@@ -43,7 +44,7 @@ test -f $DAEMON || exit 0
 # Servertype could be inetd|standalone|none.
 # In all cases check against inetd and xinetd support.
 #
-if ! egrep -qi "^[[:space:]]*ServerType.*standalone" /etc/proftpd/proftpd.conf
+if ! egrep -qi "^[[:space:]]*ServerType.*standalone" $CONFIG_FILE
 then
 	if egrep -qi "server[[:space:]]*=[[:space:]]*/usr/sbin/proftpd" /etc/xinetd.conf 2>/dev/null || \
 	   egrep -qi "server[[:space:]]*=[[:space:]]*/usr/sbin/proftpd" /etc/xinetd.d/* 2>/dev/null || \
@@ -52,7 +53,7 @@ then
     		RUN="no"
     		INETD="yes"
 	else
-		if ! egrep -qi "^[[:space:]]*ServerType.*inetd" /etc/proftpd/proftpd.conf
+		if ! egrep -qi "^[[:space:]]*ServerType.*inetd" $CONFIG_FILE
 		then
     		RUN="yes"
 			INETD="no"
@@ -78,7 +79,7 @@ start()
 {
     log_daemon_msg "Starting ftp server" "$NAME"
 
-    start-stop-daemon --start --quiet --pidfile "$PIDFILE" --oknodo --exec $DAEMON -- $OPTIONS  
+    start-stop-daemon --start --quiet --pidfile "$PIDFILE" --oknodo --exec $DAEMON -- -c $CONFIG_FILE $OPTIONS  
     if [ $? != 0 ]; then
         log_end_msg 1
         exit 1
