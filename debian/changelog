@@ -1,6 +1,5 @@
 proftpd-dfsg (1.3.3d-4) unstable; urgency=low
 
-  * NOT YET RELEASED.
   * Fixed previous changelog.
   * Now proftpd.conf includes /etc/proftpd/conf.d contents to allow custom
     configurations being loaded after system ones in separate files.
@@ -11,8 +10,9 @@ proftpd-dfsg (1.3.3d-4) unstable; urgency=low
   * Updated debian/NEWS file with information about new conf.d directory.
   * Now configuration file name can be overriden at run-time.
     (closes: #613527)
+  * Now uses Breaks instead of Conflicts against pre-squeeze proftpd package.
 
- -- Francesco Paolo Lovergine <frankie@debian.org>  Fri, 18 Feb 2011 19:14:56 +0100
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Sat, 19 Feb 2011 15:33:36 +0100
 
 proftpd-dfsg (1.3.3d-3) unstable; urgency=low
 
@@ -20,7 +20,8 @@ proftpd-dfsg (1.3.3d-3) unstable; urgency=low
     (closes: #599862)
   * Now grep uses --silet to avoid warning at /etc/inetd.conf parsing.
     (closes: #605781)
-  * Added commented TZ explicit set in proftpd.conf template. Thanks John Wright.
+  * Added commented TZ explicit set in proftpd.conf template. 
+    Thanks John Wright.
     (closes: #576888)
   * [PATCH] prxs.in fixed to avoid using the shell to call libtool, which
     prevents prxs working correctly with any shell.
@@ -34,7 +35,7 @@ proftpd-dfsg (1.3.3d-2) unstable; urgency=low
     added me as an Uploader.
   * Updated README.source to reflect changes to maintainance.
   * Changed long description in debian/control* to be more smart and up-to-date.
-  * Changed ProFTPd string occurrences in ProFTPD in all templates, as it is the 
+  * Changed ProFTPd string occurrences in ProFTPD in all templates, as it is the
     official program name since a long time.
   * Fixed proftpd-substvars for current version.
   * Now proftpd-substvars is updated at every build to avoid easy oversights.

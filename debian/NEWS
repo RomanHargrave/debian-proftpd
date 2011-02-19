@@ -2,7 +2,7 @@ proftpd-dfsg (1.3.3d-4) unstable; urgency=low
 
     Starting from this version /etc/proftpd/proftpd.conf also includes 
     all files present at /etc/proftpd/conf.d/ to allow a better customization
-    without need of changing the main system files. 
+    without need of changing the main system files.
 
  -- Francesco Paolo Lovergine <frankie@debian.org>  Tue, 15 Feb 2011 13:45:18 +0100
 
