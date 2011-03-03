@@ -11,3 +11,4 @@ odbc
 mod_vroot
 prxs
 silent
+CVE-2011-1137
