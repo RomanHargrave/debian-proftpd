@@ -1,0 +1,7 @@
+proftpd-basic: syntax-error-in-debian-news-file line 6 "badly formatted trailer line"
+proftpd-basic: syntax-error-in-debian-news-file line 8 "found start of entry where expected more change data or trailer"
+proftpd-basic: binary-without-manpage usr/sbin/ftpquota
+proftpd-basic: binary-without-manpage usr/sbin/in.proftpd
+proftpd-basic: binary-without-manpage usr/sbin/proftpd-gencert
+proftpd-basic: shlib-calls-exit usr/lib/proftpd/mod_rewrite.so
+proftpd-basic: shlib-calls-exit usr/lib/proftpd/mod_sftp_pam.so

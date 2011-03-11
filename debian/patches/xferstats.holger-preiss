@@ -1,3 +1,7 @@
+Description: Fixing output diplay ot xferstats
+Author: Francesco Paolo Lovergine <frankie@debian.org>
+Forwarded: not needed
+
 Index: proftpd-dfsg/contrib/xferstats.holger-preiss
 ===================================================================
 --- proftpd-dfsg.orig/contrib/xferstats.holger-preiss	2011-02-08 13:28:11.000000000 +0100

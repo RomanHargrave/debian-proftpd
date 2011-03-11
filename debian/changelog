@@ -1,8 +1,42 @@
 proftpd-dfsg (1.3.3d-5) unstable; urgency=low
 
+  [ Francesco Paolo Lovergine <frankie@debian.org> ]
   * Annotated CVE IDs in debian/changelog for recent vulnerabilities fixed.
+  
+  [ Mahyuddin Susanto <udienz@ubuntu.com> ]
+  * Add DEP-3 header in patches:
+    - debian/patches/mod_cap
+    - debian/patches/ftpstats
+    - debian/patches/series
+    - debian/patches/xferstats.holger-preiss
+    - debian/patches/CVE-2011-1137
+    - debian/patches/odbc
+    - debian/patches/silent
+    - debian/patches/mod_sql_mysql.c
+    - debian/patches/ftpasswd.cracklib.location
+    - debian/patches/autotools
+    - debian/patches/prxs
+    - debian/patches/mod_vroot
+    - debian/patches/quotatab_modules
+    - debian/patches/mod_wrap_noparanoid
+    - debian/patches/change_pam_name
+  * debian/copyright: Rewriting as per DEP-5 machine readable.
+  * Fix typo in 1.3.3d-4 changelog.
+  * debian/ftpasswd.8
+    - Remove white space
+    - Using hypen instead of minus sign in manual page.
+  * debian/patches/use_hypen_in_manpage.patch: Do not use minus sign in manual
+    page.
+  * Use set -e instead of passed -e to the shell on the #! line in the body of
+    script
+     - proftpd-basic.config
+     - proftpd-basic.postrm
+     - proftpd-basic.preinst
+  * Override lintian to trivial error checking
+    - debian/proftpd-basic.lintian-overrides
+    - debian/proftpd-dev.lintian-overrides
 
- -- Francesco Paolo Lovergine <frankie@debian.org>  Sat, 05 Mar 2011 15:17:42 +0100
+ -- Mahyuddin Susanto <udienz@ubuntu.com>  Fri, 11 Mar 2011 14:33:29 +0700
 
 proftpd-dfsg (1.3.3d-4) unstable; urgency=high
 
@@ -14,7 +48,7 @@ proftpd-dfsg (1.3.3d-4) unstable; urgency=high
   * [PATCH] silent remove excessive verbosity at startup about conf.d
     directory parsing.
   * Updated debian/NEWS file with information about new conf.d directory.
-  * Now configuration file name can be overriden at run-time.
+  * Now configuration file name can be overridden at run-time.
     (closes: #613527)
   * Now uses Breaks instead of Conflicts against pre-squeeze proftpd package.
   * [SECURITY,PATCH] CVE-2011-1137: mod_sftp behaves badly when receiving

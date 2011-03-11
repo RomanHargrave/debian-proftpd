@@ -1,3 +1,9 @@
+Description: Change the default location of the cracklib dictionaries
+ to match their Debian location
+Author: Paul Martin <pm@debian.org>
+Bug-Debian: http://bugs.debian.org/159365
+Forwarded: not needed
+
 Index: proftpd-dfsg/contrib/ftpasswd
 ===================================================================
 --- proftpd-dfsg.orig/contrib/ftpasswd	2011-02-08 13:30:16.000000000 +0100

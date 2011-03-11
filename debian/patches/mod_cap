@@ -1,3 +1,10 @@
+Description: Removed obsolete embedded sys/capability.h header
+ inclusion in mod_cap.c modules. Also it avoids building of the obsolete
+ embedded libpcap.
+Author: Francesco Paolo Lovergine <frankie@debian.org>
+Forwarded: not needed
+Bug-Debian: http://bugs.debian.org/479893
+
 Index: proftpd-dfsg/lib/libcap/Makefile
 ===================================================================
 --- proftpd-dfsg.orig/lib/libcap/Makefile	2011-02-07 17:47:01.000000000 +0100

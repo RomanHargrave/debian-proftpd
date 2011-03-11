@@ -1,3 +1,7 @@
+Description: Use mysql/mysql.h instead of mysql.h
+Author: Francesco Paolo Lovergine <frankie@debian.org>
+Forwarded: not needed
+
 Index: proftpd-dfsg/contrib/mod_sql_mysql.c
 ===================================================================
 --- proftpd-dfsg.orig/contrib/mod_sql_mysql.c	2011-02-07 17:47:07.000000000 +0100

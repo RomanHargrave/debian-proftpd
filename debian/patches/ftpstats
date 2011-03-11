@@ -1,3 +1,8 @@
+Description: Fixes default xferlog pathname in ftpstats
+Author: Francesco Paolo Lovergine <frankie@debian.org>
+Forwarded: not needed
+Bug-Debian: http://bugs.debian.org/378826
+
 Index: proftpd-dfsg/contrib/xferstats.holger-preiss
 ===================================================================
 --- proftpd-dfsg.orig/contrib/xferstats.holger-preiss	2011-02-08 13:29:20.000000000 +0100

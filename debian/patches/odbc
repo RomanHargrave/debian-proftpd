@@ -1,3 +1,8 @@
+Description: Manage automagically unixodbc library linking
+Author: Francesco Paolo Lovergine <frankie@debian.org>
+Forwarded: not needed
+Bug-Debian: http://bugs.debian.org/366397
+
 Index: proftpd-dfsg/contrib/mod_sql_odbc.c
 ===================================================================
 --- proftpd-dfsg.orig/contrib/mod_sql_odbc.c	2011-02-07 17:47:07.000000000 +0100

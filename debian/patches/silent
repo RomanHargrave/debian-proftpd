@@ -1,3 +1,8 @@
+Description: silent remove excessive verbosity at startup about conf.d
+ directory parsing.
+Author: Francesco Paolo Lovergine <frankie@debian.org>
+Forwarded: not needed
+
 Index: proftpd-dfsg/src/dirtree.c
 ===================================================================
 --- proftpd-dfsg.orig/src/dirtree.c	2011-02-15 13:31:17.000000000 +0100

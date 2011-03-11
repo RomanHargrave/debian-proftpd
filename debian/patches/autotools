@@ -1,3 +1,7 @@
+Description: Do not touch config.h.in and stamp-h.in
+Author: Francesco Paolo Lovergine <frankie@debian.org>
+Forwarded: not needed
+
 Index: proftpd-dfsg/Makefile.in
 ===================================================================
 --- proftpd-dfsg.orig/Makefile.in	2011-02-07 18:08:50.000000000 +0100

@@ -1,3 +1,7 @@
+Description: Add mod_quotatab module
+Author: Francesco Paolo Lovergine <frankie@debian.org>
+Forwarded: not needed
+
 Index: proftpd-dfsg/README.mod_quotatab
 ===================================================================
 --- /dev/null	1970-01-01 00:00:00.000000000 +0000
