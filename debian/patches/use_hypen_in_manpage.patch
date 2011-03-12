@@ -1,6 +1,6 @@
-## Description: add some description
-## Origin/Author: add some origin or author
-## Bug: bug URL
+Description: Use hypen instead of minus-sign
+Author: Mahyuddin Susanto <udienz@ubuntu.com>
+
 Index: proftpd-dfsg/utils/ftpshut.8.in
 ===================================================================
 --- proftpd-dfsg.orig/utils/ftpshut.8.in	2011-03-11 13:58:00.929381734 +0700

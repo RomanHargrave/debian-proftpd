@@ -115,11 +115,12 @@ myclean:
 	find contrib -name "*.la" -exec rm -f {} \;
 
 binary-indep: checkroot build
-	dh_installdirs -i 
-	dh_install -i 
+	dh_installdirs -i
+	dh_install -i
 	dh_installdocs -i 
 	dh_installchangelogs -i ChangeLog
-	dh_installexamples -i 
+	dh_installexamples -i
+	dh_lintian -i
 	
 	dh_compress -i
 	dh_fixperms -i
@@ -137,7 +138,7 @@ binary-arch: checkroot build install
 	dh_installman -a
 	dh_installlogrotate -a
 	dh_installpam -a --name=$(NAME)
-	
+	dh_lintian -a
 	# removes proftpd.conf installed by upstream
 	rm -f debian/$(PACKAGE)/etc/$(NAME)/$(NAME).conf
 	
