@@ -1,1 +1,1 @@
-proftpd:depends=proftpd-abi-@VERSION@ 
+proftpd:Depends=proftpd-abi-@VERSION@ 

@@ -36,7 +36,11 @@ proftpd-dfsg (1.3.3d-5) unstable; urgency=low
     - debian/proftpd-basic.lintian-overrides
     - debian/proftpd-dev.lintian-overrides
 
- -- Mahyuddin Susanto <udienz@ubuntu.com>  Fri, 11 Mar 2011 14:33:29 +0700
+  [ Francesco Paolo Lovergine ]
+  * Fixed a typo in debian/proftpd-substvars.in and regenerated the template. 
+  * Fixed a typo in proftpd-dev.README.Debian
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Thu, 17 Mar 2011 13:16:12 +0100
 
 proftpd-dfsg (1.3.3d-4) unstable; urgency=high
 
