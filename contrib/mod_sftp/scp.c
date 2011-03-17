@@ -1,6 +1,6 @@
 /*
  * ProFTPD - mod_sftp SCP
- * Copyright (c) 2008-2010 TJ Saunders
+ * Copyright (c) 2008-2011 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: scp.c,v 1.37.2.6 2010/09/08 17:48:48 castaglia Exp $
+ * $Id: scp.c,v 1.57 2011/02/26 02:31:36 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -30,6 +30,8 @@
 #include "msg.h"
 #include "channel.h"
 #include "scp.h"
+#include "misc.h"
+#include "disconnect.h"
 
 #define SFTP_SCP_ST_MODE_MASK	(S_ISUID|S_ISGID|S_ISVTX|S_IRWXU|S_IRWXG|S_IRWXO)
 
@@ -84,6 +86,9 @@ struct scp_path {
 
   /* For supporting the HiddenStores directive. */
   int hiddenstore;
+
+  /* For indicating whether the file existed prior to being opened/created. */
+  int file_existed;
 };
 
 static pool *scp_pool = NULL;
@@ -133,6 +138,18 @@ static int need_confirm;
 static const char *trace_channel = "scp";
 
 static int send_path(pool *, uint32_t, struct scp_path *);
+
+static int scp_timeout_stalled_cb(CALLBACK_FRAME) {
+  pr_event_generate("core.timeout-stalled", NULL);
+
+  (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+    "SCP data transfer stalled timeout (%d secs) reached",
+    pr_data_get_timeout(PR_DATA_TIMEOUT_STALLED));
+  SFTP_DISCONNECT_CONN(SFTP_SSH2_DISCONNECT_BY_APPLICATION,
+    "data stalled timeout reached");
+
+  return 0;
+}
 
 static cmd_rec *scp_cmd_alloc(pool *p, const char *name, const char *arg) {
   cmd_rec *cmd;
@@ -265,6 +282,7 @@ static void reset_path(struct scp_path *sp) {
 
   sp->recvlen = 0;
   sp->hiddenstore = FALSE;
+  sp->file_existed = FALSE;
 
   sp->wrote_errors = FALSE;
 }
@@ -497,9 +515,6 @@ static int recv_perms(pool *p, uint32_t channel_id, char *mode_str,
 static int recv_filesz(pool *p, uint32_t channel_id, char *size_str,
     off_t *filesz) {
   register unsigned int i;
-  size_t size_strlen;
-
-  size_strlen = strlen(size_str);
 
   /* The file size field could be of arbitrary length. */
   for (i = 0, *filesz = 0; isdigit((int) size_str[i]); i++) {
@@ -711,6 +726,10 @@ static int recv_finfo(pool *p, uint32_t channel_id, struct scp_path *sp,
       if (xerrno == ENOENT) {
         pr_trace_msg(trace_channel, 5, "creating directory '%s'", sp->filename);
 
+        /* XXX Dispatch a C_MKD command here?  Should <Limit MKD> apply to
+         * recursive directory uploads via SCP?
+         */
+
         if (pr_fsio_mkdir(sp->filename, 0777) < 0) {
           xerrno = errno;
 
@@ -791,6 +810,17 @@ static int recv_finfo(pool *p, uint32_t channel_id, struct scp_path *sp,
 
   cmd = scp_cmd_alloc(p, C_STOR, sp->best_path);
 
+  if (exists(sp->best_path)) {
+    if (pr_table_add(cmd->notes, "mod_xfer.file-modified",
+        pstrdup(cmd->pool, "true"), 0) < 0) {
+      pr_log_pri(PR_LOG_NOTICE,
+        "notice: error adding 'mod_xfer.file-modified' note: %s",
+        strerror(errno));
+    }
+
+    sp->file_existed = TRUE;
+  }
+
   if (pr_cmd_dispatch_phase(cmd, PRE_CMD, 0) < 0) {
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
       "scp upload to '%s' blocked by '%s' handler", sp->path,
@@ -864,6 +894,8 @@ static int recv_finfo(pool *p, uint32_t channel_id, struct scp_path *sp,
 
   pr_fsio_set_block(sp->fh);
 
+  sftp_misc_handle_chown(sp->fh);
+
   write_confirm(p, channel_id, 0, NULL);
   return 0;
 }
@@ -883,7 +915,8 @@ static int recv_data(pool *p, uint32_t channel_id, struct scp_path *sp,
       if (pr_fsio_write(sp->fh, data, writelen) != writelen) {
         int xerrno = errno;
 
-        if (xerrno == EAGAIN) {
+        if (xerrno == EINTR ||
+            xerrno == EAGAIN) {
           pr_signals_handle();
           continue;
         }
@@ -1160,6 +1193,9 @@ static int recv_path(pool *p, uint32_t channel_id, struct scp_path *sp,
 
     curr_path = pstrdup(scp_pool, sp->fh->fh_path);
 
+    /* Set session.curr_cmd, for any FSIO callbacks that might be interested. */
+    session.curr_cmd = C_STOR;
+
     res = pr_fsio_close(sp->fh);
     if (res < 0) {
       int xerrno = errno;
@@ -1227,12 +1263,30 @@ static int recv_path(pool *p, uint32_t channel_id, struct scp_path *sp,
     if (cmd == NULL)
       cmd = scp_cmd_alloc(p, C_STOR, sp->best_path);
 
+    if (sp->file_existed) {
+      if (pr_table_add(cmd->notes, "mod_xfer.file-modified",
+          pstrdup(cmd->pool, "true"), 0) < 0) {
+        pr_log_pri(PR_LOG_NOTICE,
+          "notice: error adding 'mod_xfer.file-modified' note: %s",
+          strerror(errno));
+      }
+    }
+
     (void) pr_cmd_dispatch_phase(cmd, POST_CMD, 0);
     (void) pr_cmd_dispatch_phase(cmd, LOG_CMD, 0);
 
   } else {
     if (cmd == NULL)
       cmd = scp_cmd_alloc(p, C_STOR, sp->best_path);
+
+    if (sp->file_existed) {
+      if (pr_table_add(cmd->notes, "mod_xfer.file-modified",
+          pstrdup(cmd->pool, "true"), 0) < 0) {
+        pr_log_pri(PR_LOG_NOTICE,
+          "notice: error adding 'mod_xfer.file-modified' note: %s",
+          strerror(errno));
+      }
+    }
 
     (void) pr_cmd_dispatch_phase(cmd, POST_CMD_ERR, 0);
     (void) pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
@@ -1367,8 +1421,7 @@ static int send_data(pool *p, uint32_t channel_id, struct scp_path *sp,
   /* Include space for one more character, i.e. for the terminating NUL
    * character that indicates the last chunk of the file.
    */
-  chunksz = (main_server->tcp_rcvbuf_len > 0 ? main_server->tcp_rcvbuf_len :
-    pr_config_get_xfer_bufsz()) + 1;
+  chunksz = pr_config_get_server_xfer_bufsz(PR_NETIO_IO_WR) + 1;
   chunk = palloc(p, chunksz);
 
   /* Keep sending chunks until we have sent the entire file, or until the
@@ -1576,6 +1629,11 @@ static int send_path(pool *p, uint32_t channel_id, struct scp_path *sp) {
       "error stat'ing '%s': %s", sp->path, strerror(errno));
 
     if (sp->fh) {
+      /* Set session.curr_cmd, for any FSIO callbacks that might be
+       * interested.
+       */
+      session.curr_cmd = C_RETR;
+
       pr_fsio_close(sp->fh);
       sp->fh = NULL;
 
@@ -1747,6 +1805,14 @@ int sftp_scp_handle_packet(pool *p, void *ssh2, uint32_t channel_id,
    */
   session.curr_phase = PRE_CMD;
 
+  if (pr_data_get_timeout(PR_DATA_TIMEOUT_NO_TRANSFER) > 0) {
+    pr_timer_reset(PR_TIMER_NOXFER, ANY_MODULE);
+  }
+
+  if (pr_data_get_timeout(PR_DATA_TIMEOUT_STALLED) > 0) {
+    pr_timer_reset(PR_TIMER_STALLED, ANY_MODULE);
+  }
+
   if (need_confirm) {
     /* Handle the confirmation/response from the client. */
     if (read_confirm(pkt, &data, &datalen) < 0) {
@@ -1797,7 +1863,14 @@ int sftp_scp_handle_packet(pool *p, void *ssh2, uint32_t channel_id,
     if (scp_session->path_idx != scp_session->paths->nelts)
       return 0;
 
-    return 1;
+    /* We would normally return 1 here, to indicate that we are done with
+     * the transfer.  However, doing so indicates to the channel-handling
+     * code that the channel is done, and should be closed.
+     *
+     * In the case of scp, though, we want the client to close the connection,
+     * in order ensure that it has received all of the data (see Bug#3544).
+     */
+    return 0;
 
   } else if (scp_opts & SFTP_SCP_OPT_ISDST) {
     struct scp_path **paths;
@@ -1846,6 +1919,13 @@ int sftp_scp_set_params(pool *p, uint32_t channel_id, array_header *req) {
   config_rec *c;
   struct scp_paths *paths;
 
+  if (!(sftp_services & SFTP_SERVICE_FL_SCP)) {
+    (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+      "%s", "'scp' exec request denied by Protocols config");
+    errno = EPERM;
+    return -1;
+  }
+
   /* Possible options are:
    *
    *  -d (target should be a directory)
@@ -1857,7 +1937,7 @@ int sftp_scp_set_params(pool *p, uint32_t channel_id, array_header *req) {
    */
 
 #if defined(FREEBSD4) || defined(FREEBSD5) || defined(FREEBSD6) || \
-    defined(FREEBSD7) || \
+    defined(FREEBSD7) || defined(FREEBSD8) || defined(FREEBSD9) || \
     defined(DARWIN7) || defined(DARWIN8) || defined(DARWIN9)
   optreset = 1;
   opterr = 1;
@@ -2083,6 +2163,7 @@ int sftp_scp_open_session(uint32_t channel_id) {
   pool *sub_pool;
   struct scp_paths *paths;
   struct scp_session *sess, *last;
+  int timeout_stalled;
 
   /* Check to see if we already have an SCP session opened for the given
    * channel ID.
@@ -2150,6 +2231,14 @@ int sftp_scp_open_session(uint32_t channel_id) {
     scp_sessions = sess;
   }
 
+  pr_timer_remove(PR_TIMER_STALLED, ANY_MODULE);
+
+  timeout_stalled = pr_data_get_timeout(PR_DATA_TIMEOUT_STALLED);
+  if (timeout_stalled > 0) {
+    pr_timer_add(timeout_stalled, PR_TIMER_STALLED, NULL,
+      scp_timeout_stalled_cb, "TimeoutStalled");
+  }
+
   pr_session_set_protocol("scp");
   return 0;
 }
@@ -2163,6 +2252,7 @@ int sftp_scp_close_session(uint32_t channel_id) {
     pr_signals_handle();
 
     if (sess->channel_id == channel_id) {
+      pr_timer_remove(PR_TIMER_STALLED, ANY_MODULE);
 
       if (sess->next)
         sess->next->prev = sess->prev;
@@ -2220,11 +2310,13 @@ int sftp_scp_close_session(uint32_t channel_id) {
             
                 if (elt->recvlen > 0) {
                   xferlog_write(0, pr_netaddr_get_sess_remote_name(),
-                    elt->recvlen, abs_path, 'b', 'i', 'r', session.user, 'i');
+                    elt->recvlen, abs_path, 'b', 'i', 'r', session.user, 'i',
+                    "_");
             
                 } else {
                   xferlog_write(0, pr_netaddr_get_sess_remote_name(),
-                    elt->sentlen, abs_path, 'b', 'o', 'r', session.user, 'i');
+                    elt->sentlen, abs_path, 'b', 'o', 'r', session.user, 'i',
+                    "_");
                 }
 
                 if (pr_fsio_close(elt->fh) < 0) {

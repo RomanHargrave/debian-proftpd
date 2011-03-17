@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2008 The ProFTPD Project team
+ * Copyright (c) 2008-2010 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,41 +23,48 @@
  */
 
 /* String manipulation functions
- * $Id: str.c,v 1.6 2008/06/14 02:40:04 castaglia Exp $
+ * $Id: str.c,v 1.9 2011/03/09 22:10:46 castaglia Exp $
  */
 
 #include "conf.h"
 
+/* Maximum number of replacements that we will do in a given string. */
+#define PR_STR_MAX_REPLACEMENTS			128
+
 char *sreplace(pool *p, char *s, ...) {
   va_list args;
-  char *m,*r,*src = s,*cp;
-  char **mptr,**rptr;
-  char *marr[33],*rarr[33];
+  char *m, *r, *src, *cp;
+  char *matches[PR_STR_MAX_REPLACEMENTS+1], *replaces[PR_STR_MAX_REPLACEMENTS+1];
   char buf[PR_TUNABLE_PATH_MAX] = {'\0'}, *pbuf = NULL;
-  size_t mlen = 0, rlen = 0;
-  int blen;
-  int dyn = TRUE;
+  size_t nmatches = 0, rlen = 0;
+  int blen = 0;
 
-  if (!p || !s) {
+  if (p == NULL ||
+      s == NULL) {
     errno = EINVAL;
     return NULL;
   }
 
+  src = s;
   cp = buf;
   *cp = '\0';
 
-  memset(marr, '\0', sizeof(marr));
-  memset(rarr, '\0', sizeof(rarr));
+  memset(matches, 0, sizeof(matches));
+  memset(replaces, 0, sizeof(replaces));
+
   blen = strlen(src) + 1;
 
   va_start(args, s);
 
-  while ((m = va_arg(args, char *)) != NULL && mlen < sizeof(marr)-1) {
+  while ((m = va_arg(args, char *)) != NULL &&
+         nmatches < PR_STR_MAX_REPLACEMENTS) {
     char *tmp = NULL;
     int count = 0;
 
-    if ((r = va_arg(args, char *)) == NULL)
+    r = va_arg(args, char *);
+    if (r == NULL) {
       break;
+    }
 
     /* Increase the length of the needed buffer by the difference between
      * the given match and replacement strings, multiplied by the number
@@ -97,12 +104,17 @@ char *sreplace(pool *p, char *s, ...) {
          */
         return s;
       }
-      marr[mlen] = m;
-      rarr[mlen++] = r;
+      matches[nmatches] = m;
+      replaces[nmatches++] = r;
     }
   }
 
   va_end(args);
+
+  /* If there are no matches, then there is nothing to replace. */
+  if (nmatches == 0) {
+    return s;
+  }
 
   /* Try to handle large buffer situations (i.e. escaping of PR_TUNABLE_PATH_MAX
    * (>2048) correctly, but do not allow very big buffer sizes, that may
@@ -113,17 +125,19 @@ char *sreplace(pool *p, char *s, ...) {
 # define BUFSIZ 8192
 #endif
 
-  if (blen < BUFSIZ)
-    cp = pbuf = (char *) pcalloc(p, ++blen);
-
-  if (!pbuf) {
-    cp = pbuf = buf;
-    dyn = FALSE;
-    blen = sizeof(buf);
+  if (blen >= BUFSIZ) {
+    errno = ENOSPC;
+    return NULL;
   }
 
+  cp = pbuf = (char *) pcalloc(p, ++blen);
+
   while (*src) {
-    for (mptr = marr, rptr = rarr; *mptr; mptr++, rptr++) {
+    char **mptr, **rptr;
+
+    for (mptr = matches, rptr = replaces; *mptr; mptr++, rptr++) {
+      size_t mlen;
+
       mlen = strlen(*mptr);
       rlen = strlen(*rptr);
 
@@ -134,9 +148,6 @@ char *sreplace(pool *p, char *s, ...) {
           pr_log_pri(PR_LOG_ERR,
             "WARNING: attempt to overflow internal ProFTPD buffers");
           cp = pbuf;
-
-          if (blen >= BUFSIZ)
-            blen = BUFSIZ;
 
           cp += (blen - 1);
           goto done;
@@ -156,9 +167,6 @@ char *sreplace(pool *p, char *s, ...) {
           "WARNING: attempt to overflow internal ProFTPD buffers");
         cp = pbuf;
 
-        if (blen >= BUFSIZ)
-          blen = BUFSIZ;
-
         cp += (blen - 1);
         goto done;
       }
@@ -170,10 +178,7 @@ char *sreplace(pool *p, char *s, ...) {
  done:
   *cp = '\0';
 
-  if (dyn)
-    return pbuf;
-
-  return pstrdup(p, buf);
+  return pbuf;
 }
 
 /* "safe" strcat, saves room for NUL at end of dst, and refuses to copy more
@@ -472,5 +477,43 @@ int pr_str_is_boolean(const char *str) {
 
   errno = EINVAL;
   return -1;
+}
+
+/* Return true if str contains any of the glob(7) characters. */
+int pr_str_is_fnmatch(const char *str) {
+  int have_bracket = 0;
+
+  while (*str) {
+    switch (*str) {
+      case '?':
+      case '*':
+        return TRUE;
+
+      case '\\':
+        /* If the next character is NUL, we've reached the end of the string. */
+        if (*(str+1) == '\0')
+          return FALSE;
+
+        /* Skip past the escaped character, i.e. the next character. */
+        str++;
+        break;
+
+      case '[':
+        have_bracket++;
+        break;
+
+      case ']':
+        if (have_bracket)
+          return TRUE;
+        break;
+
+      default:
+        break;
+    }
+
+    str++;
+  }
+
+  return FALSE;
 }
 

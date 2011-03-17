@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2009 The ProFTPD Project team
+ * Copyright (c) 2001-2010 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* Authentication front-end for ProFTPD
- * $Id: auth.c,v 1.80.2.1 2010/08/30 17:37:39 castaglia Exp $
+ * $Id: auth.c,v 1.84 2010/08/30 17:37:03 castaglia Exp $
  */
 
 #include "conf.h"
@@ -115,6 +115,10 @@ static void uidcache_create(void) {
 }
 
 static void uidcache_add(uid_t uid, const char *name) {
+  if (!(auth_caching & PR_AUTH_CACHE_FL_UID2NAME)) {
+    return;
+  }
+
   uidcache_create();
 
   if (uid_tab) {
@@ -179,6 +183,10 @@ static void gidcache_create(void) {
 }
 
 static void gidcache_add(gid_t gid, const char *name) {
+  if (!(auth_caching & PR_AUTH_CACHE_FL_GID2NAME)) {
+    return;
+  }
+
   gidcache_create();
 
   if (gid_tab) {
@@ -272,18 +280,29 @@ static modret_t *dispatch_auth(cmd_rec *cmd, char *match, module **m) {
 
     mr = pr_module_call(iter_tab->m, iter_tab->handler, cmd);
 
-    if (iter_tab->auth_flags & PR_AUTH_FL_REQUIRED)
+    /* Return a pointer, if requested, to the module which answered the
+     * auth request.  This is used, for example, by auth_getpwnam() for
+     * associating the answering auth module with the data looked up.
+     */
+
+    if (iter_tab->auth_flags & PR_AUTH_FL_REQUIRED) {
+      pr_trace_msg(trace_channel, 6,
+        "\"%s\" response from module mod_%s is authoritative", match,
+        iter_tab->m->name);
+
+      if (m) {
+        *m = iter_tab->m;
+      }
+
       break;
+    }
 
     if (MODRET_ISHANDLED(mr) ||
         MODRET_ISERROR(mr)) {
 
-      /* Return a pointer, if requested, to the module which answered the
-       * auth request.  This is used, for example, by auth_getpwnam() for
-       * associating the answering auth module with the data looked up.
-       */
-      if (m)
+      if (m) {
         *m = iter_tab->m;
+      }
 
       break;
     }
@@ -865,7 +884,8 @@ const char *pr_auth_uid2name(pool *p, uid_t uid) {
 
   uidcache_create();
 
-  if (uid_tab) {
+  if ((auth_caching & PR_AUTH_CACHE_FL_UID2NAME) &&
+      uid_tab) {
     void *v = NULL;
 
     v = pr_table_kget(uid_tab, (const void *) &uid, sizeof(uid_t), NULL);
@@ -923,7 +943,8 @@ const char *pr_auth_gid2name(pool *p, gid_t gid) {
 
   gidcache_create();
 
-  if (gid_tab) {
+  if ((auth_caching & PR_AUTH_CACHE_FL_GID2NAME) &&
+       gid_tab) {
     void *v = NULL;
  
     v = pr_table_kget(gid_tab, (const void *) &gid, sizeof(gid_t), NULL);
@@ -1333,6 +1354,7 @@ int pr_auth_is_valid_shell(xaset_t *ctx, const char *shell) {
 
 int pr_auth_chroot(const char *path) {
   int res;
+  time_t now;
 
 #if defined(HAVE_SETENV) && defined(__GLIBC__) && defined(__GLIBC_MINOR__) && \
   __GLIBC__ == 2 && __GLIBC_MINOR__ >= 3
@@ -1352,6 +1374,13 @@ int pr_auth_chroot(const char *path) {
 #endif
 
   pr_log_pri(PR_LOG_INFO, "Preparing to chroot to directory '%s'", path);
+
+  /* Prepare for chroots and the ensuing timezone chicanery by calling
+   * our pr_localtime() routine now, which will cause libc (via localtime(2))
+   * to load the tzinfo data into memory, and hopefully retain it (Bug#3431).
+   */
+  now = time(NULL);
+  (void) pr_localtime(NULL, &now);
 
   PRIVS_ROOT
   res = pr_fsio_chroot(path);

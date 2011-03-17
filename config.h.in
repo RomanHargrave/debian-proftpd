@@ -237,6 +237,18 @@
 /* The number of bytes in a time_t.  */
 #undef SIZEOF_TIME_T
 
+/* The number of bytes in a pointer to a char.  */
+#undef SIZEOF_CHAR_P
+
+/* The number of bytes in a pointer to a void.  */
+#undef SIZEOF_VOID_P
+
+/* Define if you have the backtrace function.  */
+#undef HAVE_BACKTRACE
+
+/* Define if you have the backtrace_symbols function.  */
+#undef HAVE_BACKTRACE_SYMBOLS
+
 /* Define if you have the bcopy function.  */
 #undef HAVE_BCOPY
 
@@ -450,6 +462,12 @@
 /* Define if you have the strsep function.  */
 #undef HAVE_STRSEP
 
+/* Define if you have the strtod function.  */
+#undef HAVE_STRTOD
+
+/* Define if you have the strtof function.  */
+#undef HAVE_STRTOF
+
 /* Define if you have the strtol function.  */
 #undef HAVE_STRTOL
 
@@ -593,6 +611,9 @@
 
 /* Define if you have the <siad.h> header file.  */
 #undef HAVE_SIAD_H
+
+/* Define if you have the <signal.h> header file.  */
+#undef HAVE_SIGNAL_H
 
 /* Define if you have the <string.h> header file.  */
 #undef HAVE_STRING_H
@@ -861,6 +882,9 @@
 /* Define if largefile support is desired.  */
 #undef PR_USE_LARGEFILES
 
+/* Define if memcache support is desired.. */
+#undef PR_USE_MEMCACHE
+
 /* Define if the %llu format should be used.  */
 #undef HAVE_LLU
 
@@ -884,6 +908,14 @@
 
 /* Define if OpenSSL support, if available, should be used.  */
 #undef PR_USE_OPENSSL
+
+/* Define if OpenSSL support (with FIPS enabled), if available, should be
+ * used.
+ */
+#undef PR_USE_OPENSSL_FIPS
+
+/* Define if using PCRE support.  */
+#undef PR_USE_PCRE
 
 /* Define if sendfile support, if available, should be used.  */
 #undef PR_USE_SENDFILE

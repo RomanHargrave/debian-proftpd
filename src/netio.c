@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2001-2010 The ProFTPD Project team
+ * Copyright (c) 2001-2011 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,11 +23,10 @@
  */
 
 /* NetIO routines
- * $Id: netio.c,v 1.39.2.1 2010/10/29 16:31:35 castaglia Exp $
+ * $Id: netio.c,v 1.50 2011/02/26 02:31:36 castaglia Exp $
  */
 
 #include "conf.h"
-#include <signal.h>
 
 /* See RFC 854 for the definition of these Telnet values */
 
@@ -109,7 +108,7 @@ static pr_buffer_t *netio_buffer_alloc(pr_netio_stream_t *nstrm) {
   pbuf = pcalloc(nstrm->strm_pool, sizeof(pr_buffer_t));
 
   /* Allocate a buffer. */
-  bufsz = pr_config_get_xfer_bufsz();
+  bufsz = pr_config_get_server_xfer_bufsz(nstrm->strm_mode);
   pbuf->buf = pcalloc(nstrm->strm_pool, bufsz);
   pbuf->buflen = bufsz;
 
@@ -659,6 +658,8 @@ int pr_netio_printf_async(pr_netio_stream_t *nstrm, char *fmt, ...) {
 
 int pr_netio_write(pr_netio_stream_t *nstrm, char *buf, size_t buflen) {
   int bwritten = 0, total = 0;
+  pr_buffer_t *pbuf;
+  pool *sub_pool;
 
   /* Sanity check */
   if (!nstrm) {
@@ -670,6 +671,43 @@ int pr_netio_write(pr_netio_stream_t *nstrm, char *buf, size_t buflen) {
     errno = (nstrm->strm_errno ? nstrm->strm_errno : EBADF);
     return -1;
   }
+
+  /* Before we send out the data to the client, generate an event
+   * for any listeners which may want to examine this data.  To do this, we
+   * need to allocate a pr_buffer_t for sending the buffer data to the
+   * listeners.
+   *
+   * We could just use nstrm->strm_pool, but for a long-lived control
+   * connection, this would amount to a slow memory increase.  So instead,
+   * we create a subpool from the stream's pool, and allocate the
+   * pr_buffer_t out of that.  Then simply destroy the subpool when done.
+   */
+
+  sub_pool = pr_pool_create_sz(nstrm->strm_pool, 64);
+  pbuf = pcalloc(sub_pool, sizeof(pr_buffer_t));
+  pbuf->buf = buf;
+  pbuf->buflen = buflen;
+  pbuf->current = pbuf->buf;
+  pbuf->remaining = 0;
+
+  switch (nstrm->strm_type) {
+    case PR_NETIO_STRM_CTRL:
+      pr_event_generate("core.ctrl-write", pbuf);
+      break;
+
+    case PR_NETIO_STRM_DATA:
+      pr_event_generate("core.data-write", pbuf);
+      break;
+
+    case PR_NETIO_STRM_OTHR:
+      pr_event_generate("core.othr-write", pbuf);
+      break;
+  }
+
+  /* The event listeners may have changed the data to write out. */
+  buf = pbuf->buf;
+  buflen = pbuf->buflen - pbuf->remaining;
+  destroy_pool(sub_pool);
 
   while (buflen) {
 
@@ -720,12 +758,14 @@ int pr_netio_write(pr_netio_stream_t *nstrm, char *buf, size_t buflen) {
     buflen -= bwritten;
   }
 
+  session.total_raw_out += total;
   return total;
 }
 
 int pr_netio_write_async(pr_netio_stream_t *nstrm, char *buf, size_t buflen) {
   int flags = 0;
   int bwritten = 0, total = 0;
+  pr_buffer_t *pbuf;
 
   /* Sanity check */
   if (!nstrm) {
@@ -744,6 +784,34 @@ int pr_netio_write_async(pr_netio_stream_t *nstrm, char *buf, size_t buflen) {
 
   if (fcntl(nstrm->strm_fd, F_SETFL, flags|O_NONBLOCK) == -1)
     return -1;
+
+  /* Before we send out the data to the client, generate an event
+   * for any listeners which may want to examine this data.
+   */
+
+  pbuf = pcalloc(nstrm->strm_pool, sizeof(pr_buffer_t));
+  pbuf->buf = buf;
+  pbuf->buflen = buflen;
+  pbuf->current = pbuf->buf;
+  pbuf->remaining = 0;
+
+  switch (nstrm->strm_type) {
+    case PR_NETIO_STRM_CTRL:
+      pr_event_generate("core.ctrl-write", pbuf);
+      break;
+
+    case PR_NETIO_STRM_DATA:
+      pr_event_generate("core.data-write", pbuf);
+      break;
+
+    case PR_NETIO_STRM_OTHR:
+      pr_event_generate("core.othr-write", pbuf);
+      break;
+  }
+
+  /* The event listeners may have changed the data to write out. */
+  buf = pbuf->buf;
+  buflen = pbuf->buflen - pbuf->remaining;
 
   while (buflen) {
     do {
@@ -885,6 +953,7 @@ int pr_netio_read(pr_netio_stream_t *nstrm, char *buf, size_t buflen,
     buflen -= bread;
   }
 
+  session.total_raw_in += total;
   return total;
 }
 
@@ -930,10 +999,12 @@ char *pr_netio_gets(char *buf, size_t buflen, pr_netio_stream_t *nstrm) {
 
   buflen--;
 
-  if (nstrm->strm_buf)
+  if (nstrm->strm_buf) {
     pbuf = nstrm->strm_buf;
-  else
+
+  } else {
     pbuf = netio_buffer_alloc(nstrm);
+  }
 
   while (buflen) {
 
@@ -956,8 +1027,17 @@ char *pr_netio_gets(char *buf, size_t buflen, pr_netio_stream_t *nstrm) {
       pbuf->remaining = pbuf->buflen - toread;
       pbuf->current = pbuf->buf;
 
-    } else
-      toread = pbuf->buflen - pbuf->remaining;
+      pbuf->remaining = pbuf->buflen - toread;
+      pbuf->current = pbuf->buf;
+
+      /* Before we begin iterating through the data read in from the
+       * network, generate an event for any listeners which may want to
+       * examine this data as well.
+       */
+      pr_event_generate("core.othr-read", pbuf);
+    }
+
+    toread = pbuf->buflen - pbuf->remaining;
 
     while (buflen && *pbuf->current != '\n' && toread--) {
       if (*pbuf->current & 0x80)
@@ -1018,7 +1098,7 @@ char *pr_netio_telnet_gets(char *buf, size_t buflen,
         pbuf->remaining == pbuf->buflen) {
 
       toread = pr_netio_read(in_nstrm, pbuf->buf,
-        (buflen < pbuf->buflen ?  buflen : pbuf->buflen), 1);
+        (buflen < pbuf->buflen ? buflen : pbuf->buflen), 1);
 
       if (toread <= 0) {
         if (bp != buf) {
@@ -1033,8 +1113,14 @@ char *pr_netio_telnet_gets(char *buf, size_t buflen,
       pbuf->remaining = pbuf->buflen - toread;
       pbuf->current = pbuf->buf;
 
-    } else
-      toread = pbuf->buflen - pbuf->remaining;
+      /* Before we begin iterating through the data read in from the
+       * network, handing any Telnet characters and such, generate an event
+       * for any listeners which may want to examine this data as well.
+       */
+      pr_event_generate("core.ctrl-read", pbuf);
+    }
+
+    toread = pbuf->buflen - pbuf->remaining;
 
     while (buflen && toread > 0 && *pbuf->current != '\n' && toread--) {
       cp = *pbuf->current++;

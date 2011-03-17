@@ -24,7 +24,7 @@
 
 /* Scoreboard routines.
  *
- * $Id: scoreboard.h,v 1.17 2010/01/10 20:01:30 castaglia Exp $
+ * $Id: scoreboard.h,v 1.20 2010/11/15 22:27:29 castaglia Exp $
  */
 
 #ifndef PR_SCOREBOARD_H
@@ -82,7 +82,22 @@ typedef struct {
 
   time_t sce_begin_idle, sce_begin_session;
 
-  off_t sce_xfer_size, sce_xfer_done, sce_xfer_len;
+  /* Records the number of bytes to be transferred, and the number of bytes
+   * transferred so far.  These two numbers are used to calculate the
+   * percentage of data transferred in the ftptop/ftpwho utilities.
+   *
+   * Note that for uploads, we do not know the full size of the data being
+   * uploaded, hence we cannot show a percentage; we can only display/record
+   * how many bytes have been transferred so far.
+   */
+  off_t sce_xfer_size;
+  off_t sce_xfer_done;
+
+  /* Records the number of bytes transferred, and the elapsed time.  These
+   * two fields are used to calculate the transfer rate as displayed by
+   * the ftptop/ftpwho utilities.
+   */
+  off_t sce_xfer_len;
   unsigned long sce_xfer_elapsed;
 
 } pr_scoreboard_entry_t;
@@ -115,7 +130,9 @@ typedef struct {
 #define PR_SCORE_ERR_NEWER_VERSION	-4
 
 const char *pr_get_scoreboard(void);
+const char *pr_get_scoreboard_mutex(void);
 int pr_set_scoreboard(const char *);
+int pr_set_scoreboard_mutex(const char *);
 
 int pr_close_scoreboard(void);
 void pr_delete_scoreboard(void);

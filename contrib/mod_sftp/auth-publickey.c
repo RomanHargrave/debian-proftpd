@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: auth-publickey.c,v 1.4.2.1 2010/06/17 17:57:08 castaglia Exp $
+ * $Id: auth-publickey.c,v 1.5 2010/06/17 17:56:51 castaglia Exp $
  */
 
 #include "mod_sftp.h"

@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2010 The ProFTPD Project team
+ * Copyright (c) 2001-2011 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* Unix authentication module for ProFTPD
- * $Id: mod_auth_unix.c,v 1.42.2.3 2010/12/07 18:22:29 castaglia Exp $
+ * $Id: mod_auth_unix.c,v 1.48 2011/02/14 22:41:35 castaglia Exp $
  */
 
 #include "conf.h"
@@ -38,7 +38,9 @@
 #endif
 
 #ifdef PR_USE_SHADOW
-# include <shadow.h>
+# ifdef HAVE_SHADOW_H
+#   include <shadow.h>
+# endif
 #endif
 
 #ifdef HAVE_SYS_SECURITY_H
@@ -126,6 +128,7 @@ extern unsigned char persistent_passwd;
 /* mod_auth_unix option flags */
 #define AUTH_UNIX_OPT_AIX_NO_RLOGIN		0x0001
 #define AUTH_UNIX_OPT_NO_GETGROUPLIST		0x0002
+#define AUTH_UNIX_OPT_MAGIC_TOKEN_CHROOT	0x0004
 
 static unsigned long auth_unix_opts = 0UL;
 
@@ -204,8 +207,9 @@ static struct passwd *p_getpwnam(const char *name) {
   while ((pw = p_getpwent()) != NULL) {
     pr_signals_handle();
 
-    if (strcmp(name, pw->pw_name) == 0)
+    if (strcmp(name, pw->pw_name) == 0) {
       break;
+    }
   }
 
   return pw;
@@ -336,11 +340,92 @@ MODRET pw_getpwnam(cmd_rec *cmd) {
   const char *name;
 
   name = cmd->argv[0];
-  if (persistent_passwd)
+  if (persistent_passwd) {
     pw = p_getpwnam(name);
 
-  else
+  } else {
     pw = getpwnam(name);
+  }
+
+  if (auth_unix_opts & AUTH_UNIX_OPT_MAGIC_TOKEN_CHROOT) {
+    char *home_dir, *ptr;
+
+    /* Here is where we do the "magic token" chroot monstrosity inflicted
+     * on the world by wu-ftpd.
+     *
+     * If the magic token '/./' appears in the user's home directory, the
+     * directory portion before the token is the directory to use for
+     * the chroot; the directory portion after the token is the directory
+     * to use for the initial chdir.
+     */
+
+    home_dir = pstrdup(cmd->tmp_pool, pw->pw_dir);
+
+    /* We iterate through the home directory string since it is possible
+     * for the '.' character to appear without it being part of the magic
+     * token.
+     */
+    ptr = strchr(home_dir, '.');
+    while (ptr != NULL) {
+      pr_signals_handle();
+
+      /* If we're at the start of the home directory string, stop looking:
+       * this home directory is not really valid anyway.
+       */
+      if (ptr == home_dir) {
+        break;
+      }
+
+      /* Back up one character. */
+      ptr--;
+
+      /* If we're at the start of the home directory now, stop looking:
+       * this home directory cannot contain a valid magic token.  I.e.
+       *
+       * /./home/foo
+       *
+       * cannot be valid, as there is no directory portion before the
+       * token.
+       */
+      if (ptr == home_dir) {
+        break;
+      }
+
+      if (strncmp(ptr, "/./", 3) == 0) {
+        char *default_chdir;
+        config_rec *c;
+
+        *ptr = '\0';
+        default_chdir = pstrdup(cmd->tmp_pool, ptr + 2);
+
+        /* In order to make sure that this user is chrooted to this
+         * directory, we remove all DefaultRoot directives and add a new
+         * one.  Same for the DefaultChdir directive.
+         */
+
+        (void) remove_config(main_server->conf, "DefaultRoot", FALSE);
+        c = add_config_param_set(&main_server->conf, "DefaultRoot", 1, NULL);
+        c->argv[0] = pstrdup(c->pool, home_dir);
+
+        (void) remove_config(main_server->conf, "DefaultChdir", FALSE);
+        c = add_config_param_set(&main_server->conf, "DefaultChdir", 1, NULL);
+        c->argv[0] = pstrdup(c->pool, default_chdir);
+
+        pr_log_debug(DEBUG9, "AuthUnixOption magicTokenChroot: "
+          "found magic token in '%s', using 'DefaultRoot %s' and "
+          "'DefaultChdir %s'", pw->pw_dir, home_dir, default_chdir);
+
+        /* We need to use a long-lived memory pool for overwriting the
+         * normal home directory.
+         */
+        pw->pw_dir = pstrdup(session.pool, home_dir);
+
+        break;
+      }
+
+      ptr = strchr(ptr + 2, '.');
+    }
+  }
 
   return pw ? mod_create_data(cmd, pw) : PR_DECLINED(cmd);
 }
@@ -385,36 +470,42 @@ static char *_get_pw_info(pool *p, const char *u, time_t *lstchg, time_t *min,
 #endif /* HAVE_SETSPENT */
 
   sp = getspnam(u);
-
-  if (sp) {
+  if (sp != NULL) {
     cpw = pstrdup(p, sp->sp_pwdp);
 
-    if (lstchg)
+    if (lstchg != NULL) {
       *lstchg = SP_CVT_DAYS(sp->sp_lstchg);
+    }
 
-    if (min)
+    if (min != NULL) {
       *min = SP_CVT_DAYS(sp->sp_min);
+    }
 
-    if (max)
+    if (max != NULL) {
       *max = SP_CVT_DAYS(sp->sp_max);
+    }
 
 #ifdef HAVE_SPWD_SP_WARN
-    if (warn)
+    if (warn != NULL) {
       *warn = SP_CVT_DAYS(sp->sp_warn);
+    }
 #endif /* HAVE_SPWD_SP_WARN */
 
 #ifdef HAVE_SPWD_SP_INACT
-    if (inact)
+    if (inact != NULL) {
       *inact = SP_CVT_DAYS(sp->sp_inact);
+    }
 #endif /* HAVE_SPWD_SP_INACT */
 
 #ifdef HAVE_SPWD_SP_EXPIRE
-    if (expire)
+    if (expire != NULL) {
       *expire = SP_CVT_DAYS(sp->sp_expire);
+    }
 #endif /* HAVE_SPWD_SP_EXPIRE */
   }
+
 #ifdef PR_USE_AUTO_SHADOW
-  else {
+  if (sp == NULL) {
     struct passwd *pw;
 
     endspent();
@@ -424,29 +515,39 @@ static char *_get_pw_info(pool *p, const char *u, time_t *lstchg, time_t *min,
     if (pw != NULL) {
       cpw = pstrdup(p, pw->pw_passwd);
 
-      if (lstchg)
+      if (lstchg != NULL) {
         *lstchg = (time_t) -1;
+      }
 
-      if (min)
+      if (min != NULL) {
         *min = (time_t) -1;
+      }
 
-      if (max)
+      if (max != NULL) {
         *max = (time_t) -1;
+      }
 
-      if (warn)
+      if (warn != NULL) {
         *warn = (time_t) -1;
+      }
 
-      if (inact)
+      if (inact != NULL) {
         *inact = (time_t) -1;
+      }
 
-      if (expire)
+      if (expire != NULL) {
         *expire = (time_t) -1;
+      }
     }
+
+  } else {
+    PRIVS_RELINQUISH
   }
 #else
   endspent();
   PRIVS_RELINQUISH
 #endif /* PR_USE_AUTO_SHADOW */
+
   return cpw;
 }
 
@@ -1108,6 +1209,9 @@ MODRET set_authunixoptions(cmd_rec *cmd) {
 
     } else if (strcmp(cmd->argv[i], "noGetgrouplist") == 0) {
       opts |= AUTH_UNIX_OPT_NO_GETGROUPLIST;
+
+    } else if (strcmp(cmd->argv[i], "magicTokenChroot") == 0) {
+      opts |= AUTH_UNIX_OPT_MAGIC_TOKEN_CHROOT;
 
     } else {
       CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, ": unknown AuthUnixOption '",

@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (C) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (C) 2001-2010 The ProFTPD Project
+ * Copyright (C) 2001-2011 The ProFTPD Project
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,14 +25,10 @@
  */
 
 /* ProFTPD virtual/modular file-system support
- * $Id: fsio.c,v 1.89.2.2 2010/04/12 19:00:00 castaglia Exp $
+ * $Id: fsio.c,v 1.98 2011/03/03 21:38:54 castaglia Exp $
  */
 
 #include "conf.h"
-
-#ifdef HAVE_REGEX_H
-# include <regex.h>
-#endif
 
 #ifdef HAVE_SYS_STATVFS_H
 # include <sys/statvfs.h>
@@ -1209,8 +1205,7 @@ pr_fs_t *pr_get_fs(const char *path, int *exact) {
   return best_match_fs;
 }
 
-#if defined(HAVE_REGEX_H) && defined(HAVE_REGCOMP)
-#ifdef PR_FS_MATCH
+#if defined(PR_USE_REGEX) && defined(PR_FS_MATCH)
 void pr_associate_fs(pr_fs_match_t *fsm, pr_fs_t *fs) {
   *((pr_fs_t **) push_array(fsm->fsm_fs_objs)) = fs;
 }
@@ -1244,9 +1239,9 @@ pr_fs_match_t *pr_create_fs_match(pool *p, const char *name,
 
   regexp = pr_regexp_alloc();
 
-  if ((res = regcomp(regexp, pattern, REG_EXTENDED|REG_NOSUB)) != 0) {
-
-    regerror(res, regexp, regerr, sizeof(regerr));
+  res = pr_regexp_compile(regexp, pattern, REG_EXTENDED|REG_NOSUB);
+  if (res != 0) {
+    pr_regexp_error(res, regexp, regerr, sizeof(regerr));
     pr_regexp_free(regexp);
 
     pr_log_pri(PR_LOG_ERR, "unable to compile regex '%s': %s", pattern, regerr);
@@ -1403,7 +1398,7 @@ pr_fs_match_t *pr_get_next_fs_match(pr_fs_match_t *fsm, const char *path,
 
   for (fsmi = fsm->fsm_next; fsmi; fsmi = fsmi->fsm_next) {
     if ((fsmi->fsm_opmask & op) &&
-        regexec(fsmi->fsm_regex, path, 0, NULL, 0) == 0)
+        pr_regexp_exec(fsmi->fsm_regex, path, 0, NULL, 0) == 0)
       return fsmi;
   }
 
@@ -1420,14 +1415,13 @@ pr_fs_match_t *pr_get_fs_match(const char *path, int op) {
   fsm = fs_match_list;
 
   if ((fsm->fsm_opmask & op) &&
-      regexec(fsm->fsm_regex, path, 0, NULL, 0) == 0)
+      pr_regexp_exec(fsm->fsm_regex, path, 0, NULL, 0) == 0)
     return fsm;
 
   /* ...otherwise, hand the search off to pr_get_next_fs_match() */
   return pr_get_next_fs_match(fsm, path, op);
 }
-#endif /* PR_FS_MATCH */
-#endif /* HAVE_REGEX_H && HAVE_REGCOMP */
+#endif /* PR_USE_REGEX and PR_FS_MATCH */
 
 void pr_fs_setcwd(const char *dir) {
   pr_fs_resolve_path(dir, cwd, sizeof(cwd)-1, FSIO_DIR_CHDIR);
@@ -2306,6 +2300,7 @@ void *pr_fsio_opendir(const char *path) {
   DIR *res = NULL;
 
   if (strchr(path, '/') == NULL) {
+    pr_fs_setcwd(pr_fs_getcwd());
     fs = fs_cwd;
 
   } else {
@@ -2327,8 +2322,9 @@ void *pr_fsio_opendir(const char *path) {
     fs->fs_name, path);
   res = (fs->opendir)(fs, path);
 
-  if (!res)
+  if (res == NULL) {
     return NULL;
+  }
 
   /* Cache it here */
   fs_cache_dir = res;
@@ -2339,8 +2335,7 @@ void *pr_fsio_opendir(const char *path) {
 
   fsod = pcalloc(fsod_pool, sizeof(fsopendir_t));
 
-  if (!fsod) {
-
+  if (fsod == NULL) {
     if (fs->closedir) {
       (fs->closedir)(fs, res);
       errno = ENOMEM;
@@ -2363,17 +2358,19 @@ void *pr_fsio_opendir(const char *path) {
 
     /* find the end of the fsopendir list */
     fsodi = fsopendir_list;
-    while (fsodi->next)
+    while (fsodi->next) {
+      pr_signals_handle();
       fsodi = fsodi->next;
+    }
 
     fsod->next = NULL;
     fsod->prev = fsodi;
     fsodi->next = fsod;
 
-  } else
-
+  } else {
     /* This fsopendir _becomes_ the start of the fsopendir list */
     fsopendir_list = fsod;
+  }
 
   return res;
 }
@@ -2955,8 +2952,8 @@ int pr_fsio_read(pr_fh_t *fh, char *buf, size_t size) {
   while (fs && fs->fs_next && !fs->read)
     fs = fs->fs_next;
 
-  pr_trace_msg(trace_channel, 8, "using %s read() for path '%s'", fs->fs_name,
-    fh->fh_path);
+  pr_trace_msg(trace_channel, 8, "using %s read() for path '%s' (%lu bytes)",
+    fs->fs_name, fh->fh_path, (unsigned long) size);
   res = (fs->read)(fh, fh->fh_fd, buf, size);
 
   return res;
@@ -2978,8 +2975,8 @@ int pr_fsio_write(pr_fh_t *fh, const char *buf, size_t size) {
   while (fs && fs->fs_next && !fs->write)
     fs = fs->fs_next;
 
-  pr_trace_msg(trace_channel, 8, "using %s write() for path '%s'", fs->fs_name,
-    fh->fh_path);
+  pr_trace_msg(trace_channel, 8, "using %s write() for path '%s' (%lu bytes)",
+    fs->fs_name, fh->fh_path, (unsigned long) size);
   res = (fs->write)(fh, fh->fh_fd, buf, size);
 
   return res;
@@ -3663,30 +3660,6 @@ char *pr_fsio_getline(char *buf, int buflen, pr_fh_t *fh,
   return (buf > start ? start : 0);
 }
 
-#if defined(HAVE_SYS_STATVFS_H) || defined(HAVE_SYS_VFS_H) || defined(HAVE_STATFS)
-
-/* Simple multiplication and division doesn't work with very large
- * filesystems (overflows 32 bits).  This code should handle it.
- */
-static off_t calc_fs_size(size_t blocks, size_t bsize) {
-  off_t bl_lo, bl_hi;
-  off_t res_lo, res_hi, tmp;
-
-  bl_lo = blocks & 0x0000ffff;
-  bl_hi = blocks & 0xffff0000;
-
-  tmp = (bl_hi >> 16) * bsize;
-  res_hi = tmp & 0xffff0000;
-  res_lo = (tmp & 0x0000ffff) << 16;
-  res_lo += bl_lo * bsize;
-
-  if (res_hi & 0xfc000000)
-    /* Overflow */
-    return 0;
-
-  return (res_lo >> 10) | (res_hi << 6);
-}
-
 /* Be generous in the maximum allowed number of dup fds, in our search for
  * one that is outside the big three.
  *
@@ -3767,7 +3740,29 @@ int pr_fs_get_usable_fd(int fd) {
   return fdi;
 }
 
-off_t pr_fs_getsize(char *path) {
+/* Simple multiplication and division doesn't work with very large
+ * filesystems (overflows 32 bits).  This code should handle it.
+ */
+static off_t calc_fs_size(size_t blocks, size_t bsize) {
+  off_t bl_lo, bl_hi;
+  off_t res_lo, res_hi, tmp;
+
+  bl_lo = blocks & 0x0000ffff;
+  bl_hi = blocks & 0xffff0000;
+
+  tmp = (bl_hi >> 16) * bsize;
+  res_hi = tmp & 0xffff0000;
+  res_lo = (tmp & 0x0000ffff) << 16;
+  res_lo += bl_lo * bsize;
+
+  if (res_hi & 0xfc000000)
+    /* Overflow */
+    return 0;
+
+  return (res_lo >> 10) | (res_hi << 6);
+}
+
+static int fs_getsize(char *path, off_t *fs_size) {
 # if defined(HAVE_SYS_STATVFS_H)
 
 #  if defined(_FILE_OFFSET_BITS) && _FILE_OFFSET_BITS == 64 && \
@@ -3785,10 +3780,15 @@ off_t pr_fs_getsize(char *path) {
   struct statvfs fs;
 #  endif /* LFS && !Solaris 2.5.1 && !Solaris 2.6 && !Solaris 2.7 */
 
-  if (statvfs(path, &fs) != 0) {
+  pr_trace_msg(trace_channel, 18, "using statvfs() on '%s'", path);
+  if (statvfs(path, &fs) < 0) {
+    int xerrno = errno;
+
     pr_trace_msg(trace_channel, 3, "statvfs() error using '%s': %s",
-      path, strerror(errno));
-    return 0;
+      path, strerror(xerrno));
+
+    errno = xerrno;
+    return -1;
   }
 
   /* The calc_fs_size() function is only useful for 32-bit numbers;
@@ -3797,19 +3797,26 @@ off_t pr_fs_getsize(char *path) {
    */
   if (sizeof(fs.f_bavail) > 4 ||
       sizeof(fs.f_frsize) > 4) {
-    return ((off_t) fs.f_bavail * (off_t) fs.f_frsize);
+    *fs_size = ((off_t) fs.f_bavail * (off_t) fs.f_frsize);
 
   } else {
-    return calc_fs_size(fs.f_bavail, fs.f_frsize);
+    *fs_size = calc_fs_size(fs.f_bavail, fs.f_frsize);
   }
+
+  return 0;
 
 # elif defined(HAVE_SYS_VFS_H)
   struct statfs fs;
 
-  if (statfs(path, &fs) != 0) {
+  pr_trace_msg(trace_channel, 18, "using statfs() on '%s'", path);
+  if (statfs(path, &fs) < 0) {
+    int xerrno = errno;
+
     pr_trace_msg(trace_channel, 3, "statfs() error using '%s': %s",
-      path, strerror(errno));
-    return 0;
+      path, strerror(xerrno));
+
+    errno = xerrno;
+    return -1;
   }
 
   /* The calc_fs_size() function is only useful for 32-bit numbers;
@@ -3818,19 +3825,26 @@ off_t pr_fs_getsize(char *path) {
    */
   if (sizeof(fs.f_bavail) > 4 ||
       sizeof(fs.f_bsize) > 4) {
-    return ((off_t) fs.f_bavail * (off_t) fs.f_bsize);
+    *fs_size = ((off_t) fs.f_bavail * (off_t) fs.f_bsize);
 
   } else {
-    return calc_fs_size(fs.f_bavail, fs.f_bsize);
+    *fs_size = calc_fs_size(fs.f_bavail, fs.f_bsize);
   }
+
+  return 0;
 
 # elif defined(HAVE_STATFS)
   struct statfs fs;
 
-  if (statfs(path, &fs) != 0) {
+  pr_trace_msg(trace_channel, 18, "using statfs() on '%s'", path);
+  if (statfs(path, &fs) < 0) {
+    int xerrno = errno;
+
     pr_trace_msg(trace_channel, 3, "statfs() error using '%s': %s",
-      path, strerror(errno));
-    return 0;
+      path, strerror(xerrno));
+
+    errno = xerrno;
+    return -1;
   }
 
   /* The calc_fs_size() function is only useful for 32-bit numbers;
@@ -3839,15 +3853,37 @@ off_t pr_fs_getsize(char *path) {
    */
   if (sizeof(fs.f_bavail) > 4 ||
       sizeof(fs.f_bsize) > 4) {
-    return ((off_t) fs.f_bavail * (off_t) fs.f_bsize);
+    *fs_size = ((off_t) fs.f_bavail * (off_t) fs.f_bsize);
 
   } else {
-    return calc_fs_size(fs.f_bavail, fs.f_bsize);
+    *fs_size = calc_fs_size(fs.f_bavail, fs.f_bsize);
   }
 
+  return 0;
+
 # endif /* !HAVE_STATFS && !HAVE_SYS_STATVFS && !HAVE_SYS_VFS */
+  errno = ENOSYS;
+  return -1;
+}
+
+#if defined(HAVE_STATFS) || defined(HAVE_SYS_STATVFS_H) || \
+  defined(HAVE_SYS_VFS_H)
+off_t pr_fs_getsize(char *path) {
+  int res;
+  off_t fs_size;
+
+  res = pr_fs_getsize2(path, &fs_size);
+  if (res < 0) {
+    fs_size = 0;
+  }
+
+  return fs_size;
 }
 #endif /* !HAVE_STATFS && !HAVE_SYS_STATVFS && !HAVE_SYS_VFS */
+
+int pr_fs_getsize2(char *path, off_t *fs_size) {
+  return fs_getsize(path, fs_size);
+}
 
 int pr_fsio_puts(const char *buf, pr_fh_t *fh) {
   if (!fh) {

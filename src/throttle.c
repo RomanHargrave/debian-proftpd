@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2008 The ProFTPD Project team
+ * Copyright (c) 2008-2011 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,11 +23,10 @@
  */
 
 /* TransferRate throttling
- * $Id: throttle.c,v 1.5 2008/09/01 21:10:38 castaglia Exp $
+ * $Id: throttle.c,v 1.8 2011/01/12 06:54:49 castaglia Exp $
  */
 
 #include "conf.h"
-#include <signal.h>
 
 /* Transfer rate variables */
 static long double xfer_rate_kbps = 0.0, xfer_rate_bps = 0.0;
@@ -97,7 +96,7 @@ void pr_throttle_init(cmd_rec *cmd) {
   config_rec *c = NULL;
   char *xfer_cmd = NULL;
   unsigned char have_user_rate = FALSE, have_group_rate = FALSE,
-    have_class_rate = FALSE, have_all_rate = FALSE;
+    have_class_rate = FALSE;
   unsigned int precedence = 0;
 
   /* Make sure the variables are (re)initialized */
@@ -116,6 +115,8 @@ void pr_throttle_init(cmd_rec *cmd) {
   while (c) {
     char **cmdlist = (char **) c->argv[0];
     int matched_cmd = FALSE;
+
+    pr_signals_handle();
 
     /* Does this TransferRate apply to the current command?  Note: this
      * could be made more efficient by using bitmasks rather than string
@@ -147,7 +148,7 @@ void pr_throttle_init(cmd_rec *cmd) {
           xfer_rate_freebytes = *((off_t *) c->argv[2]);
           have_xfer_rate = TRUE;
           have_user_rate = TRUE;
-          have_group_rate = have_class_rate = have_all_rate = FALSE;
+          have_group_rate = have_class_rate = FALSE;
         }
 
       } else if (strcmp(c->argv[4], "group") == 0) {
@@ -162,7 +163,7 @@ void pr_throttle_init(cmd_rec *cmd) {
           xfer_rate_freebytes = *((off_t *) c->argv[2]);
           have_xfer_rate = TRUE;
           have_group_rate = TRUE;
-          have_user_rate = have_class_rate = have_all_rate = FALSE;
+          have_user_rate = have_class_rate = FALSE;
         }
 
       } else if (strcmp(c->argv[4], "class") == 0) {
@@ -177,7 +178,7 @@ void pr_throttle_init(cmd_rec *cmd) {
           xfer_rate_freebytes = *((off_t *) c->argv[2]);
           have_xfer_rate = TRUE;
           have_class_rate = TRUE;
-          have_user_rate = have_group_rate = have_all_rate = FALSE;
+          have_user_rate = have_group_rate = FALSE;
         }
       }
 
@@ -191,7 +192,6 @@ void pr_throttle_init(cmd_rec *cmd) {
         xfer_rate_kbps = *((long double *) c->argv[1]);
         xfer_rate_freebytes = *((off_t *) c->argv[2]);
         have_xfer_rate = TRUE;
-        have_all_rate = TRUE;
         have_user_rate = have_group_rate = have_class_rate = FALSE;
       }
     }

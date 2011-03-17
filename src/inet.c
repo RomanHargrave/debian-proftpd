@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2010 The ProFTPD Project team
+ * Copyright (c) 2001-2011 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* Inet support functions, many wrappers for netdb functions
- * $Id: inet.c,v 1.121 2010/02/21 19:51:42 castaglia Exp $
+ * $Id: inet.c,v 1.130 2011/02/28 06:08:42 castaglia Exp $
  */
 
 #include "conf.h"
@@ -156,18 +156,13 @@ conn_t *pr_inet_copy_conn(pool *p, conn_t *c) {
 /* Initialize a new connection record, also creates a new subpool just for the
  * new connection.
  */
-static conn_t *init_conn(pool *p, xaset_t *servers, int fd,
-    pr_netaddr_t *bind_addr, int port, int retry_bind, int reporting) {
+static conn_t *init_conn(pool *p, int fd, pr_netaddr_t *bind_addr,
+    int port, int retry_bind, int reporting) {
   pool *sub_pool = NULL;
   conn_t *c;
   pr_netaddr_t na;
   int addr_family;
   int res = 0, one = 1, hold_errno;
-
-  if ((!servers || !servers->xas_list) && !main_server) {
-    errno = EINVAL;
-    return NULL;
-  }
 
   if (!inet_pool) {
     inet_pool = make_sub_pool(permanent_pool);
@@ -445,18 +440,19 @@ static conn_t *init_conn(pool *p, xaset_t *servers, int fd,
   return c;
 }
 
-conn_t *pr_inet_create_conn(pool *p, xaset_t *servers, int fd,
-    pr_netaddr_t *bind_addr, int port, int retry_bind) {
+conn_t *pr_inet_create_conn(pool *p, int fd, pr_netaddr_t *bind_addr,
+    int port, int retry_bind) {
   conn_t *c = NULL;
 
-  c = init_conn(p, servers, fd, bind_addr, port, retry_bind, TRUE);
+  c = init_conn(p, fd, bind_addr, port, retry_bind, TRUE);
 
   /* This code is somewhat of a kludge, because error handling should
    * NOT occur in inet.c, it should be handled by the caller.
    */
 
-  if (!c)
-    end_login(1);
+  if (c == NULL) {
+    pr_session_disconnect(NULL, PR_SESS_DISCONNECT_BY_APPLICATION, NULL);
+  }
 
   return c;
 }
@@ -464,8 +460,8 @@ conn_t *pr_inet_create_conn(pool *p, xaset_t *servers, int fd,
 /* Attempt to create a connection bound to a given port range, returns NULL
  * if unable to bind to any port in the range.
  */
-conn_t *pr_inet_create_conn_portrange(pool *p, xaset_t *servers,
-    pr_netaddr_t *bind_addr, int low_port, int high_port) {
+conn_t *pr_inet_create_conn_portrange(pool *p, pr_netaddr_t *bind_addr,
+    int low_port, int high_port) {
   int range_len, i;
   int *range, *ports;
   int attempt, random_index;
@@ -505,17 +501,18 @@ conn_t *pr_inet_create_conn_portrange(pool *p, xaset_t *servers,
 	 * port will be from the range of as-yet untried ports.
 	 */
 
-	while (++random_index <= i)
+	while (++random_index <= i) {
 	  range[random_index-1] = range[random_index];
+        }
       }
 
-      c = init_conn(p, servers, -1, bind_addr, ports[i], FALSE, FALSE);
+      c = init_conn(p, -1, bind_addr, ports[i], FALSE, FALSE);
 
       if (!c &&
           inet_errno != EADDRINUSE) {
         pr_log_pri(PR_LOG_ERR, "error initializing connection: %s",
           strerror(inet_errno));
-        end_login(1);
+        pr_session_disconnect(NULL, PR_SESS_DISCONNECT_BY_APPLICATION, NULL);
       }
     }
   }
@@ -578,8 +575,7 @@ void pr_inet_lingering_abort(pool *p, conn_t *c, long linger) {
 }
 
 int pr_inet_set_proto_opts(pool *p, conn_t *c, int mss, int nodelay,
-    int lowdelay, int throughput, int nopush) {
-  int tos = 0;
+    int tos, int nopush) {
 
   /* More portability fun.  Traditional BSD-style sockets want the value from
    * getprotobyname() in the setsockopt(2) call; Linux wants SOL_TCP for
@@ -611,7 +607,7 @@ int pr_inet_set_proto_opts(pool *p, conn_t *c, int mss, int nodelay,
       *no_delay == TRUE) {
 
     if (c->rfd != -1) {
-      if (setsockopt(c->rfd, IPPROTO_TCP, TCP_NODELAY, (void *) &nodelay,
+      if (setsockopt(c->rfd, tcp_level, TCP_NODELAY, (void *) &nodelay,
           sizeof(nodelay)) < 0) {
         pr_log_pri(PR_LOG_NOTICE, "error setting read fd %d TCP_NODELAY: %s",
           c->rfd, strerror(errno));
@@ -647,18 +643,7 @@ int pr_inet_set_proto_opts(pool *p, conn_t *c, int mss, int nodelay,
   }
 #endif /* TCP_MAXSEG */
 
-#ifdef IPTOS_LOWDELAY
-  if (lowdelay)
-    tos = IPTOS_LOWDELAY;
-#endif /* IPTOS_LOWDELAY */
-
-#ifdef IPTOS_THROUGHPUT
-  if (throughput)
-    tos = IPTOS_THROUGHPUT;
-#endif /* IPTOS_THROUGHPUT */
-
 #ifdef IP_TOS
-
   /* Only set TOS flags on IPv4 sockets; IPv6 sockets don't seem to support
    * them.
    */
@@ -699,36 +684,61 @@ int pr_inet_set_socket_opts(pool *p, conn_t *c, int rcvbuf, int sndbuf) {
 
   if (c->listen_fd != -1) {
     int keepalive = 0;
-    int crcvbuf, csndbuf;
+    int crcvbuf = 0, csndbuf = 0;
     socklen_t len;
 
     if (setsockopt(c->listen_fd, SOL_SOCKET, SO_KEEPALIVE, (void *)
-        &keepalive, sizeof(int)) < 0)
+        &keepalive, sizeof(int)) < 0) {
       pr_log_pri(PR_LOG_NOTICE, "error setting listen fd SO_KEEPALIVE: %s",
         strerror(errno));
+    }
 
-    len = sizeof(csndbuf);
-    getsockopt(c->listen_fd, SOL_SOCKET, SO_SNDBUF, (void *) &csndbuf, &len);
+    if (sndbuf > 0) {
+      len = sizeof(csndbuf);
+      getsockopt(c->listen_fd, SOL_SOCKET, SO_SNDBUF, (void *) &csndbuf, &len);
 
-    if (sndbuf &&
-        sndbuf > csndbuf) {
-      if (setsockopt(c->listen_fd, SOL_SOCKET, SO_SNDBUF, (void *) &sndbuf,
-          sizeof(sndbuf)) < 0)
-        pr_log_pri(PR_LOG_NOTICE, "error setting listen fd SO_SNDBUF: %s",
-          strerror(errno));
+      if (sndbuf > csndbuf) {
+        if (setsockopt(c->listen_fd, SOL_SOCKET, SO_SNDBUF, (void *) &sndbuf,
+            sizeof(sndbuf)) < 0) {
+          pr_log_pri(PR_LOG_NOTICE, "error setting listen fd SO_SNDBUF: %s",
+            strerror(errno));
+
+        } else {
+          pr_trace_msg("data", 8,
+            "set socket sndbuf of %lu bytes", (unsigned long) sndbuf);
+        }
+
+      } else {
+        pr_trace_msg("data", 8,
+          "socket %d has sndbuf of %lu bytes, ignoring "
+          "requested %lu bytes sndbuf", c->listen_fd, (unsigned long) csndbuf,
+          (unsigned long) sndbuf);
+      }
     }
 
     c->sndbuf = (sndbuf ? sndbuf : csndbuf);
 
-    len = sizeof(crcvbuf);
-    getsockopt(c->listen_fd, SOL_SOCKET, SO_RCVBUF, (void *) &crcvbuf, &len);
+    if (rcvbuf > 0) {
+      len = sizeof(crcvbuf);
+      getsockopt(c->listen_fd, SOL_SOCKET, SO_RCVBUF, (void *) &crcvbuf, &len);
 
-    if (rcvbuf &&
-        rcvbuf > crcvbuf) {
-      if (setsockopt(c->listen_fd, SOL_SOCKET, SO_RCVBUF, (void *) &rcvbuf,
-          sizeof(rcvbuf)) < 0)
-        pr_log_pri(PR_LOG_NOTICE, "error setting listen fd SO_RCVFBUF: %s",
-          strerror(errno));
+      if (rcvbuf > crcvbuf) {
+        if (setsockopt(c->listen_fd, SOL_SOCKET, SO_RCVBUF, (void *) &rcvbuf,
+            sizeof(rcvbuf)) < 0) {
+          pr_log_pri(PR_LOG_NOTICE, "error setting listen fd SO_RCVFBUF: %s",
+            strerror(errno));
+
+        } else {
+          pr_trace_msg("data", 8,
+            "set socket rcvbuf of %lu bytes", (unsigned long) rcvbuf);
+        }
+
+      } else {
+        pr_trace_msg("data", 8,
+          "socket %d has rcvbuf of %lu bytes, ignoring "
+          "requested %lu bytes rcvbuf", c->listen_fd, (unsigned long) crcvbuf,
+          (unsigned long) rcvbuf);
+      }
     }
 
     c->rcvbuf = (rcvbuf ? rcvbuf : crcvbuf);
@@ -848,7 +858,7 @@ int pr_inet_listen(pool *p, conn_t *c, int backlog) {
 
       pr_log_pri(PR_LOG_ERR, "unable to listen on %s#%u: %s",
         pr_netaddr_get_ipstr(c->local_addr), c->local_port, strerror(errno));
-      end_login(1);
+      pr_session_disconnect(NULL, PR_SESS_DISCONNECT_BY_APPLICATION, NULL);
 
     } else
       break;
@@ -1072,17 +1082,18 @@ int pr_inet_get_conn_info(conn_t *c, int fd) {
   pr_netaddr_clear(&na);
 
 #ifdef PR_USE_IPV6
-  if (pr_netaddr_use_ipv6())
+  if (pr_netaddr_use_ipv6()) {
     pr_netaddr_set_family(&na, AF_INET6);
 
-  else
+  } else {
     pr_netaddr_set_family(&na, AF_INET);
+  }
 #else
   pr_netaddr_set_family(&na, AF_INET);
 #endif /* PR_USE_IPV6 */
   nalen = pr_netaddr_get_sockaddr_len(&na);
 
-  if (getsockname(fd, pr_netaddr_get_sockaddr(&na), &nalen) != -1) {
+  if (getsockname(fd, pr_netaddr_get_sockaddr(&na), &nalen) == 0) {
     if (!c->local_addr)
       c->local_addr = pr_netaddr_alloc(c->pool);
 
@@ -1096,31 +1107,41 @@ int pr_inet_get_conn_info(conn_t *c, int fd) {
     pr_netaddr_set_sockaddr(c->local_addr, pr_netaddr_get_sockaddr(&na));
     c->local_port = ntohs(pr_netaddr_get_port(&na));
 
-  } else
+  } else {
     return -1;
+  }
 
   /* "Reset" the pr_netaddr_t struct for the getpeername(2) call. */
 #ifdef PR_USE_IPV6
-  if (pr_netaddr_use_ipv6())
+  if (pr_netaddr_use_ipv6()) {
     pr_netaddr_set_family(&na, AF_INET6);
 
-  else
+  } else {
     pr_netaddr_set_family(&na, AF_INET);
+  }
 #else
   pr_netaddr_set_family(&na, AF_INET);
 #endif /* PR_USE_IPV6 */
   nalen = pr_netaddr_get_sockaddr_len(&na);
 
-  if (getpeername(fd, pr_netaddr_get_sockaddr(&na), &nalen) != -1) {
-    c->remote_addr = pr_netaddr_alloc(c->pool);
+  if (getpeername(fd, pr_netaddr_get_sockaddr(&na), &nalen) == 0) {
+    /* Handle IPv4-mapped IPv6 peers as IPv4 peers (Bug#2196). */
+    if (pr_netaddr_is_v4mappedv6(&na) == TRUE) {
+      c->remote_addr = pr_netaddr_v6tov4(c->pool, &na);
 
-    pr_netaddr_set_family(c->remote_addr,
-      pr_netaddr_get_sockaddr(&na)->sa_family);
-    pr_netaddr_set_sockaddr(c->remote_addr, pr_netaddr_get_sockaddr(&na));
+    } else {
+      c->remote_addr = pr_netaddr_alloc(c->pool);
+
+      pr_netaddr_set_family(c->remote_addr,
+        pr_netaddr_get_sockaddr(&na)->sa_family);
+      pr_netaddr_set_sockaddr(c->remote_addr, pr_netaddr_get_sockaddr(&na));
+    }
+
     c->remote_port = ntohs(pr_netaddr_get_port(&na));
 
-  } else
+  } else {
     return -1;
+  }
 
   return 0;
 }
@@ -1229,6 +1250,30 @@ conn_t *pr_inet_openrw(pool *p, conn_t *c, pr_netaddr_t *addr, int strm_type,
 
   return res;
 }
+
+int pr_inet_generate_socket_event(const char *event, server_rec *s,
+    pr_netaddr_t *addr, int fd) {
+  pool *p;
+  struct socket_ctx *sc;
+
+  if (event == NULL ||
+      s == NULL ||
+      addr == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  p = make_sub_pool(permanent_pool);
+  sc = pcalloc(p, sizeof(struct socket_ctx));
+  sc->server = s;
+  sc->addr = addr;
+  sc->sockfd = fd;
+  pr_event_generate(event, sc);
+  destroy_pool(p);
+
+  return 0;
+}
+
 
 void init_inet(void) {
   struct protoent *pr = NULL;

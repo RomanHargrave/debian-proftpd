@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: disconnect.h,v 1.6.2.1 2010/10/29 22:28:52 castaglia Exp $
+ * $Id: disconnect.h,v 1.7 2010/10/29 22:28:17 castaglia Exp $
  */
 
 #include "mod_sftp.h"

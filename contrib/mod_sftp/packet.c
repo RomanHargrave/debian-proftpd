@@ -1,6 +1,6 @@
 /*
  * ProFTPD - mod_sftp packet IO
- * Copyright (c) 2008-2010 TJ Saunders
+ * Copyright (c) 2008-2011 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: packet.c,v 1.14.2.2 2010/10/29 22:46:06 castaglia Exp $
+ * $Id: packet.c,v 1.27 2011/03/16 22:38:51 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -43,17 +43,29 @@
 
 extern pr_response_t *resp_list, *resp_err_list;
 
+extern module sftp_module;
+
 static uint32_t packet_client_seqno = 0;
 static uint32_t packet_server_seqno = 0;
 
+/* Maximum length of the payload data of an SSH2 packet we're willing to
+ * accept.  Any packets reporting a payload length longer than this will be
+ * ignored/dropped.
+ */
+#define SFTP_PACKET_MAX_PAYLOAD_LEN	(256 * 1024)
+
 /* RFC4344 recommends 2^31 for the client packet sequence number at which
  * we should request a rekey, and 2^32 for the server packet sequence number.
- * Since we're using uin32_t, though, it isn't a big enough data type for those
- * numbers.  We'll settle for the max value for the uint32_t type.
+ *
+ * However, the uint32_t data type may not be unsigned for some
+ * platforms/compilers.  To avoid issues on these platforms, use 2^31-1
+ * for rekeying for both client and server packet sequence numbers.
  */
-#define SFTP_PACKET_REKEY_SEQNO_LIMIT		(uint32_t) -1
-static uint32_t rekey_client_seqno = SFTP_PACKET_REKEY_SEQNO_LIMIT;
-static uint32_t rekey_server_seqno = SFTP_PACKET_REKEY_SEQNO_LIMIT;
+#define SFTP_PACKET_CLIENT_REKEY_SEQNO_LIMIT		2147483647
+#define SFTP_PACKET_SERVER_REKEY_SEQNO_LIMIT		2147483647
+
+static uint32_t rekey_client_seqno = SFTP_PACKET_CLIENT_REKEY_SEQNO_LIMIT;
+static uint32_t rekey_server_seqno = SFTP_PACKET_SERVER_REKEY_SEQNO_LIMIT;
 
 static off_t rekey_client_len = 0;
 static off_t rekey_server_len = 0;
@@ -65,21 +77,47 @@ static time_t last_recvd, last_sent;
 static const char *version_id = SFTP_ID_STRING "\r\n";
 static int sent_version_id = FALSE;
 
+static void is_client_alive(void);
+
+/* Count of the number of "client alive" messages sent without a response. */
+static unsigned int client_alive_max = 0, client_alive_count = 0;
+static unsigned int client_alive_interval = 0;
+
 static const char *trace_channel = "ssh2";
 
 static int packet_poll(int sockfd, int io) {
   fd_set rfds, wfds;
   struct timeval tv;
-  int res, timeout;
+  int res, timeout, using_client_alive = FALSE;
 
-  timeout = poll_timeout;
-  if (timeout <= 0) {
-    /* Default of 60 seconds */
-    timeout = 60;
+  if (poll_timeout == -1) {
+    /* If we have "client alive" timeout interval configured, use that --
+     * but only if we have already done the key exchange, and are not
+     * rekeying.
+     *
+     * Otherwise, we use the default (i.e. TimeoutIdle).
+     */
+
+    if (client_alive_interval > 0 &&
+        (!(sftp_sess_state & SFTP_SESS_STATE_REKEYING) && 
+         (sftp_sess_state & SFTP_SESS_STATE_HAVE_AUTH))) {
+      timeout = client_alive_interval;
+      using_client_alive = TRUE;
+
+    } else {
+      timeout = pr_data_get_timeout(PR_DATA_TIMEOUT_IDLE);
+    }
+
+  } else {
+    timeout = poll_timeout;
   }
 
   tv.tv_sec = timeout;
   tv.tv_usec = 0;
+
+  pr_trace_msg(trace_channel, 19,
+    "waiting for max of %lu secs while polling socket %d using select(2)",
+    (unsigned long) tv.tv_sec, sockfd);
 
   while (1) {
     pr_signals_handle();
@@ -106,20 +144,34 @@ static int packet_poll(int sockfd, int io) {
     }
 
     if (res < 0) {
-      if (errno == EINTR) {
+      int xerrno = errno;
+
+      if (xerrno == EINTR) {
         pr_signals_handle();
         continue;
       }
 
+      pr_trace_msg(trace_channel, 18, "error calling select(2) on fd %d: %s",
+        sockfd, strerror(xerrno));
+
+      errno = xerrno;
       return -1;
 
     } else if (res == 0) {
       tv.tv_sec = timeout;
       tv.tv_usec = 0;
 
-      (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
-        "polling on socket %d timed out after %lu sec, trying again", sockfd,
-        (unsigned long) tv.tv_sec);
+      if (using_client_alive) {
+        is_client_alive();
+
+      } else {
+        pr_trace_msg(trace_channel, 18,
+          "polling on socket %d timed out after %lu sec, trying again", sockfd,
+          (unsigned long) tv.tv_sec);
+        (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+          "polling on socket %d timed out after %lu sec, trying again", sockfd,
+          (unsigned long) tv.tv_sec);
+      }
 
       continue;
     }
@@ -138,7 +190,8 @@ static int packet_poll(int sockfd, int io) {
  * It is the caller's responsibility to ensure that buf is large enough to
  * hold reqlen bytes.
  */
-int sftp_ssh2_packet_sock_read(int sockfd, void *buf, size_t reqlen) {
+int sftp_ssh2_packet_sock_read(int sockfd, void *buf, size_t reqlen,
+    int flags) {
   void *ptr;
   size_t remainlen;
 
@@ -165,13 +218,19 @@ int sftp_ssh2_packet_sock_read(int sockfd, void *buf, size_t reqlen) {
 
     while (res <= 0) {
       if (res < 0) {
-        if (errno == EINTR) {
+        int xerrno = errno;
+
+        if (xerrno == EINTR) {
           pr_signals_handle();
           continue;
         }
 
+        pr_trace_msg(trace_channel, 16,
+          "error reading from client (fd %d): %s", sockfd, strerror(xerrno));
         (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
-          "error reading from client (fd %d): %s", sockfd, strerror(errno));
+          "error reading from client (fd %d): %s", sockfd, strerror(xerrno));
+
+        errno = xerrno;
 
         /* We explicitly disconnect the client here, rather than sending
          * a DISCONNECT message, because the errors below all indicate
@@ -190,9 +249,14 @@ int sftp_ssh2_packet_sock_read(int sockfd, void *buf, size_t reqlen) {
             errno == ESHUTDOWN ||
 #endif /* ESHUTDOWNN */
             errno == EPIPE) {
+          xerrno = errno;
+
+          pr_trace_msg(trace_channel, 16,
+            "disconnecting client (%s)", strerror(xerrno));
           (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
-            "disconnecting client (%s)", strerror(errno));
-          end_login(1);
+            "disconnecting client (%s)", strerror(xerrno));
+          pr_session_disconnect(&sftp_module, PR_SESS_DISCONNECT_CLIENT_EOF,
+            strerror(xerrno));
         }
 
         return -1;
@@ -202,16 +266,34 @@ int sftp_ssh2_packet_sock_read(int sockfd, void *buf, size_t reqlen) {
          * the uncommunicative client.
          */
 
+        pr_trace_msg(trace_channel, 16, "%s",
+          "disconnecting client (received EOF)");
         (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
           "disconnecting client (received EOF)");
-        end_login(1);
+        pr_session_disconnect(&sftp_module, PR_SESS_DISCONNECT_CLIENT_EOF,
+          NULL);
       }
     }
 
+    /* Generate an event for any interested listeners.  Since the data are
+     * probably encrypted and such, and since listeners won't/shouldn't
+     * have the facilities for handling such data, we only pass the
+     * amount of data read in.
+     */
+    pr_event_generate("ssh2.netio-read", &res);
+
+    session.total_raw_in += reqlen;
     time(&last_recvd);
 
     if (res == remainlen)
       break;
+
+    if (flags & SFTP_PACKET_READ_FL_PESSIMISTIC) {
+      pr_trace_msg(trace_channel, 20, "read %lu bytes, expected %lu bytes; "
+        "pessimistically returning", (unsigned long) res,
+        (unsigned long) remainlen);
+      break;
+    }
 
     pr_trace_msg(trace_channel, 20, "read %lu bytes, expected %lu bytes; "
       "reading more", (unsigned long) res, (unsigned long) remainlen);
@@ -220,6 +302,13 @@ int sftp_ssh2_packet_sock_read(int sockfd, void *buf, size_t reqlen) {
   }
 
   return reqlen;
+}
+
+static char peek_mesg_type(struct ssh2_packet *pkt) {
+  char mesg_type;
+
+  memcpy(&mesg_type, pkt->payload, sizeof(char));
+  return mesg_type;
 }
 
 static void handle_debug_mesg(struct ssh2_packet *pkt) {
@@ -262,6 +351,9 @@ static void handle_disconnect_mesg(struct ssh2_packet *pkt) {
   reason_code = sftp_msg_read_int(pkt->pool, &pkt->payload, &pkt->payload_len);
   reason_str = sftp_disconnect_get_str(reason_code);
   if (reason_str == NULL) {
+    pr_trace_msg(trace_channel, 9,
+      "client sent unknown disconnect reason code %lu",
+      (unsigned long) reason_code);
     reason_str = "Unknown reason code";
   }
 
@@ -283,7 +375,7 @@ static void handle_disconnect_mesg(struct ssh2_packet *pkt) {
 
   (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
     "client sent SSH_DISCONNECT message: %s (%s)", explain, reason_str);
-  end_login(1);
+  pr_session_disconnect(&sftp_module, PR_SESS_DISCONNECT_CLIENT_QUIT, explain);
 }
 
 static void handle_global_request_mesg(struct ssh2_packet *pkt) {
@@ -324,6 +416,17 @@ static void handle_global_request_mesg(struct ssh2_packet *pkt) {
   }
 }
 
+static void handle_client_alive_mesg(struct ssh2_packet *pkt, char mesg_type) {
+  const char *mesg_desc;
+
+  mesg_desc = sftp_ssh2_packet_get_mesg_type_desc(mesg_type);
+
+  pr_trace_msg(trace_channel, 12,
+    "client sent %s message, considering client alive", mesg_desc);
+
+  client_alive_count = 0;
+}
+
 static void handle_ignore_mesg(struct ssh2_packet *pkt) {
   char *str;
   size_t len;
@@ -342,6 +445,60 @@ static void handle_unimplemented_mesg(struct ssh2_packet *pkt) {
 
   pr_trace_msg(trace_channel, 7, "received SSH_MSG_UNIMPLEMENTED for "
     "packet #%lu", (unsigned long) seqno);
+}
+
+static void is_client_alive(void) {
+  unsigned int count;
+  char *buf, *ptr;
+  uint32_t bufsz, buflen, channel_id;
+  struct ssh2_packet *pkt;
+  pool *tmp_pool;
+
+  if (++client_alive_count > client_alive_max) {
+    (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+      "SFTPClientAlive threshold (max %u checks, %u sec interval) reached, "
+      "disconnecting client", client_alive_max, client_alive_interval);    
+
+    /* XXX Generate an event for this? */
+
+    SFTP_DISCONNECT_CONN(SFTP_SSH2_DISCONNECT_BY_APPLICATION,
+      "client alive threshold reached");
+  }
+
+  /* If we have any opened channels, send a CHANNEL_REQUEST to one of
+   * them.  Otherwise, send a GLOBAL_REQUEST.
+   */
+
+  tmp_pool = make_sub_pool(session.pool);
+
+  bufsz = buflen = 64;
+  ptr = buf = palloc(tmp_pool, bufsz);
+
+  count = sftp_channel_opened(&channel_id);  
+  if (count > 0) {
+    sftp_msg_write_byte(&buf, &buflen, SFTP_SSH2_MSG_CHANNEL_REQUEST);
+    sftp_msg_write_int(&buf, &buflen, channel_id);
+
+    pr_trace_msg(trace_channel, 9,
+      "sending CHANNEL_REQUEST (remote channel ID %lu, keepalive@proftpd.org)",
+      (unsigned long) channel_id);
+
+  } else {
+    sftp_msg_write_byte(&buf, &buflen, SFTP_SSH2_MSG_GLOBAL_REQUEST);
+
+    pr_trace_msg(trace_channel, 9,
+      "sending GLOBAL_REQUEST (keepalive@proftpd.org)");
+  }
+
+  sftp_msg_write_string(&buf, &buflen, "keepalive@proftpd.org");
+  sftp_msg_write_bool(&buf, &buflen, TRUE);
+
+  pkt = sftp_ssh2_packet_create(tmp_pool);
+  pkt->payload = ptr;
+  pkt->payload_len = (bufsz - buflen);
+
+  (void) sftp_ssh2_packet_write(sftp_conn->wfd, pkt);
+  destroy_pool(tmp_pool);
 }
 
 /* Attempt to read in a random amount of data (up to the maximum amount of
@@ -363,7 +520,12 @@ static void read_packet_discard(int sockfd) {
     (unsigned long) buflen);
 
   if (buflen > 0) {
-    sftp_ssh2_packet_sock_read(sockfd, buf, buflen);
+    int flags = SFTP_PACKET_READ_FL_PESSIMISTIC;
+
+    /* We don't necessary want to wait for the entire random amount of data
+     * to be read in.
+     */
+    sftp_ssh2_packet_sock_read(sockfd, buf, buflen, flags);
   }
 
   return;
@@ -383,7 +545,7 @@ static int read_packet_len(int sockfd, struct ssh2_packet *pkt,
    * how many more bytes there are in the packet.
    */
 
-  res = sftp_ssh2_packet_sock_read(sockfd, buf, blocksz);
+  res = sftp_ssh2_packet_sock_read(sockfd, buf, blocksz, 0);
   if (res < 0)
     return res;
 
@@ -441,8 +603,26 @@ static int read_packet_payload(int sockfd, struct ssh2_packet *pkt,
   if (payload_len + padding_len == 0)
     return 0;
 
-  if (payload_len > 0)
+  if (payload_len > 0) {
+    /* We don't want to reject the packet outright yet; but we can ignore
+     * the payload data we're going to read in.  This packet will fail
+     * eventually anyway.
+     */
+    if (payload_len > SFTP_PACKET_MAX_PAYLOAD_LEN) {
+      pr_trace_msg(trace_channel, 20,
+        "payload len (%lu bytes) exceeds max payload len (%lu), "
+        "ignoring payload", (unsigned long) payload_len,
+        (unsigned long) SFTP_PACKET_MAX_PAYLOAD_LEN);
+
+      pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+        "client sent buggy/malicious packet payload length, ignoring");
+
+      errno = EPERM;
+      return -1;
+    }
+
     pkt->payload = pcalloc(pkt->pool, payload_len);
+  }
 
   /* If there's data in the buffer we received, it's probably already part
    * of the payload, unencrypted.  That will leave the remaining payload
@@ -503,7 +683,7 @@ static int read_packet_payload(int sockfd, struct ssh2_packet *pkt,
     return -1;
   }
 
-  res = sftp_ssh2_packet_sock_read(sockfd, buf + *offset, data_len);
+  res = sftp_ssh2_packet_sock_read(sockfd, buf + *offset, data_len, 0);
   if (res < 0) {
     return res;
   }
@@ -531,7 +711,7 @@ static int read_packet_mac(int sockfd, struct ssh2_packet *pkt, char *buf) {
   if (mac_len == 0)
     return 0;
 
-  res = sftp_ssh2_packet_sock_read(sockfd, buf, mac_len);
+  res = sftp_ssh2_packet_sock_read(sockfd, buf, mac_len, 0);
   if (res < 0)
     return res;
 
@@ -539,13 +719,6 @@ static int read_packet_mac(int sockfd, struct ssh2_packet *pkt, char *buf) {
   memcpy(pkt->mac, buf, res);
 
   return 0;
-}
-
-static char peek_mesg_type(struct ssh2_packet *pkt) {
-  char mesg_type;
-
-  memcpy(&mesg_type, pkt->payload, sizeof(char));
-  return mesg_type;
 }
 
 struct ssh2_packet *sftp_ssh2_packet_create(pool *p) {
@@ -702,10 +875,18 @@ const char *sftp_ssh2_packet_get_mesg_type_desc(char mesg_type) {
 
 int sftp_ssh2_packet_set_poll_timeout(int timeout) {
   if (timeout <= 0) {
-    timeout = pr_data_get_timeout(PR_DATA_TIMEOUT_IDLE);
+    poll_timeout = -1;
+
+  } else {
+    poll_timeout = timeout;
   }
 
-  poll_timeout = timeout;
+  return 0;
+}
+
+int sftp_ssh2_packet_set_client_alive(unsigned int max, unsigned int interval) {
+  client_alive_max = max;
+  client_alive_interval = interval;
   return 0;
 }
 
@@ -758,7 +939,6 @@ int sftp_ssh2_packet_read(int sockfd, struct ssh2_packet *pkt) {
       read_packet_discard(sockfd);
       return -1;
     }
-
 
     pr_trace_msg(trace_channel, 20, "SSH2 packet padding len = %u bytes",
       (unsigned int) pkt->padding_len);
@@ -928,6 +1108,14 @@ int sftp_ssh2_packet_read(int sockfd, struct ssh2_packet *pkt) {
       continue;
     }
 
+    if (mesg_type == SFTP_SSH2_MSG_REQUEST_SUCCESS ||
+        mesg_type == SFTP_SSH2_MSG_REQUEST_FAILURE ||
+        mesg_type == SFTP_SSH2_MSG_CHANNEL_SUCCESS ||
+        mesg_type == SFTP_SSH2_MSG_CHANNEL_FAILURE) {
+      handle_client_alive_mesg(pkt, mesg_type);
+      continue;
+    }
+
     if (mesg_type == SFTP_SSH2_MSG_IGNORE) {
       /* Since peeking at the mesg type did not actually update the
        * payload/len values, do that now.
@@ -1031,7 +1219,7 @@ int sftp_ssh2_packet_write(int sockfd, struct ssh2_packet *pkt) {
   char buf[SFTP_MAX_PACKET_LEN * 2], mesg_type;
   size_t buflen = 0, bufsz = SFTP_MAX_PACKET_LEN;
   uint32_t packet_len = 0;
-  int res;
+  int res, write_len = 0;
 
   /* Clear the iovec array before sending the data, if possible. */
   if (packet_niov == 0) {
@@ -1082,16 +1270,19 @@ int sftp_ssh2_packet_write(int sockfd, struct ssh2_packet *pkt) {
     if (!sent_version_id) {
       packet_iov[packet_niov].iov_base = (void *) version_id;
       packet_iov[packet_niov].iov_len = strlen(version_id);
+      write_len += packet_iov[packet_niov].iov_len;
       packet_niov++;
     }
 
     packet_iov[packet_niov].iov_base = (void *) buf;
     packet_iov[packet_niov].iov_len = buflen;
+    write_len += packet_iov[packet_niov].iov_len;
     packet_niov++;
 
     if (pkt->mac_len > 0) {
       packet_iov[packet_niov].iov_base = (void *) pkt->mac;
       packet_iov[packet_niov].iov_len = pkt->mac_len;
+      write_len += packet_iov[packet_niov].iov_len;
       packet_niov++;
     }
 
@@ -1104,31 +1295,44 @@ int sftp_ssh2_packet_write(int sockfd, struct ssh2_packet *pkt) {
     if (!sent_version_id) {
       packet_iov[packet_niov].iov_base = (void *) version_id;
       packet_iov[packet_niov].iov_len = strlen(version_id);
+      write_len += packet_iov[packet_niov].iov_len;
       packet_niov++;
     }
 
     packet_iov[packet_niov].iov_base = (void *) &packet_len;
     packet_iov[packet_niov].iov_len = sizeof(uint32_t);
+    write_len += packet_iov[packet_niov].iov_len;
     packet_niov++;
 
     packet_iov[packet_niov].iov_base = (void *) &(pkt->padding_len);
     packet_iov[packet_niov].iov_len = sizeof(char);
+    write_len += packet_iov[packet_niov].iov_len;
     packet_niov++;
 
     packet_iov[packet_niov].iov_base = (void *) pkt->payload;
     packet_iov[packet_niov].iov_len = pkt->payload_len;
+    write_len += packet_iov[packet_niov].iov_len;
     packet_niov++;
 
     packet_iov[packet_niov].iov_base = (void *) pkt->padding;
     packet_iov[packet_niov].iov_len = pkt->padding_len;
+    write_len += packet_iov[packet_niov].iov_len;
     packet_niov++;
 
     if (pkt->mac_len > 0) {
       packet_iov[packet_niov].iov_base = (void *) pkt->mac;
       packet_iov[packet_niov].iov_len = pkt->mac_len;
+      write_len += packet_iov[packet_niov].iov_len;
       packet_niov++;
     }
   }
+
+  /* Generate an event for any interested listeners.  Since the data are
+   * probably encrypted and such, and since listeners won't/shouldn't
+   * have the facilities for handling such data, we only pass the
+   * amount of data to be written out.
+   */
+  pr_event_generate("ssh2.netio-write", &write_len);
 
   if (packet_poll(sockfd, SFTP_PACKET_IO_WR) < 0) {
     return -1;
@@ -1152,9 +1356,12 @@ int sftp_ssh2_packet_write(int sockfd, struct ssh2_packet *pkt) {
     if (errno == ECONNRESET ||
         errno == ECONNABORTED ||
         errno == EPIPE) {
+      int xerrno = errno;
+
       (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
-        "disconnecting client (%s)", strerror(errno));
-      end_login(1);
+        "disconnecting client (%s)", strerror(xerrno));
+      pr_session_disconnect(&sftp_module, PR_SESS_DISCONNECT_BY_APPLICATION,
+        strerror(xerrno));
     }
 
     /* Always clear the iovec array after sending the data. */
@@ -1163,6 +1370,8 @@ int sftp_ssh2_packet_write(int sockfd, struct ssh2_packet *pkt) {
 
     return -1;
   }
+
+  session.total_raw_out += res;
 
   /* Always clear the iovec array after sending the data. */
   memset(packet_iov, 0, sizeof(packet_iov));
@@ -1295,6 +1504,8 @@ int sftp_ssh2_packet_handle(void) {
       }
 
     default:
+      pr_event_generate("ssh2.invalid-packet", pkt);
+
       (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
         "unhandled %s (%d) message, disconnecting",
         sftp_ssh2_packet_get_mesg_type_desc(mesg_type), mesg_type);
@@ -1312,14 +1523,14 @@ int sftp_ssh2_packet_rekey_reset(void) {
   /* Add the rekey seqno limit to the current sequence numbers. */
 
   if (rekey_client_seqno > 0) {
-    rekey_client_seqno = packet_client_seqno + SFTP_PACKET_REKEY_SEQNO_LIMIT;
+    rekey_client_seqno = packet_client_seqno + SFTP_PACKET_CLIENT_REKEY_SEQNO_LIMIT;
 
     if (rekey_client_seqno == 0)
       rekey_client_seqno++;
   }
 
   if (rekey_server_seqno > 0) {
-    rekey_server_seqno = packet_client_seqno + SFTP_PACKET_REKEY_SEQNO_LIMIT;
+    rekey_server_seqno = packet_client_seqno + SFTP_PACKET_SERVER_REKEY_SEQNO_LIMIT;
 
     if (rekey_server_seqno == 0)
       rekey_server_seqno++;
@@ -1362,6 +1573,7 @@ int sftp_ssh2_packet_send_version(void) {
     }
 
     sent_version_id = TRUE;
+    session.total_raw_out += res;
   }
 
   return 0;

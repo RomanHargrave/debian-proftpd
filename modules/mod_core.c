@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2010 The ProFTPD Project team
+ * Copyright (c) 2001-2011 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,18 +25,13 @@
  */
 
 /* Core FTPD module
- * $Id: mod_core.c,v 1.366.2.4 2010/12/01 18:46:08 castaglia Exp $
+ * $Id: mod_core.c,v 1.399 2011/03/16 18:26:48 castaglia Exp $
  */
 
 #include "conf.h"
 #include "privs.h"
 
 #include <ctype.h>
-#include <signal.h>
-
-#ifdef HAVE_REGEX_H
-# include <regex.h>
-#endif
 
 extern module site_module;
 extern xaset_t *server_list;
@@ -119,6 +114,63 @@ static ssize_t get_num_bytes(char *nbytes_str) {
   return PR_BYTES_BAD_FORMAT;
 }
 
+/* These are for handling any configured MaxCommandRate. */
+static unsigned long core_cmd_count = 0UL;
+static unsigned long core_max_cmds = 0UL;
+static unsigned int core_max_cmd_interval = 1;
+static time_t core_max_cmd_ts = 0;
+
+static unsigned long core_exceeded_cmd_rate(cmd_rec *cmd) {
+  unsigned long res = 0;
+  long over = 0;
+  time_t now;
+
+  if (core_max_cmds == 0) {
+    return 0;
+  }
+
+  core_cmd_count++;
+
+  over = core_cmd_count - core_max_cmds;
+  if (over > 0) {
+    /* Determine the delay, in ms.
+     *
+     * The value for this delay must be a value which will cause the command
+     * rate to not be exceeded.  For example, if the config is:
+     *
+     *  MaxCommandRate 200 1
+     *
+     * it means a maximum of 200 commands a sec.  This works out to a command
+     * every 5 ms, maximum:
+     *
+     *  1 sec * 1000 ms / 200 cmds per sec = 5 ms
+     *
+     * That 5 ms, then, would be the delay to use. For each command over the
+     * maximum number of commands per interval, we add this delay factor.
+     * This means that the more over the limit the session is, the longer the
+     * delay.
+     */
+
+    res = (unsigned long) (((core_max_cmd_interval * 1000) / core_max_cmds) * over);
+  }
+
+  now = time(NULL);
+  if (core_max_cmd_ts > 0) {
+    if ((now - core_max_cmd_ts) > core_max_cmd_interval) {
+      /* If it's been longer than the MaxCommandRate interval, reset the
+       * command counter.
+       */
+      core_cmd_count = 0;
+      core_max_cmd_ts = now;
+    }
+
+  } else {
+    core_max_cmd_ts = now;
+  }
+
+  return res;
+}
+
 static int core_idle_timeout_cb(CALLBACK_FRAME) {
   /* We don't want to quit in the middle of a transfer */
   if (session.sf_flags & SF_XFER) { 
@@ -132,11 +184,13 @@ static int core_idle_timeout_cb(CALLBACK_FRAME) {
   pr_response_send_async(R_421,
     _("Idle timeout (%d seconds): closing control connection"),
     pr_data_get_timeout(PR_DATA_TIMEOUT_IDLE));
-  session_exit(PR_LOG_INFO, "Client session idle timeout, disconnected", 0,
-    NULL);
 
   pr_timer_remove(PR_TIMER_LOGIN, ANY_MODULE);
   pr_timer_remove(PR_TIMER_NOXFER, ANY_MODULE);
+
+  pr_log_pri(PR_LOG_INFO, "%s", "Client session idle timeout, disconnected");
+  pr_session_disconnect(&core_module, PR_SESS_DISCONNECT_TIMEOUT,
+    "TimeoutIdle");
   return 0;
 }
 
@@ -604,13 +658,28 @@ MODRET set_satisfy(cmd_rec *cmd) {
   return PR_HANDLED(cmd);
 }
 
+/* usage: ScoreboardFile path */
 MODRET set_scoreboardfile(cmd_rec *cmd) {
   CHECK_ARGS(cmd, 1);
   CHECK_CONF(cmd, CONF_ROOT);
 
-  if (pr_set_scoreboard(cmd->argv[1]) < 0)
+  if (pr_set_scoreboard(cmd->argv[1]) < 0) {
     CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, ": unable to use '",
       cmd->argv[1], "': ", strerror(errno), NULL));
+  }
+
+  return PR_HANDLED(cmd);
+}
+
+/* usage: ScoreboardMutex path */
+MODRET set_scoreboardmutex(cmd_rec *cmd) {
+  CHECK_ARGS(cmd, 1);
+  CHECK_CONF(cmd, CONF_ROOT);
+
+  if (pr_set_scoreboard_mutex(cmd->argv[1]) < 0) {
+    CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, ": unable to use '",
+      cmd->argv[1], "': ", strerror(errno), NULL));
+  }
 
   return PR_HANDLED(cmd);
 }
@@ -790,6 +859,50 @@ MODRET set_maxinstances(cmd_rec *cmd) {
   return PR_HANDLED(cmd);
 }
 
+/* usage: MaxCommandRate rate [interval] */
+MODRET set_maxcommandrate(cmd_rec *cmd) {
+  config_rec *c;
+  long cmd_max = 0L;
+  unsigned int max_cmd_interval = 1;
+  char *endp = NULL;
+
+  if (cmd->argc-1 < 1 ||
+      cmd->argc-1 > 2) {
+    CONF_ERROR(cmd, "wrong number of parameters");
+  }
+
+  CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
+
+  cmd_max = strtol(cmd->argv[1], &endp, 10);
+
+  if (endp && *endp) {
+    CONF_ERROR(cmd, "invalid command rate");
+  }
+
+  if (cmd_max < 0) {
+    CONF_ERROR(cmd, "command rate must be positive");
+  }
+
+  /* If the optional interval parameter is given, parse it. */
+  if (cmd->argc-1 == 2) {
+    max_cmd_interval = atoi(cmd->argv[2]);
+
+    if (max_cmd_interval < 1) {
+      CONF_ERROR(cmd, pstrcat(cmd->tmp_pool,
+        ": interval must be greater than zero", NULL));
+    }
+  }
+
+  c = add_config_param(cmd->argv[0], 2, NULL, NULL);
+  c->argv[0] = palloc(c->pool, sizeof(unsigned long));
+  *((unsigned long *) c->argv[0]) = cmd_max;
+  c->argv[1] = palloc(c->pool, sizeof(unsigned int));
+  *((unsigned int *) c->argv[1]) = max_cmd_interval;
+
+  return PR_HANDLED(cmd);
+}
+
+
 /* usage: MaxConnectionRate rate [interval] */
 MODRET set_maxconnrate(cmd_rec *cmd) {
   long conn_max = 0L;
@@ -930,15 +1043,20 @@ MODRET set_socketoptions(cmd_rec *cmd) {
 }
 
 MODRET set_multilinerfc2228(cmd_rec *cmd) {
-  int bool = -1;
+  int bool;
+  config_rec *c;
+
   CHECK_ARGS(cmd, 1);
-  CHECK_CONF(cmd, CONF_ROOT);
+  CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
 
   bool = get_boolean(cmd, 1);
   if (bool == -1)
     CONF_ERROR(cmd, "expected Boolean parameter");
 
-  MultilineRFC2228 = bool;
+  c = add_config_param(cmd->argv[0], 1, NULL);
+  c->argv[0] = pcalloc(c->pool, sizeof(int));
+  *((int *) c->argv[0]) = bool;
+ 
   return PR_HANDLED(cmd);
 }
 
@@ -1094,32 +1212,79 @@ MODRET set_group(cmd_rec *cmd) {
   return PR_HANDLED(cmd);
 }
 
-/* usage: Trace channel1:level1 ... */
+/* usage: Trace ["session"] channel1:level1 ... */
 MODRET set_trace(cmd_rec *cmd) {
 #ifdef PR_USE_TRACE
   register unsigned int i;
+  int per_session = FALSE;
+  unsigned int idx = 1;
 
   if (cmd->argc-1 < 1)
     CONF_ERROR(cmd, "wrong number of parameters");
   CHECK_CONF(cmd, CONF_ROOT);
 
-  for (i = 1; i < cmd->argc; i++) {
-    char *channel, *tmp;
-    int level;
+  /* Look for the optional "session" keyword, which will indicate that these
+   * Trace settings are to be applied to a session process only.
+   */
+  if (strcmp(cmd->argv[1], "session") == 0) {
 
-    tmp = strchr(cmd->argv[i], ':');
-    if (tmp == NULL) {
-      CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "badly formatted parameter: '",
-        cmd->argv[i], "'", NULL));
+    /* If this is the only parameter, it's a config error. */
+    if (cmd->argc == 2) {
+      CONF_ERROR(cmd, "wrong number of parameters");
     }
 
-    channel = cmd->argv[i];
-    *tmp = '\0';
-    level = atoi(++tmp);
+    per_session = TRUE;
+    idx = 2;
+  }
 
-    if (pr_trace_set_level(channel, level) < 0) {
-      CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "error setting level ", tmp,
-        " for channel '", channel, "': ", strerror(errno), NULL));
+  if (!per_session) {
+    for (i = idx; i < cmd->argc; i++) {
+      char *channel, *ptr;
+      int min_level, max_level, res;
+
+      ptr = strchr(cmd->argv[i], ':');
+      if (ptr == NULL) {
+        CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "badly formatted parameter: '",
+          cmd->argv[i], "'", NULL));
+      }
+
+      channel = cmd->argv[i];
+      *ptr = '\0';
+
+      res = pr_trace_parse_levels(ptr + 1, &min_level, &max_level);
+      if (res < 0) {
+        CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "error parsing level ", ptr + 1,
+          " for channel '", channel, "': ", strerror(errno), NULL));
+      }
+
+      if (pr_trace_set_levels(channel, min_level, max_level) < 0) {
+        CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "error setting level ", ptr + 1,
+          " for channel '", channel, "': ", strerror(errno), NULL));
+      }
+    }
+
+  } else {
+    register unsigned int j = 0;
+    config_rec *c;
+
+    /* Do a syntax check of the configured trace channels/levels, and store
+     * them in a config rec for later handling.
+     */
+
+    c = add_config_param(cmd->argv[0], 0);
+    c->argc = cmd->argc - 2;
+    c->argv = pcalloc(c->pool, ((c->argc + 1) * sizeof(char *))); 
+
+    for (i = idx; i < cmd->argc; i++) {
+      char *ptr;
+
+      ptr = strchr(cmd->argv[i], ':');
+      if (ptr == NULL) {
+        CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "badly formatted parameter: '",
+          cmd->argv[i], "'", NULL));
+      }
+
+      c->argv[j++] = pstrdup(c->pool, cmd->argv[i]);
     }
   }
 
@@ -1200,6 +1365,111 @@ MODRET set_unsetenv(cmd_rec *cmd) {
   CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
 
   add_config_param_str(cmd->argv[0], 1, cmd->argv[1]); 
+  return PR_HANDLED(cmd);
+}
+
+/* usage: ProcessTitles "terse"|"verbose" */
+MODRET set_processtitles(cmd_rec *cmd) {
+  CHECK_ARGS(cmd, 1);
+  CHECK_CONF(cmd, CONF_ROOT);
+
+  if (strcasecmp(cmd->argv[1], "terse") != 0 &&
+      strcasecmp(cmd->argv[1], "verbose") != 0) {
+    CONF_ERROR(cmd, "unknown parameter");
+  }
+
+  add_config_param_str(cmd->argv[0], 1, cmd->argv[1]);
+  return PR_HANDLED(cmd);
+}
+
+/* usage: Protocols protocol1 ... protocolN */
+MODRET set_protocols(cmd_rec *cmd) {
+  register unsigned int i;
+  config_rec *c;
+  array_header *list;
+
+  CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
+
+  if (cmd->argc < 2) {
+    CONF_ERROR(cmd, "wrong number of parameters");
+  }
+
+  c = add_config_param(cmd->argv[0], 1, NULL);
+
+  list = make_array(c->pool, 0, sizeof(char *));
+  for (i = 1; i < cmd->argc; i++) {
+    *((char **) push_array(list)) = pstrdup(c->pool, cmd->argv[i]);
+  }
+
+  c->argv[0] = list;
+  c->flags |= CF_MERGEDOWN_MULTI;
+
+  return PR_HANDLED(cmd);
+}
+
+/* usage: RegexOptions [MatchLimit limit] [MatchLimitRecursion limit]
+ */
+MODRET set_regexoptions(cmd_rec *cmd) {
+  config_rec *c;
+  unsigned long match_limit = 0, match_limit_recursion = 0;
+  register unsigned int i;
+
+  if (cmd->argc < 3) {
+    CONF_ERROR(cmd, "Wrong number of parameters");
+
+  } else {
+    int npairs;
+
+    /* Make sure we have an even number of args for the key/value pairs. */
+    npairs = cmd->argc - 1;
+    if (npairs % 2 != 0) {
+      CONF_ERROR(cmd, "Wrong number of parameters");
+    }
+  }
+
+  CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
+
+  /* XXX If more limits/options are supported, switch to using a table
+   * for storing the key/value pairs.
+   */
+
+  for (i = 1; i < cmd->argc; i++) {
+    if (strcmp(cmd->argv[i], "MatchLimit") == 0) {
+      char *ptr = NULL;
+
+      match_limit = strtoul(cmd->argv[i+1], &ptr, 10);
+      if (ptr && *ptr) {
+        CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "bad MatchLimit value: ",
+          cmd->argv[i+1], NULL));
+      }
+
+      /* Don't forget to advance i past the value. */
+      i += 2;
+
+    } else if (strcmp(cmd->argv[i], "MatchLimitRecursion") == 0) {
+      char *ptr = NULL;
+
+      match_limit_recursion = strtoul(cmd->argv[i+1], &ptr, 10);
+      if (ptr && *ptr) {
+        CONF_ERROR(cmd, pstrcat(cmd->tmp_pool,
+          "bad MatchLimitRecursion value: ", cmd->argv[i+1], NULL));
+      }
+
+      /* Don't forget to advance i past the value. */
+      i += 2;
+
+    } else {
+      CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, ": unknown RegexOptions option: '",
+        cmd->argv[i], "'", NULL));
+    }
+  }
+
+  c = add_config_param(cmd->argv[0], 2, NULL, NULL);
+  c->argv[0] = palloc(c->pool, sizeof(unsigned long));
+  *((unsigned long *) c->argv[0]) = match_limit;
+  c->argv[1] = palloc(c->pool, sizeof(unsigned long));
+  *((unsigned long *) c->argv[1]) = match_limit_recursion;
+
   return PR_HANDLED(cmd);
 }
 
@@ -1377,14 +1647,16 @@ MODRET set_rlimitmemory(cmd_rec *cmd) {
 
     } else {
       rlim->rlim_cur = get_num_bytes(cmd->argv[2]);
+
+      /* Check for bad return values. */
+      if (rlim->rlim_cur == PR_BYTES_BAD_UNITS) {
+        CONF_ERROR(cmd, "unknown units used");
+      }
+
+      if (rlim->rlim_cur == PR_BYTES_BAD_FORMAT) {
+        CONF_ERROR(cmd, "badly formatted parameter");
+      }
     }
-
-    /* Check for bad return values. */
-    if (rlim->rlim_cur == PR_BYTES_BAD_UNITS)
-      CONF_ERROR(cmd, "unknown units used");
-
-    if (rlim->rlim_cur == PR_BYTES_BAD_FORMAT)
-      CONF_ERROR(cmd, "badly formatted parameter");
 
     /* Handle the optional "hard limit" parameter, if present. */
     if (cmd->argc-1 == 3) {
@@ -1393,14 +1665,16 @@ MODRET set_rlimitmemory(cmd_rec *cmd) {
 
       } else {
         rlim->rlim_max = get_num_bytes(cmd->argv[3]);
+
+        /* Check for bad return values. */
+        if (rlim->rlim_max == PR_BYTES_BAD_UNITS) {
+          CONF_ERROR(cmd, "unknown units used");
+        }
+
+        if (rlim->rlim_max == PR_BYTES_BAD_FORMAT) {
+          CONF_ERROR(cmd, "badly formatted parameter");
+        }
       }
-
-      /* Check for bad return values. */
-      if (rlim->rlim_max == PR_BYTES_BAD_UNITS)
-        CONF_ERROR(cmd, "unknown units used");
-
-      if (rlim->rlim_max == PR_BYTES_BAD_FORMAT)
-        CONF_ERROR(cmd, "badly formatted parameter");
     }
 
     c = add_config_param(cmd->argv[0], 2, (void *) rlim, NULL);
@@ -1432,14 +1706,16 @@ MODRET set_rlimitmemory(cmd_rec *cmd) {
 
     } else {
       rlim->rlim_cur = get_num_bytes(cmd->argv[1]);
+
+      /* Check for bad return values. */
+      if (rlim->rlim_cur == PR_BYTES_BAD_UNITS) {
+        CONF_ERROR(cmd, "unknown units used");
+      }
+
+      if (rlim->rlim_cur == PR_BYTES_BAD_FORMAT) {
+        CONF_ERROR(cmd, "badly formatted parameter");
+      }
     }
-
-    /* Check for bad return values. */
-    if (rlim->rlim_cur == PR_BYTES_BAD_UNITS)
-      CONF_ERROR(cmd, "unknown units used");
-
-    if (rlim->rlim_cur == PR_BYTES_BAD_FORMAT)
-      CONF_ERROR(cmd, "badly formatted parameter");
 
     /* Handle the optional "hard limit" parameter, if present. */
     if (cmd->argc-1 == 2) {
@@ -1448,14 +1724,16 @@ MODRET set_rlimitmemory(cmd_rec *cmd) {
 
       } else {
         rlim->rlim_max = get_num_bytes(cmd->argv[2]);
+
+        /* Check for bad return values. */
+        if (rlim->rlim_max == PR_BYTES_BAD_UNITS) {
+          CONF_ERROR(cmd, "unknown units used");
+        }
+
+        if (rlim->rlim_max == PR_BYTES_BAD_FORMAT) {
+          CONF_ERROR(cmd, "badly formatted parameter");
+        }
       }
-
-      /* Check for bad return values. */
-      if (rlim->rlim_max == PR_BYTES_BAD_UNITS)
-        CONF_ERROR(cmd, "unknown units used");
-
-      if (rlim->rlim_max == PR_BYTES_BAD_FORMAT)
-        CONF_ERROR(cmd, "badly formatted parameter");
     }
 
     add_config_param(cmd->argv[0], 2, (void *) rlim, NULL);
@@ -1497,27 +1775,28 @@ MODRET set_rlimitopenfiles(cmd_rec *cmd) {
 
     /* Retrieve the current values */
 #if defined(RLIMIT_NOFILE)
-    if (getrlimit(RLIMIT_NOFILE, rlim) < 0)
+    if (getrlimit(RLIMIT_NOFILE, rlim) < 0) {
       pr_log_pri(PR_LOG_ERR, "error: getrlimit(RLIMIT_NOFILE): %s",
         strerror(errno));
+    }
 #elif defined(RLIMIT_OFILE)
-    if (getrlimit(RLIMIT_OFILE, rlim) < 0)
+    if (getrlimit(RLIMIT_OFILE, rlim) < 0) {
       pr_log_pri(PR_LOG_ERR, "error: getrlimit(RLIMIT_OFILE): %s",
         strerror(errno));
+    }
 #endif
 
     if (strcasecmp("max", cmd->argv[2]) == 0) {
       rlim->rlim_cur = sysconf(_SC_OPEN_MAX);
 
     } else {
+      /* Check that the non-max argument is a number, and error out if not. */
+      char *ptr = NULL;
+      long num = strtol(cmd->argv[2], &ptr, 10);
 
-      /* Check that the non-max argument is a number, and error out if not.
-       */
-      char *tmp = NULL;
-      long num = strtol(cmd->argv[2], &tmp, 10);
-
-      if (tmp && *tmp)
+      if (ptr && *ptr) {
         CONF_ERROR(cmd, "badly formatted argument");
+      }
 
       rlim->rlim_cur = num;
     }
@@ -1528,17 +1807,20 @@ MODRET set_rlimitopenfiles(cmd_rec *cmd) {
         rlim->rlim_max = sysconf(_SC_OPEN_MAX);
 
       } else {
+        /* Check that the non-max argument is a number, and error out if not. */
+        char *ptr = NULL;
+        long num = strtol(cmd->argv[3], &ptr, 10);
 
-        /* Check that the non-max argument is a number, and error out if not.
-         */
-        char *tmp = NULL;
-        long num = strtol(cmd->argv[3], &tmp, 10);
-
-        if (tmp && *tmp)
+        if (ptr && *ptr) {
           CONF_ERROR(cmd, "badly formatted argument");
+        }
 
         rlim->rlim_max = num;
       }
+
+    } else {
+      /* Assume that the hard limit should be the same as the soft limit. */
+      rlim->rlim_max = rlim->rlim_cur;
     }
 
     c = add_config_param(cmd->argv[0], 2, (void *) rlim, NULL);
@@ -1552,27 +1834,28 @@ MODRET set_rlimitopenfiles(cmd_rec *cmd) {
 
     /* Retrieve the current values */
 #if defined(RLIMIT_NOFILE)
-    if (getrlimit(RLIMIT_NOFILE, rlim) < 0)
+    if (getrlimit(RLIMIT_NOFILE, rlim) < 0) {
       pr_log_pri(PR_LOG_ERR, "error: getrlimit(RLIMIT_NOFILE): %s",
         strerror(errno));
+    }
 #elif defined(RLIMIT_OFILE)
-    if (getrlimit(RLIMIT_OFILE, rlim) < 0)
+    if (getrlimit(RLIMIT_OFILE, rlim) < 0) {
       pr_log_pri(PR_LOG_ERR, "error: getrlimit(RLIMIT_OFILE): %s",
         strerror(errno));
+    }
 #endif
 
     if (strcasecmp("max", cmd->argv[1]) == 0) {
       rlim->rlim_cur = sysconf(_SC_OPEN_MAX);
 
     } else {
+      /* Check that the non-max argument is a number, and error out if not. */
+      char *ptr = NULL;
+      long num = strtol(cmd->argv[1], &ptr, 10);
 
-      /* Check that the non-max argument is a number, and error out if not.
-       */
-      char *tmp = NULL;
-      long num = strtol(cmd->argv[1], &tmp, 10);
-
-      if (tmp && *tmp)
+      if (ptr && *ptr) {
         CONF_ERROR(cmd, "badly formatted argument");
+      }
 
       rlim->rlim_cur = num;
     }
@@ -1583,17 +1866,20 @@ MODRET set_rlimitopenfiles(cmd_rec *cmd) {
         rlim->rlim_max = sysconf(_SC_OPEN_MAX);
 
       } else {
+        /* Check that the non-max argument is a number, and error out if not. */
+        char *ptr = NULL;
+        long num = strtol(cmd->argv[2], &ptr, 10);
 
-        /* Check that the non-max argument is a number, and error out if not.
-         */
-        char *tmp = NULL;
-        long num = strtol(cmd->argv[2], &tmp, 10);
-
-        if (tmp && *tmp)
+        if (ptr && *ptr) {
           CONF_ERROR(cmd, "badly formatted argument");
+        }
 
         rlim->rlim_max = num;
       }
+
+    } else {
+      /* Assume that the hard limit should be the same as the soft limit. */
+      rlim->rlim_max = rlim->rlim_cur;
     }
 
     add_config_param(cmd->argv[0], 2, (void *) rlim, NULL);
@@ -1696,31 +1982,57 @@ MODRET set_timesgmt(cmd_rec *cmd) {
 }
 
 MODRET set_regex(cmd_rec *cmd, char *param, char *type) {
-#if defined(HAVE_REGEX_H) && defined(HAVE_REGCOMP)
-  regex_t *preg = NULL;
+#ifdef PR_USE_REGEX
+  pr_regex_t *pre = NULL;
   config_rec *c = NULL;
-  int res = 0;
+  int regex_flags = REG_EXTENDED|REG_NOSUB, res = 0;
 
-  CHECK_ARGS(cmd, 1);
+  if (cmd->argc-1 < 1 ||
+      cmd->argc-1 > 2) {
+    CONF_ERROR(cmd, "bad number of parameters");
+  }
+
   CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL|CONF_ANON|CONF_DIR|
     CONF_DYNDIR);
 
+  /* Make sure that, if present, the flags parameter is correctly formatted. */
+  if (cmd->argc-1 == 2) {
+    int flags = 0;
+
+    /* We need to parse the flags parameter here, to see if any flags which
+     * affect the compilation of the regex (e.g. NC) are present.
+     */
+
+    flags = pr_filter_parse_flags(cmd->tmp_pool, cmd->argv[2]);
+    if (flags < 0) {
+      CONF_ERROR(cmd, pstrcat(cmd->tmp_pool,
+        ": badly formatted flags parameter: '", cmd->argv[2], "'", NULL));
+    }
+
+    if (flags == 0) {
+      CONF_ERROR(cmd, pstrcat(cmd->tmp_pool,
+        ": unknown filter flags '", cmd->argv[2], "'", NULL));
+    }
+
+    regex_flags |= flags;
+  }
+
   pr_log_debug(DEBUG4, "%s: compiling %s regex '%s'", cmd->argv[0], type,
     cmd->argv[1]);
-  preg = pr_regexp_alloc();
+  pre = pr_regexp_alloc(&core_module);
 
-  res = regcomp(preg, cmd->argv[1], REG_EXTENDED|REG_NOSUB);
+  res = pr_regexp_compile(pre, cmd->argv[1], regex_flags);
   if (res != 0) {
     char errstr[200] = {'\0'};
 
-    regerror(res, preg, errstr, sizeof(errstr));
-    pr_regexp_free(preg);
+    pr_regexp_error(res, pre, errstr, sizeof(errstr));
+    pr_regexp_free(NULL, pre);
 
     CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "'", cmd->argv[1], "' failed regex "
       "compilation: ", errstr, NULL));
   }
 
-  c = add_config_param(param, 1, preg);
+  c = add_config_param(param, 1, pre);
   c->flags |= CF_MERGEDOWN;
   return PR_HANDLED(cmd);
 
@@ -1732,8 +2044,8 @@ MODRET set_regex(cmd_rec *cmd, char *param, char *type) {
 }
 
 MODRET set_allowdenyfilter(cmd_rec *cmd) {
-#if defined(HAVE_REGEX_H) && defined(HAVE_REGCOMP)
-  regex_t *preg = NULL;
+#ifdef PR_USE_REGEX
+  pr_regex_t *pre = NULL;
   config_rec *c = NULL;
   int res = 0;
 
@@ -1741,21 +2053,21 @@ MODRET set_allowdenyfilter(cmd_rec *cmd) {
   CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL|CONF_ANON|CONF_DIR|
     CONF_DYNDIR|CONF_LIMIT);
 
-  preg = pr_regexp_alloc();
+  pre = pr_regexp_alloc(&core_module);
 
   pr_log_debug(DEBUG4, "%s: compiling regex '%s'", cmd->argv[0], cmd->argv[1]);
-  res = regcomp(preg, cmd->argv[1], REG_EXTENDED|REG_NOSUB);
+  res = pr_regexp_compile(pre, cmd->argv[1], REG_EXTENDED|REG_NOSUB);
   if (res != 0) {
     char errstr[200] = {'\0'};
 
-    regerror(res, preg, errstr, sizeof(errstr));
-    pr_regexp_free(preg);
+    pr_regexp_error(res, pre, errstr, sizeof(errstr));
+    pr_regexp_free(NULL, pre);
 
     CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "'", cmd->argv[1], "' failed regex "
       "compilation: ", errstr, NULL));
   }
 
-  c = add_config_param(cmd->argv[0], 1, preg);
+  c = add_config_param(cmd->argv[0], 1, pre);
   c->flags |= CF_MERGEDOWN;
   return HANDLED(cmd);
 
@@ -1941,8 +2253,8 @@ MODRET add_directory(cmd_rec *cmd) {
 }
 
 MODRET set_hidefiles(cmd_rec *cmd) {
-#if defined(HAVE_REGEX_H) && defined(HAVE_REGCOMP)
-  regex_t *regexp = NULL;
+#ifdef PR_USE_REGEX
+  pr_regex_t *pre = NULL;
   config_rec *c = NULL;
   unsigned int precedence = 0;
   unsigned char negated = FALSE, none = FALSE;
@@ -1986,14 +2298,14 @@ MODRET set_hidefiles(cmd_rec *cmd) {
   if (!none) {
     int res;
 
-    regexp = pr_regexp_alloc();
+    pre = pr_regexp_alloc(&core_module);
   
-    res = regcomp(regexp, cmd->argv[1], REG_EXTENDED|REG_NOSUB);
+    res = pr_regexp_compile(pre, cmd->argv[1], REG_EXTENDED|REG_NOSUB);
     if (res != 0) {
       char errstr[200] = {'\0'};
 
-      regerror(res, regexp, errstr, sizeof(errstr));
-      pr_regexp_free(regexp);
+      pr_regexp_error(res, pre, errstr, sizeof(errstr));
+      pr_regexp_free(NULL, pre);
 
       CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "'", cmd->argv[1],
         "' failed regex compilation: ", errstr, NULL));
@@ -2019,8 +2331,8 @@ MODRET set_hidefiles(cmd_rec *cmd) {
 
   if (cmd->argc-1 == 1) {
     c = add_config_param(cmd->argv[0], 3, NULL, NULL, NULL);
-    c->argv[0] = pcalloc(c->pool, sizeof(regex_t *));
-    *((regex_t **) c->argv[0]) = regexp;
+    c->argv[0] = pcalloc(c->pool, sizeof(pr_regex_t *));
+    *((pr_regex_t **) c->argv[0]) = pre;
     c->argv[1] = pcalloc(c->pool, sizeof(unsigned char));
     *((unsigned char *) c->argv[1]) = negated;
     c->argv[2] = pcalloc(c->pool, sizeof(unsigned int));
@@ -2048,8 +2360,8 @@ MODRET set_hidefiles(cmd_rec *cmd) {
     argv = (char **) c->argv;
 
     /* Copy in the regexp. */
-    *argv = pcalloc(c->pool, sizeof(regex_t *));
-    *((regex_t **) *argv++) = regexp;
+    *argv = pcalloc(c->pool, sizeof(pr_regex_t *));
+    *((pr_regex_t **) *argv++) = pre;
 
     /* Copy in the 'negated' flag */
     *argv = pcalloc(c->pool, sizeof(unsigned char));
@@ -2544,21 +2856,21 @@ MODRET set_allowdenyusergroupclass(cmd_rec *cmd) {
       argv = cmd->argv+1;
 
     } else if (strcasecmp(cmd->argv[1], "regex") == 0) {
-#if defined(HAVE_REGEX_H) && defined(HAVE_REGCOMP)
-      regex_t *preg;
+#ifdef PR_USE_REGEX
+      pr_regex_t *pre;
       int res;
 
       if (cmd->argc != 3)
         CONF_ERROR(cmd, "wrong number of parameters");
 
-      preg = pr_regexp_alloc();
+      pre = pr_regexp_alloc(&core_module);
 
-      res = regcomp(preg, cmd->argv[2], REG_EXTENDED|REG_NOSUB);
+      res = pr_regexp_compile_posix(pre, cmd->argv[2], REG_EXTENDED|REG_NOSUB);
       if (res != 0) {
         char errstr[200] = {'\0'};
 
-        regerror(res, preg, errstr, sizeof(errstr));
-        pr_regexp_free(preg);
+        pr_regexp_error(res, pre, errstr, sizeof(errstr));
+        pr_regexp_free(NULL, pre);
 
         CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "'", cmd->argv[2], "' failed "
           "regex compilation: ", errstr, NULL));
@@ -2567,7 +2879,7 @@ MODRET set_allowdenyusergroupclass(cmd_rec *cmd) {
       c = add_config_param(cmd->argv[0], 2, NULL, NULL);
       c->argv[0] = pcalloc(c->pool, sizeof(unsigned char));
       *((unsigned char *) c->argv[0]) = PR_EXPR_EVAL_REGEX;
-      c->argv[1] = (void *) preg;
+      c->argv[1] = (void *) pre;
       c->flags |= CF_MERGEDOWN_MULTI;
 
       return PR_HANDLED(cmd);
@@ -2575,7 +2887,7 @@ MODRET set_allowdenyusergroupclass(cmd_rec *cmd) {
 #else
       CONF_ERROR(cmd, "The 'regex' parameter cannot be used on this system, "
         "as you do not have POSIX compliant regex support");
-#endif /* HAVE_REGEX_H and HAVE_REGCOMP */
+#endif /* regex support */
 
     } else {
       argc = cmd->argc-1;
@@ -2831,13 +3143,11 @@ MODRET set_displayquit(cmd_rec *cmd) {
 }
 
 MODRET set_displaygoaway(cmd_rec *cmd) {
-  config_rec *c = NULL;
-
   CHECK_ARGS(cmd, 1);
   CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL|CONF_ANON);
 
-  c = add_config_param_str(cmd->argv[0], 1, cmd->argv[1]);
-  c->flags |= CF_MERGEDOWN;
+  pr_log_debug(DEBUG0, "The %s directive has been deprecated; use the "
+    "MaxClientsPerClass optional message parameter instead", cmd->argv[0]);
 
   return PR_HANDLED(cmd);
 }
@@ -2976,9 +3286,9 @@ MODRET end_virtualhost(cmd_rec *cmd) {
   return PR_HANDLED(cmd);
 }
 
-#if defined(HAVE_REGEX_H) && defined(HAVE_REGCOMP)
+#ifdef PR_USE_REGEX
 MODRET regex_filters(cmd_rec *cmd) {
-  regex_t *allow_regex = NULL, *deny_regex = NULL;
+  pr_regex_t *allow_regex = NULL, *deny_regex = NULL;
 
   /* Don't apply the filter checks to passwords (arguments to the PASS
    * command).
@@ -2988,9 +3298,9 @@ MODRET regex_filters(cmd_rec *cmd) {
 
   /* Check for an AllowFilter */
   allow_regex = get_param_ptr(CURRENT_CONF, "AllowFilter", FALSE);
-
-  if (allow_regex && cmd->arg &&
-      regexec(allow_regex, cmd->arg, 0, NULL, 0) != 0) {
+  if (allow_regex != NULL &&
+      cmd->arg != NULL &&
+      pr_regexp_exec(allow_regex, cmd->arg, 0, NULL, 0, 0, 0) != 0) {
     pr_log_debug(DEBUG2, "'%s %s' denied by AllowFilter", cmd->argv[0],
       cmd->arg);
     pr_response_add_err(R_550, _("%s: Forbidden command argument"), cmd->arg);
@@ -2999,9 +3309,9 @@ MODRET regex_filters(cmd_rec *cmd) {
 
   /* Check for a DenyFilter */
   deny_regex = get_param_ptr(CURRENT_CONF, "DenyFilter", FALSE);
-
-  if (deny_regex && cmd->arg &&
-      regexec(deny_regex, cmd->arg, 0, NULL, 0) == 0) {
+  if (deny_regex != NULL &&
+      cmd->arg != NULL &&
+      pr_regexp_exec(deny_regex, cmd->arg, 0, NULL, 0, 0, 0) == 0) {
     pr_log_debug(DEBUG2, "'%s %s' denied by DenyFilter", cmd->argv[0],
       cmd->arg);
     pr_response_add_err(R_550, _("%s: Forbidden command argument"), cmd->arg);
@@ -3010,18 +3320,45 @@ MODRET regex_filters(cmd_rec *cmd) {
 
   return PR_DECLINED(cmd);
 }
-#endif /* HAVE_REGEX_H && HAVE_REGCOMP */
+#endif /* regex support */
 
-MODRET core_clear_fs(cmd_rec *cmd) {
+MODRET core_pre_any(cmd_rec *cmd) {
+  unsigned long cmd_delay = 0;
+
   /* Make sure any FS caches are clear before each command. */
   pr_fs_clear_cache();
+
+  /* Check for an exceeded MaxCommandRate. */
+  cmd_delay = core_exceeded_cmd_rate(cmd);
+  if (cmd_delay > 0) {
+    struct timeval tv;
+
+    pr_event_generate("core.max-command-rate", NULL);
+
+    pr_log_pri(PR_LOG_NOTICE,
+      "MaxCommandRate (%lu cmds/%u %s) exceeded, injecting processing delay "
+      "of %lu ms", core_max_cmds, core_max_cmd_interval,
+      core_max_cmd_interval == 1 ? "sec" : "secs", cmd_delay);
+
+    pr_trace_msg("command", 8, "MaxCommandRate exceeded, delaying for %lu ms",
+      cmd_delay);
+
+    tv.tv_sec = (cmd_delay / 1000);
+    tv.tv_usec = (cmd_delay - (tv.tv_sec * 1000)) * 1000;
+
+    pr_signals_block();
+    (void) select(0, NULL, NULL, NULL, &tv);
+    pr_signals_unblock();
+  }
 
   return PR_DECLINED(cmd);
 }
 
 MODRET core_quit(cmd_rec *cmd) {
+  int flags = PR_DISPLAY_FL_SEND_NOW;
+
   if (displayquit_fh) {
-    if (pr_display_fh(displayquit_fh, NULL, R_221, 0) < 0) {
+    if (pr_display_fh(displayquit_fh, NULL, R_221, flags) < 0) {
       pr_log_debug(DEBUG6, "unable to display DisplayQuit file '%s': %s",
         displayquit_fh->fh_path, strerror(errno));
     }
@@ -3029,25 +3366,16 @@ MODRET core_quit(cmd_rec *cmd) {
     pr_fsio_close(displayquit_fh);
     displayquit_fh = NULL;
 
-    /* Hack or feature, pr_display_file() always puts a hyphen on the last line.
-     */
-    pr_response_send(R_221, "%s", "");
-
   } else {
     char *display = get_param_ptr(TOPLEVEL_CONF, "DisplayQuit", FALSE); 
     if (display) {
-      if (pr_display_file(display, NULL, R_221, 0) < 0) {
+      if (pr_display_file(display, NULL, R_221, flags) < 0) {
         pr_log_debug(DEBUG6, "unable to display DisplayQuit file '%s': %s",
           display, strerror(errno));
       }
 
-      /* Hack or feature, pr_display_file() always puts a hyphen on the
-       * last line
-       */
-      pr_response_send(R_221, "%s", "");
-
     } else {
-      pr_response_send(R_221, _("Goodbye."));
+      pr_response_send(R_221, "%s", _("Goodbye."));
     }
   }
 
@@ -3061,10 +3389,10 @@ MODRET core_quit(cmd_rec *cmd) {
 MODRET core_log_quit(cmd_rec *cmd) {
 
 #ifndef PR_DEVEL_NO_DAEMON
-  end_login(0);
+  pr_session_disconnect(&core_module, PR_SESS_DISCONNECT_CLIENT_QUIT, NULL);
 #endif /* PR_DEVEL_NO_DAEMON */
 
-  /* Even though end_login() does not return, this is necessary to avoid
+  /* Even though pr_session_end() does not return, this is necessary to avoid
    * compiler warnings.
    */
   return PR_HANDLED(cmd);
@@ -3096,6 +3424,7 @@ MODRET core_pasv(cmd_rec *cmd) {
   unsigned int port = 0;
   char *addrstr = NULL, *tmp = NULL;
   config_rec *c = NULL;
+  pr_netaddr_t *bind_addr;
 
   if (session.sf_flags & SF_EPSV_ALL) {
     pr_response_add_err(R_500, _("Illegal PASV command, EPSV ALL in effect"));
@@ -3119,14 +3448,24 @@ MODRET core_pasv(cmd_rec *cmd) {
     session.d = NULL;
   }
 
+  if (pr_netaddr_get_family(session.c->local_addr) == pr_netaddr_get_family(session.c->remote_addr)) {
+    bind_addr = session.c->local_addr;
+
+  } else {
+    /* In this scenario, the server has an IPv6 socket, but the remote client
+     * is an IPv4 (or IPv4-mapped IPv6) peer.
+     */
+    bind_addr = pr_netaddr_v6tov4(cmd->pool, session.c->local_addr);
+  }
+
   c = find_config(main_server->conf, CONF_PARAM, "PassivePorts", FALSE);
   if (c != NULL) {
     int pasv_min_port = *((int *) c->argv[0]);
     int pasv_max_port = *((int *) c->argv[1]);
 
-    if (!(session.d = pr_inet_create_conn_portrange(session.pool,
-        NULL, session.c->local_addr, pasv_min_port, pasv_max_port))) {
-
+    session.d = pr_inet_create_conn_portrange(session.pool, bind_addr,
+      pasv_min_port, pasv_max_port);
+    if (session.d == NULL) {
       /* If not able to open a passive port in the given range, default to
        * normal behavior (using INPORT_ANY), and log the failure.  This
        * indicates a too-small range configuration.
@@ -3139,16 +3478,24 @@ MODRET core_pasv(cmd_rec *cmd) {
   }
 
   /* Open up the connection and pass it back. */
-  if (!session.d) {
-    session.d = pr_inet_create_conn(session.pool, NULL, -1,
-      session.c->local_addr, INPORT_ANY, FALSE);
+  if (session.d == NULL) {
+    session.d = pr_inet_create_conn(session.pool, -1, bind_addr, INPORT_ANY,
+      FALSE);
   }
 
-  if (!session.d) {
+  if (session.d == NULL) {
     pr_response_add_err(R_425, _("Unable to build data connection: "
       "Internal error"));
     return PR_ERROR(cmd);
   }
+
+  /* Make sure that necessary socket options are set on the socket prior
+   * to the call to listen(2).
+   */
+  pr_inet_set_proto_opts(session.pool, session.d, main_server->tcp_mss_len, 0,
+    IPTOS_THROUGHPUT, 1);
+  pr_inet_generate_socket_event("core.data-listen", main_server,
+    session.d->local_addr, session.d->listen_fd);
 
   pr_inet_set_block(session.pool, session.d);
   pr_inet_listen(session.pool, session.d, 1);
@@ -3552,6 +3899,7 @@ MODRET core_epsv(cmd_rec *cmd) {
   int family = 0;
   int epsv_min_port = 1024, epsv_max_port = 65535;
   config_rec *c = NULL;
+  pr_netaddr_t *bind_addr;
 
   CHECK_CMD_MIN_ARGS(cmd, 1);
 
@@ -3635,6 +3983,16 @@ MODRET core_epsv(cmd_rec *cmd) {
     session.d = NULL;
   }
 
+  if (pr_netaddr_get_family(session.c->local_addr) == pr_netaddr_get_family(session.c->remote_addr)) {
+    bind_addr = session.c->local_addr;
+
+  } else {
+    /* In this scenario, the server has an IPv6 socket, but the remote client
+     * is an IPv4 (or IPv4-mapped IPv6) peer.
+     */
+    bind_addr = pr_netaddr_v6tov4(cmd->pool, session.c->local_addr);
+  }
+
   c = find_config(main_server->conf, CONF_PARAM, "PassivePorts", FALSE);
   if (c != NULL) {
     epsv_min_port = *((int *) c->argv[0]);
@@ -3651,9 +4009,8 @@ MODRET core_epsv(cmd_rec *cmd) {
    * have more predictable behavior for choosing random IPv4 socket ports.
    */
 
-  session.d = pr_inet_create_conn_portrange(session.pool, NULL,
-    session.c->local_addr, epsv_min_port, epsv_max_port);
-
+  session.d = pr_inet_create_conn_portrange(session.pool, bind_addr,
+    epsv_min_port, epsv_max_port);
   if (session.d == NULL) {
     /* If not able to open a passive port in the given range, default to
      * normal behavior (using INPORT_ANY), and log the failure.  This
@@ -3663,8 +4020,8 @@ MODRET core_epsv(cmd_rec *cmd) {
       "range %d-%d: defaulting to INPORT_ANY (consider defining a larger "
       "PassivePorts range)", epsv_min_port, epsv_max_port);
 
-    session.d = pr_inet_create_conn(session.pool, NULL, -1,
-      session.c->local_addr, INPORT_ANY, FALSE);
+    session.d = pr_inet_create_conn(session.pool, -1, bind_addr, INPORT_ANY,
+      FALSE);
   }
 
   if (session.d == NULL) {
@@ -3672,6 +4029,14 @@ MODRET core_epsv(cmd_rec *cmd) {
       _("Unable to build data connection: Internal error"));
     return PR_ERROR(cmd);
   }
+
+  /* Make sure that necessary socket options are set on the socket prior
+   * to the call to listen(2).
+   */
+  pr_inet_set_proto_opts(session.pool, session.d, main_server->tcp_mss_len, 0,
+    IPTOS_THROUGHPUT, 1);
+  pr_inet_generate_socket_event("core.data-listen", main_server,
+    session.d->local_addr, session.d->listen_fd);
 
   pr_inet_set_block(session.pool, session.d);
   pr_inet_listen(session.pool, session.d, 1);
@@ -3719,7 +4084,7 @@ MODRET core_help(cmd_rec *cmd) {
     for (cp = cmd->argv[1]; *cp; cp++)
       *cp = toupper(*cp);
 
-    if (strcasecmp(cmd->argv[1], "SITE") == 0)
+    if (strcasecmp(cmd->argv[1], C_SITE) == 0)
       return pr_module_call(&site_module, site_dispatch, cmd);
 
     if (pr_help_add_response(cmd, cmd->argv[1]) == 0)
@@ -3742,7 +4107,7 @@ int core_chgrp(cmd_rec *cmd, char *dir, uid_t uid, gid_t gid) {
 
   cmd_name = cmd->argv[0];
   cmd->argv[0] = "SITE_CHGRP";
-  if (!dir_check(cmd->tmp_pool, cmd, "WRITE", dir, NULL)) {
+  if (!dir_check(cmd->tmp_pool, cmd, G_WRITE, dir, NULL)) {
     pr_log_debug(DEBUG7, "SITE CHGRP command denied by <Limit> config");
     cmd->argv[0] = cmd_name;
 
@@ -3759,7 +4124,7 @@ int core_chmod(cmd_rec *cmd, char *dir, mode_t mode) {
 
   cmd_name = cmd->argv[0];
   cmd->argv[0] = "SITE_CHMOD";
-  if (!dir_check(cmd->tmp_pool, cmd, "WRITE", dir, NULL)) {
+  if (!dir_check(cmd->tmp_pool, cmd, G_WRITE, dir, NULL)) {
     pr_log_debug(DEBUG7, "SITE CHMOD command denied by <Limit> config");
     cmd->argv[0] = cmd_name;
 
@@ -3907,7 +4272,7 @@ MODRET _chdir(cmd_rec *cmd, char *ndir) {
 
   if (c) {
     struct stat st;
-    time_t prev;
+    time_t prev = 0;
 
     char *display = c->argv[0];
     int bool = *((int *) c->argv[1]);
@@ -3915,22 +4280,24 @@ MODRET _chdir(cmd_rec *cmd, char *ndir) {
     if (bool) {
    
       /* XXX Get rid of this CONF_USERDATA instance; it's the only
-       * occurrence of it in the source.
+       * occurrence of it in the source.  Use the session.notes table instead.
        */ 
       c = find_config(cmd->server->conf, CONF_USERDATA, session.cwd, FALSE);
-
       if (!c) {
         time(&prev);
         c = add_config_set(&cmd->server->conf, session.cwd);
         c->config_type = CONF_USERDATA;
         c->argc = 1;
         c->argv = pcalloc(c->pool, sizeof(void **) * 2);
-        c->argv[0] = (void *) prev;
+        c->argv[0] = palloc(c->pool, sizeof(time_t));
+        *((time_t *) c->argv[0]) = prev;
         prev = (time_t) 0L;
 
       } else {
-        prev = (time_t) c->argv[0];
-        c->argv[0] = (void *) time(NULL);
+        prev = *((time_t *) c->argv[0]);
+
+        /* Update the timestamp stored for this directory. */
+        *((time_t *) c->argv[0]) = time(NULL);
       }
     }
 
@@ -3938,8 +4305,7 @@ MODRET _chdir(cmd_rec *cmd, char *ndir) {
         !S_ISDIR(st.st_mode) &&
         (bool ? st.st_mtime > prev : TRUE)) {
 
-      if (pr_display_file(display, session.cwd, R_250,
-          PR_DISPLAY_FL_NO_EOM) < 0) {
+      if (pr_display_file(display, session.cwd, R_250, 0) < 0) {
         pr_log_debug(DEBUG3, "error displaying '%s': %s", display,
           strerror(errno));
       }
@@ -4315,11 +4681,12 @@ MODRET core_dele(cmd_rec *cmd) {
   if (session.sf_flags & SF_ANON) {
     xferlog_write(0, session.c->remote_name, st.st_size, fullpath,
       (session.sf_flags & SF_ASCII ? 'a' : 'b'), 'd', 'a', session.anon_user,
-      'c');
+      'c', "_");
 
   } else {
     xferlog_write(0, session.c->remote_name, st.st_size, fullpath,
-      (session.sf_flags & SF_ASCII ? 'a' : 'b'), 'd', 'r', session.user, 'c');
+      (session.sf_flags & SF_ASCII ? 'a' : 'b'), 'd', 'r', session.user, 'c',
+      "_");
   }
 
   pr_response_add(R_250, _("%s command successful"), cmd->argv[0]);
@@ -4542,6 +4909,15 @@ MODRET core_opts(cmd_rec *cmd) {
 
   subcmd = pr_cmd_alloc(cmd->tmp_pool, cmd->argc-1, NULL);
   subcmd->argv[0] = pstrcat(cmd->tmp_pool, "OPTS_", cmd->argv[1], NULL);
+  subcmd->group = cmd->group;
+
+  if (!dir_check(cmd->tmp_pool, subcmd, subcmd->group, session.vwd, NULL)) {
+    pr_log_debug(DEBUG7, "OPTS %s denied by <Limit> configuration",
+      cmd->argv[1]);
+    pr_response_add_err(R_550, "%s %s: %s", cmd->argv[0], cmd->argv[1],
+      strerror(EACCES));
+    return PR_ERROR(cmd);
+  }
 
   for (i = 2; i < cmd->argc; i++) {
     subcmd->argv[i-1] = cmd->argv[i];
@@ -4581,6 +4957,48 @@ MODRET core_post_pass(cmd_rec *cmd) {
           "TimeoutIdle");
       }
     }
+  }
+
+#ifdef PR_USE_TRACE
+  /* Handle any user/group-specific Trace settings. */
+  c = find_config(main_server->conf, CONF_PARAM, "Trace", FALSE);
+  if (c != NULL) {
+    register unsigned int i;
+
+    for (i = 0; i < c->argc; i++) {
+      char *channel, *ptr;
+      int min_level, max_level, res;
+
+      ptr = strchr(c->argv[i], ':');
+      channel = c->argv[i];
+      *ptr = '\0';
+
+      res = pr_trace_parse_levels(ptr + 1, &min_level, &max_level);
+      if (res == 0) {
+        res = pr_trace_set_levels(channel, min_level, max_level);
+        *ptr = ':';
+
+        if (res < 0) {
+          pr_log_debug(DEBUG6, "%s: error setting levels %d-%d for "
+            "channel '%s': %s", c->name, min_level, max_level, channel,
+            strerror(errno));
+        }
+
+      } else {
+        pr_log_debug(DEBUG6, "%s: error parsing level '%s' for channel '%s': "
+          "%s", c->name, ptr + 1, channel, strerror(errno));
+      }
+    }
+  }
+#endif /* PR_USE_TRACE */
+
+  /* Look for a configured MaxCommandRate. */
+  c = find_config(main_server->conf, CONF_PARAM, "MaxCommandRate", FALSE);
+  if (c) {
+    core_cmd_count = 0UL;
+    core_max_cmds = *((unsigned long *) c->argv[0]);
+    core_max_cmd_interval = *((unsigned int *) c->argv[1]);
+    core_max_cmd_ts = 0;
   }
 
   /* Note: we MUST return HANDLED here, not DECLINED, to indicate that at
@@ -4664,7 +5082,7 @@ static void core_restart_ev(const void *event_data, void *user_data) {
 
 #ifdef PR_USE_TRACE
   if (trace_log) {
-    pr_trace_set_level(PR_TRACE_DEFAULT_CHANNEL, -1);
+    pr_trace_set_levels(PR_TRACE_DEFAULT_CHANNEL, -1, -1);
     pr_trace_set_file(NULL);
     trace_log = NULL;
   }
@@ -4715,41 +5133,40 @@ static int core_init(void) {
   pr_cmd_set_handler(NULL);
 
   /* Add the commands handled by this module to the HELP list. */
-  pr_help_add(C_CWD,  "<sp> pathname", TRUE);
-  pr_help_add(C_XCWD, "<sp> pathname", TRUE);
-  pr_help_add(C_CDUP, "(up one directory)", TRUE);
-  pr_help_add(C_XCUP, "(up one directory)", TRUE);
-  pr_help_add(C_SMNT, "is not implemented", FALSE);
-  pr_help_add(C_QUIT, "(close control connection)", TRUE);
-  pr_help_add(C_PORT, "<sp> h1,h2,h3,h4,p1,p2", TRUE);
-  pr_help_add(C_PASV, "(returns address/port)", TRUE);
-  pr_help_add(C_EPRT, "<sp> |proto|addr|port|", TRUE);
-  pr_help_add(C_EPSV, "(returns port |||port|)", TRUE);
-  pr_help_add(C_ALLO, "is not implemented (ignored)", FALSE);
-  pr_help_add(C_RNFR, "<sp> pathname", TRUE);
-  pr_help_add(C_RNTO, "<sp> pathname", TRUE);
-  pr_help_add(C_DELE, "<sp> pathname", TRUE);
-  pr_help_add(C_MDTM, "<sp> pathname", TRUE);
-  pr_help_add(C_RMD,  "<sp> pathname", TRUE);
-  pr_help_add(C_XRMD, "<sp> pathname", TRUE);
-  pr_help_add(C_MKD,  "<sp> pathname", TRUE);
-  pr_help_add(C_XMKD, "<sp> pathname", TRUE);
-  pr_help_add(C_PWD,  "(returns current working directory)", TRUE);
-  pr_help_add(C_XPWD, "(returns current working directory)", TRUE);
-  pr_help_add(C_SIZE, "<sp> pathname", TRUE);
-  pr_help_add(C_SYST, "(returns system type)", TRUE);
-  pr_help_add(C_HELP, "[<sp> command]", TRUE);
-  pr_help_add(C_NOOP, "(no operation)", TRUE);
-  pr_help_add(C_FEAT, "(returns feature list)", TRUE);
-  pr_help_add(C_OPTS, "<sp> command [<sp> options]", TRUE);
-  pr_help_add(C_AUTH, "<sp> base64-data", FALSE);
-  pr_help_add(C_CCC,  "(clears protection level)", FALSE);
-  pr_help_add(C_CONF, "<sp> base64-data", FALSE);
-  pr_help_add(C_ENC,  "<sp> base64-data", FALSE);
-  pr_help_add(C_MIC,  "<sp> base64-data", FALSE);
-  pr_help_add(C_PBSZ, "<sp> protection buffer size", FALSE);
-  pr_help_add(C_PROT, "<sp> protection code", FALSE);
-
+  pr_help_add(C_CWD,  _("<sp> pathname"), TRUE);
+  pr_help_add(C_XCWD, _("<sp> pathname"), TRUE);
+  pr_help_add(C_CDUP, _("(up one directory)"), TRUE);
+  pr_help_add(C_XCUP, _("(up one directory)"), TRUE);
+  pr_help_add(C_SMNT, _("is not implemented"), FALSE);
+  pr_help_add(C_QUIT, _("(close control connection)"), TRUE);
+  pr_help_add(C_PORT, _("<sp> h1,h2,h3,h4,p1,p2"), TRUE);
+  pr_help_add(C_PASV, _("(returns address/port)"), TRUE);
+  pr_help_add(C_EPRT, _("<sp> |proto|addr|port|"), TRUE);
+  pr_help_add(C_EPSV, _("(returns port |||port|)"), TRUE);
+  pr_help_add(C_ALLO, _("is not implemented (ignored)"), FALSE);
+  pr_help_add(C_RNFR, _("<sp> pathname"), TRUE);
+  pr_help_add(C_RNTO, _("<sp> pathname"), TRUE);
+  pr_help_add(C_DELE, _("<sp> pathname"), TRUE);
+  pr_help_add(C_MDTM, _("<sp> pathname"), TRUE);
+  pr_help_add(C_RMD, _("<sp> pathname"), TRUE);
+  pr_help_add(C_XRMD, _("<sp> pathname"), TRUE);
+  pr_help_add(C_MKD, _("<sp> pathname"), TRUE);
+  pr_help_add(C_XMKD, _("<sp> pathname"), TRUE);
+  pr_help_add(C_PWD, _("(returns current working directory)"), TRUE);
+  pr_help_add(C_XPWD, _("(returns current working directory)"), TRUE);
+  pr_help_add(C_SIZE, _("<sp> pathname"), TRUE);
+  pr_help_add(C_SYST, _("(returns system type)"), TRUE);
+  pr_help_add(C_HELP, _("[<sp> command]"), TRUE);
+  pr_help_add(C_NOOP, _("(no operation)"), TRUE);
+  pr_help_add(C_FEAT, _("(returns feature list)"), TRUE);
+  pr_help_add(C_OPTS, _("<sp> command [<sp> options]"), TRUE);
+  pr_help_add(C_AUTH, _("<sp> base64-data"), FALSE);
+  pr_help_add(C_CCC, _("(clears protection level)"), FALSE);
+  pr_help_add(C_CONF, _("<sp> base64-data"), FALSE);
+  pr_help_add(C_ENC, _("<sp> base64-data"), FALSE);
+  pr_help_add(C_MIC, _("<sp> base64-data"), FALSE);
+  pr_help_add(C_PBSZ, _("<sp> protection buffer size"), FALSE);
+  pr_help_add(C_PROT, _("<sp> protection code"), FALSE);
 
   /* Add the additional features implemented by this module into the
    * list, to be displayed in response to a FEAT command.
@@ -4770,6 +5187,11 @@ static int core_sess_init(void) {
   unsigned int *debug_level = NULL;
 
   init_auth();
+
+  c = find_config(main_server->conf, CONF_PARAM, "MultilineRFC2228", FALSE);
+  if (c) {
+    session.multiline_rfc2228 = *((int *) c->argv[0]);
+  }
 
   /* Start the idle timer. */
 
@@ -4794,6 +5216,21 @@ static int core_sess_init(void) {
   debug_level = get_param_ptr(main_server->conf, "DebugLevel", FALSE);
   if (debug_level != NULL)
     pr_log_setdebuglevel(*debug_level);
+
+  /* Check for any server-specific RegexOptions */
+  c = find_config(main_server->conf, CONF_PARAM, "RegexOptions", FALSE);
+  if (c != NULL) {
+    unsigned long match_limit, match_limit_recursion;
+
+    match_limit = *((unsigned long *) c->argv[0]);
+    match_limit_recursion = *((unsigned long *) c->argv[1]);
+
+    pr_trace_msg("regexp", 4,
+      "using regex options: match limit = %lu, match limit recursion = %lu",
+      match_limit, match_limit_recursion);
+
+    pr_regexp_set_limits(match_limit, match_limit_recursion);
+  }
 
   /* Check for configured SetEnvs. */
   c = find_config(main_server->conf, CONF_PARAM, "SetEnv", FALSE);
@@ -4858,7 +5295,6 @@ static int core_sess_init(void) {
       m = pr_module_get(modulev[i]);
 
       if (m) {
-
         if (m->authtable) {
           authtable *authtab;
 
@@ -4872,20 +5308,23 @@ static int core_sess_init(void) {
           for (authtab = m->authtable; authtab->name; authtab++) {
             authtab->m = m;
 
-            if (required)
+            if (required) {
               authtab->auth_flags |= PR_AUTH_FL_REQUIRED;
+            }
 
             pr_stash_add_symbol(PR_SYM_AUTH, authtab);
           }
 
-        } else
+        } else {
           pr_log_debug(DEBUG0, "AuthOrder: warning: module '%s' is not a valid "
             "auth module (no auth handlers), authentication may fail",
             modulev[i]);
+        }
 
-      } else
+      } else {
         pr_log_debug(DEBUG0, "AuthOrder: warning: module '%s' not loaded",
           modulev[i]);
+      }
     }
 
     /* NOTE: the master conf/cmd/auth tables/arrays should ideally be
@@ -4893,6 +5332,32 @@ static int core_sess_init(void) {
      * point.
      */
   }
+
+#ifdef PR_USE_TRACE
+  /* Handle any session-specific Trace settings. */
+  c = find_config(main_server->conf, CONF_PARAM, "Trace", FALSE);
+  if (c != NULL) {
+    register unsigned int i;
+
+    for (i = 0; i < c->argc; i++) {
+      char *channel, *ptr;
+      int level, res;
+
+      ptr = strchr(c->argv[i], ':');
+      channel = c->argv[i];
+      *ptr = '\0';
+      level = atoi(ptr + 1);
+
+      res = pr_trace_set_levels(channel, 1, level);
+      *ptr = ':';
+
+      if (res < 0) {
+        pr_log_debug(DEBUG6, "%s: error setting levels %d-%d for "
+          "channel '%s': %s", c->name, 1, level, channel, strerror(errno));
+      }
+    }
+  }
+#endif /* PR_USE_TRACE */
 
   if (ServerType == SERVER_STANDALONE) {
     pr_timer_remove(core_scrub_timer_id, &core_module);
@@ -4986,6 +5451,17 @@ static int core_sess_init(void) {
         displayquit, strerror(errno));
   }
 
+  /* Check for any ProcessTitles setting. */
+  c = find_config(main_server->conf, CONF_PARAM, "ProcessTitles", FALSE);
+  if (c) {
+    char *verbosity;
+ 
+    verbosity = c->argv[0];
+    if (strcasecmp(verbosity, "terse") == 0) {
+      pr_proctitle_set_static_str("proftpd: processing connection");
+    }
+  }
+
   return 0;
 }
 
@@ -5046,6 +5522,7 @@ static conftable core_conftab[] = {
   { "IgnoreHidden",		set_ignorehidden,		NULL },
   { "Include",			add_include,	 		NULL },
   { "MasqueradeAddress",	set_masqueradeaddress,		NULL },
+  { "MaxCommandRate",		set_maxcommandrate,		NULL },
   { "MaxConnectionRate",	set_maxconnrate,		NULL },
   { "MaxInstances",		set_maxinstances,		NULL },
   { "MultilineRFC2228",		set_multilinerfc2228,		NULL },
@@ -5055,11 +5532,15 @@ static conftable core_conftab[] = {
   { "PathDenyFilter",		set_pathdenyfilter,		NULL },
   { "PidFile",			set_pidfile,	 		NULL },
   { "Port",			set_serverport, 		NULL },
+  { "ProcessTitles",		set_processtitles,		NULL },
+  { "Protocols",		set_protocols,			NULL },
+  { "RegexOptions",		set_regexoptions,		NULL },
   { "RLimitCPU",		set_rlimitcpu,			NULL },
   { "RLimitMemory",		set_rlimitmemory,		NULL },
   { "RLimitOpenFiles",		set_rlimitopenfiles,		NULL },
   { "Satisfy",			set_satisfy,			NULL },
   { "ScoreboardFile",		set_scoreboardfile,		NULL },
+  { "ScoreboardMutex",		set_scoreboardmutex,		NULL },
   { "ScoreboardScrub",		set_scoreboardscrub,		NULL },
   { "ServerAdmin",		set_serveradmin,		NULL },
   { "ServerIdent",		set_serverident,		NULL },
@@ -5090,10 +5571,10 @@ static conftable core_conftab[] = {
 };
 
 static cmdtable core_cmdtab[] = {
-#if defined(HAVE_REGEX_H) && defined(HAVE_REGCOMP)
+#ifdef PR_USE_REGEX
   { PRE_CMD, C_ANY, G_NONE,  regex_filters, FALSE, FALSE, CL_NONE },
 #endif
-  { PRE_CMD, C_ANY, G_NONE, core_clear_fs,FALSE, FALSE, CL_NONE },
+  { PRE_CMD, C_ANY, G_NONE, core_pre_any,FALSE, FALSE, CL_NONE },
   { CMD, C_HELP, G_NONE,  core_help,	FALSE,	FALSE, CL_INFO },
   { CMD, C_PORT, G_NONE,  core_port,	TRUE,	FALSE, CL_MISC },
   { CMD, C_PASV, G_NONE,  core_pasv,	TRUE,	FALSE, CL_MISC },

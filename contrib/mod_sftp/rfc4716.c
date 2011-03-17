@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: rfc4716.c,v 1.9.2.1 2010/03/03 00:53:36 castaglia Exp $
+ * $Id: rfc4716.c,v 1.13 2010/08/02 23:57:25 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -369,9 +369,13 @@ static int filestore_verify_host_key(sftp_keystore_t *store, pool *p,
       "in '%s'", host_fqdn, store_data->path);
   }
 
-  pr_fsio_lseek(store_data->fh, 0, SEEK_SET);
-  store_data->lineno = 0;
+  if (pr_fsio_lseek(store_data->fh, 0, SEEK_SET) < 0) {
+    (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+      "error seeking to start of '%s': %s", store_data->path, strerror(errno));
+    return -1;
+  }
 
+  store_data->lineno = 0;
   return res;
 }
 
@@ -407,10 +411,12 @@ static int filestore_verify_user_key(sftp_keystore_t *store, pool *p,
       }
 
     } else {
-      /* If the file key has a Subject header, and that header value does
-       * not match the logging in user, then continue looking.
+      /* If we are configured to check for Subject headers, and If the file key
+       * has a Subject header, and that header value does not match the
+       * logging in user, then continue looking.
        */
-      if (key->subject != NULL) {
+      if ((sftp_opts & SFTP_OPT_MATCH_KEY_SUBJECT) &&
+          key->subject != NULL) {
         if (strcmp(key->subject, user) != 0) {
           (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
             "found matching key for user '%s' in '%s', but Subject "
@@ -436,9 +442,13 @@ static int filestore_verify_user_key(sftp_keystore_t *store, pool *p,
       "in '%s'", user, store_data->path);
   }
 
-  pr_fsio_lseek(store_data->fh, 0, SEEK_SET);
-  store_data->lineno = 0;
+  if (pr_fsio_lseek(store_data->fh, 0, SEEK_SET) < 0) {
+    (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+      "error seeking to start of '%s': %s", store_data->path, strerror(errno));
+    return -1;
+  }
 
+  store_data->lineno = 0;
   return res;
 }
 
@@ -456,7 +466,7 @@ static sftp_keystore_t *filestore_open(pool *parent_pool,
   pool *filestore_pool;
   struct filestore_data *store_data;
   pr_fh_t *fh;
-  char *path;
+  char buf[PR_TUNABLE_PATH_MAX+1], *path;
   struct stat st;
 
   filestore_pool = make_sub_pool(parent_pool);
@@ -469,7 +479,20 @@ static sftp_keystore_t *filestore_open(pool *parent_pool,
    * interpolated.
    */
   session.user = (char *) user;
-  path = dir_interpolate(filestore_pool, store_info);
+
+  memset(buf, '\0', sizeof(buf));
+  switch (pr_fs_interpolate(store_info, buf, sizeof(buf)-1)) {
+    case 1:
+      /* Interpolate occurred; make a copy of the interpolated path. */
+      path = pstrdup(filestore_pool, buf);
+      break;
+
+    default:
+      /* Otherwise, use the path as is. */
+      path = pstrdup(filestore_pool, store_info);
+      break;
+  }
+
   session.user = NULL;
 
   PRIVS_ROOT

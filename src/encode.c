@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2006-2009 The ProFTPD Project team
+ * Copyright (c) 2006-2010 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@
  */
 
 /* UTF8/charset encoding/decoding
- * $Id: encode.c,v 1.20.2.4 2010/04/14 21:04:27 castaglia Exp $
+ * $Id: encode.c,v 1.27 2010/04/18 18:42:16 castaglia Exp $
  */
 
 #include "conf.h"
@@ -52,6 +52,9 @@ static int str_convert(iconv_t conv, const char *inbuf, size_t *inbuflen,
     char *outbuf, size_t *outbuflen) {
 # ifdef HAVE_ICONV
 
+  /* Reset the state machine before each conversion. */
+  (void) iconv(conv, NULL, NULL, NULL, NULL);
+
   while (*inbuflen > 0) {
     size_t nconv;
 
@@ -69,11 +72,24 @@ static int str_convert(iconv_t conv, const char *inbuf, size_t *inbuflen,
 #endif
 
     if (nconv == (size_t) -1) {
+
+      /* Note: an errno of EILSEQ here can indicate badly encoded strings OR
+       * (more likely) that the source character set used in the iconv_open(3)
+       * call for this iconv_t descriptor does not accurately describe the
+       * character encoding of the given string.  E.g. a filename may use
+       * the ISO8859-1 character set, but iconv_open(3) was called using
+       * US-ASCII.
+       */
+
       return -1;
     }
 
+    /* XXX We should let the loop condition work, rather than breaking out
+     * of the loop here.
+     */
     break;
   }
+
   return 0;
 # else
   errno = ENOSYS;

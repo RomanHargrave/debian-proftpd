@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2009 The ProFTPD Project team
+ * Copyright (c) 2009-2011 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,10 +21,193 @@
  * distribute the resulting executable, without including the source code for
  * OpenSSL in the source distribution.
  *
- * $Id: session.c,v 1.6 2009/09/14 20:44:12 castaglia Exp $
+ * $Id: session.c,v 1.10 2011/03/16 22:04:38 castaglia Exp $
  */
 
 #include "conf.h"
+
+/* From src/main.c */
+extern unsigned char is_master;
+
+static void sess_cleanup(int flags) {
+
+  /* Clear the scoreboard entry. */
+  if (ServerType == SERVER_STANDALONE) {
+
+    /* For standalone daemons, we only clear the scoreboard slot if we are
+     * an exiting child process.
+     */
+
+    if (!is_master) {
+      if (pr_scoreboard_entry_del(TRUE) < 0 &&
+          errno != EINVAL &&
+          errno != ENOENT) {
+        pr_log_debug(DEBUG1, "error deleting scoreboard entry: %s",
+          strerror(errno));
+      }
+    }
+
+  } else if (ServerType == SERVER_INETD) {
+    /* For inetd-spawned daemons, we always clear the scoreboard slot. */
+    if (pr_scoreboard_entry_del(TRUE) < 0 &&
+        errno != EINVAL &&
+        errno != ENOENT) {
+      pr_log_debug(DEBUG1, "error deleting scoreboard entry: %s",
+        strerror(errno));
+    }
+  }
+
+  /* If session.user is set, we have a valid login. */
+  if (session.user &&
+      session.wtmp_log) {
+    const char *sess_ttyname;
+
+    sess_ttyname = pr_session_get_ttyname(session.pool);
+    log_wtmp(sess_ttyname, "", pr_netaddr_get_sess_remote_name(),
+      pr_netaddr_get_sess_remote_addr());
+  }
+
+  /* These are necessary in order that cleanups associated with these pools
+   * (and their subpools) are properly run.
+   */
+  if (session.d) {
+    pr_inet_close(session.pool, session.d);
+    session.d = NULL;
+  }
+
+  if (session.c) {
+    pr_inet_close(session.pool, session.c);
+    session.c = NULL;
+  }
+
+  /* Run all the exit handlers */
+  pr_event_generate("core.exit", NULL);
+
+  if (!is_master ||
+      (ServerType == SERVER_INETD &&
+      !(flags & PR_SESS_END_FL_SYNTAX_CHECK))) {
+    pr_log_pri(PR_LOG_INFO, "%s session closed.",
+      pr_session_get_protocol(PR_SESS_PROTO_FL_LOGOUT));
+  }
+
+  log_closesyslog();
+}
+
+void pr_session_disconnect(module *m, int reason_code,
+    const char *details) {
+
+  session.disconnect_reason = reason_code;
+  session.disconnect_module = m;
+
+  if (details != NULL) {
+    /* Stash any extra details in the session.notes table */
+    if (pr_table_add_dup(session.notes, "core.disconnect-details",
+        (char *) details, 0) < 0) {
+      int xerrno = errno;
+
+      if (xerrno != EEXIST) {
+        pr_log_debug(DEBUG5, "error stashing 'core.disconnect-details' in "
+          "session.notes: %s", strerror(xerrno));
+      }
+    }
+  }
+
+  pr_session_end(0);
+}
+
+void pr_session_end(int flags) {
+  int exitcode = 0;
+
+  sess_cleanup(flags);
+
+  if (flags & PR_SESS_END_FL_NOEXIT) {
+    return;
+  }
+
+#ifdef PR_USE_DEVEL
+  destroy_pool(session.pool);
+
+  if (is_master) {
+    main_server = NULL;
+    free_pools();
+    pr_proctitle_free();
+  }
+#endif /* PR_USE_DEVEL */
+
+#ifdef PR_DEVEL_PROFILE
+  /* Populating the gmon.out gprof file requires that the process exit
+   * via exit(3) or by returning from main().  Using _exit(2) doesn't allow
+   * the process the time to write its profile data out.
+   */
+  exit(exitcode);
+#else
+  _exit(exitcode);
+#endif /* PR_DEVEL_PROFILE */
+}
+
+const char *pr_session_get_disconnect_reason(char **details) {
+  const char *reason_str = NULL;
+
+  switch (session.disconnect_reason) {
+    case PR_SESS_DISCONNECT_UNSPECIFIED:
+      reason_str = "Unknown/unspecified";
+      break;
+
+    case PR_SESS_DISCONNECT_CLIENT_QUIT:
+      reason_str = "Quit";
+      break;
+
+    case PR_SESS_DISCONNECT_CLIENT_EOF:
+      reason_str = "Read EOF from client";
+      break;
+
+    case PR_SESS_DISCONNECT_SESSION_INIT_FAILED:
+      reason_str = "Session initialized failed";
+      break;
+
+    case PR_SESS_DISCONNECT_SIGNAL:
+      reason_str = "Terminated by signal";
+      break;
+
+    case PR_SESS_DISCONNECT_NOMEM:
+      reason_str = "Low memory";
+      break;
+
+    case PR_SESS_DISCONNECT_SERVER_SHUTDOWN:
+      reason_str = "Server shutting down";
+      break;
+
+    case PR_SESS_DISCONNECT_TIMEOUT:
+      reason_str = "Timeout exceeded";
+      break;
+
+    case PR_SESS_DISCONNECT_BANNED:
+      reason_str = "Banned";
+      break;
+
+    case PR_SESS_DISCONNECT_CONFIG_ACL:
+      reason_str = "Configured policy";
+      break;
+
+    case PR_SESS_DISCONNECT_MODULE_ACL:
+      reason_str = "Module-specific policy";
+      break;
+
+    case PR_SESS_DISCONNECT_BAD_CONFIG:
+      reason_str = "Server misconfiguration";
+      break;
+
+    case PR_SESS_DISCONNECT_BY_APPLICATION:
+      reason_str = "Application error";
+      break;
+  }
+
+  if (details != NULL) {
+    *details = pr_table_get(session.notes, "core.disconnect-details", NULL);
+  }
+
+  return reason_str;
+}
 
 const char *pr_session_get_protocol(int flags) {
   const char *sess_proto;

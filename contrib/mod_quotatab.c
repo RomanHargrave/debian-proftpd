@@ -2,7 +2,7 @@
  * ProFTPD: mod_quotatab -- a module for managing FTP byte/file quotas via
  *                          centralized tables
  *
- * Copyright (c) 2001-2010 TJ Saunders
+ * Copyright (c) 2001-2011 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -28,7 +28,7 @@
  * ftp://pooh.urbanrage.com/pub/c/.  This module, however, has been written
  * from scratch to implement quotas in a different way.
  *
- * $Id: mod_quotatab.c,v 1.58.2.6 2010/11/01 18:51:12 castaglia Exp $
+ * $Id: mod_quotatab.c,v 1.70 2011/03/03 21:38:54 castaglia Exp $
  */
 
 #include "mod_quotatab.h"
@@ -82,8 +82,8 @@ static unsigned long have_quota_update = 0;
 #define QUOTA_HAVE_READ_UPDATE			10000
 #define QUOTA_HAVE_WRITE_UPDATE			20000
 
-#if defined(HAVE_REGEX_H) && defined(HAVE_REGCOMP)
-static regex_t *quota_exclude_re = NULL;
+#ifdef PR_USE_REGEX
+static pr_regex_t *quota_exclude_pre = NULL;
 static const char *quota_exclude_filter = NULL;
 #endif
 
@@ -102,6 +102,8 @@ static int quotatab_have_dele_st = FALSE;
 
 /* For locking (e.g. during tally creation). */
 static int quota_lockfd = -1;
+
+#define QUOTA_MAX_LOCK_ATTEMPTS		10
 
 /* It is the case where sometimes a command may be denied by a PRE_CMD
  * handler of this module, in which case an appropriate error response is
@@ -170,6 +172,32 @@ static int quotatab_wunlock(quota_table_t *);
 
 /* Support routines
  */
+
+/* Returns the most appropriate errno value for indicating a "quota exceeded"
+ * state, or -1 if there is no such appropriate errno.
+ */
+static int get_quota_exceeded_errno(int default_errno, char **errstr) {
+  int res;
+
+#if defined(EDQUOT)
+  res = EDQUOT;
+
+#elif defined(EFBIG)
+  res = EFBIG;
+
+#elif defined(ENOSPC)
+  res = ENOSPC;
+
+#else
+  res = default_errno;
+#endif
+
+  if (errstr != NULL) {
+    *errstr = strerror(res);
+  }
+
+  return res;
+}
 
 /* Quota units routines */
 
@@ -475,6 +503,35 @@ static int quotatab_create(quota_tally_t *tally) {
   return TRUE;
 }
 
+static int quotatab_create_tally(void) {
+  int res = TRUE;
+
+  memset(sess_tally.name, '\0', sizeof(sess_tally.name));
+  snprintf(sess_tally.name, sizeof(sess_tally.name), "%s",
+    sess_limit.name);
+  sess_tally.name[sizeof(sess_tally.name)-1] = '\0';
+
+  sess_tally.quota_type = sess_limit.quota_type;
+
+  /* Initial tally values. */
+  sess_tally.bytes_in_used = 0.0F;
+  sess_tally.bytes_out_used = 0.0F;
+  sess_tally.bytes_xfer_used = 0.0F;
+  sess_tally.files_in_used = 0U;
+  sess_tally.files_out_used = 0U;
+  sess_tally.files_xfer_used = 0U;
+
+  quotatab_log("creating new tally entry to match limit entry");
+
+  res = quotatab_create(&sess_tally);
+  if (res == FALSE) {
+    quotatab_log("error: unable to create tally entry: %s",
+      strerror(errno));
+  }
+
+  return res;
+}
+
 static quota_regtab_t *quotatab_get_backend(const char *backend,
     unsigned int srcs) {
   quota_regtab_t *regtab;
@@ -498,8 +555,8 @@ static int quotatab_ignore_path(pool *p, const char *path) {
     return FALSE;
   }
 
-#if defined(HAVE_REGEX_H) && defined(HAVE_REGCOMP)
-  if (quota_exclude_re == NULL) {
+#ifdef PR_USE_REGEX
+  if (quota_exclude_pre == NULL) {
     return FALSE;
   }
 
@@ -511,7 +568,7 @@ static int quotatab_ignore_path(pool *p, const char *path) {
     abs_path = (char *) path;
   }
 
-  if (regexec(quota_exclude_re, abs_path, 0, NULL, 0) == 0) {
+  if (pr_regexp_exec(quota_exclude_pre, abs_path, 0, NULL, 0, 0, 0) == 0) {
     return TRUE;
   }
 
@@ -898,17 +955,19 @@ static int quotatab_mutex_lock(int lock_type) {
         xerrno == EACCES) {
       /* Treat this as an interrupted call, call pr_signals_handle() (which
        * will delay for a few msecs because of EINTR), and try again.
-       * After 10 attempts, give up altogether.
+       * After QUOTA_MAX_LOCK_ATTEMPTS attempts, give up altogether.
        */
 
       nattempts++;
-      if (nattempts <= 10) {
+      if (nattempts <= QUOTA_MAX_LOCK_ATTEMPTS) {
         errno = EINTR;
 
         pr_signals_handle();
         continue;
       }
 
+      quotatab_log("unable to acquire %s lock on QuotaLock for user '%s': %s",
+        lock_desc, session.user, strerror(xerrno));
       errno = xerrno;
       return -1;
     }
@@ -920,19 +979,62 @@ static int quotatab_mutex_lock(int lock_type) {
 }
 
 static int quotatab_rlock(quota_table_t *tab) {
-  int res = 0;
 
   if (tab->rlock_count == 0 &&
       tab->wlock_count == 0) {
+    unsigned int nattempts = 1;
+
     tab->tab_lockfd = quota_lockfd;
-    res = tab->tab_rlock(tab);
+
+    pr_trace_msg("lock", 9, "attempting to read-lock QuotaLock fd %d",
+      quota_lockfd);
+   
+    while (tab->tab_rlock(tab) < 0) { 
+      int xerrno = errno;
+
+      if (xerrno == EINTR) {
+        pr_signals_handle();
+        continue;
+      }
+
+      if (xerrno == EACCES) {
+        struct flock locker;
+
+        /* Get the PID of the process blocking this lock. */
+        if (fcntl(quota_lockfd, F_GETLK, &locker) == 0) {
+          pr_trace_msg("lock", 3, "process ID %lu has blocking %s on "
+            "QuotaLock fd %d", (unsigned long) locker.l_pid,
+            (locker.l_type == F_WRLCK ? "write-lock" :
+             locker.l_type == F_RDLCK ? "read-lock" : "unlock"),
+            quota_lockfd);
+        }
+      }
+
+      if (xerrno == EAGAIN ||
+          xerrno == EACCES) {
+        /* Treat this as an interrupted call, call pr_signals_handle() (which
+         * will delay for a few msecs because of EINTR), and try again.
+         * After QUOTA_MAX_LOCK_ATTEMPTS attempts, give up altogether.
+         */
+
+        nattempts++;
+        if (nattempts <= QUOTA_MAX_LOCK_ATTEMPTS) {
+          errno = EINTR;
+
+          pr_signals_handle();
+          continue;
+        }
+      }
+
+      quotatab_log("unable to acquire read lock on QuotaLock for user '%s': %s",
+        session.user, strerror(xerrno));
+      errno = xerrno;
+      return -1;
+    }
   }
 
-  if (res == 0) {
-    tab->rlock_count++;
-  }
-
-  return res;
+  tab->rlock_count++;
+  return 0;
 }
 
 static int quotatab_runlock(quota_table_t *tab) {
@@ -941,7 +1043,18 @@ static int quotatab_runlock(quota_table_t *tab) {
   if (tab->rlock_count == 1 &&
       tab->wlock_count == 0) {
     tab->tab_lockfd = quota_lockfd;
-    res = tab->tab_unlock(tab);
+
+    while (tab->tab_unlock(tab) < 0) {
+      int xerrno = errno;
+
+      if (xerrno == EINTR) {
+        pr_signals_handle();
+        continue;
+      }
+
+      res = -1;
+      break;
+    }
   }
 
   if (res == 0 &&
@@ -949,22 +1062,65 @@ static int quotatab_runlock(quota_table_t *tab) {
     tab->rlock_count--;
   }
 
-  return 0;
+  return res;
 }
 
 static int quotatab_wlock(quota_table_t *tab) {
-  int res = 0;
 
   if (tab->wlock_count == 0) {
+    unsigned int nattempts = 1;
+
     tab->tab_lockfd = quota_lockfd;
-    res = tab->tab_wlock(tab);
+
+    pr_trace_msg("lock", 9, "attempting to write-lock QuotaLock fd %d",
+      quota_lockfd);
+
+    while (tab->tab_wlock(tab) < 0) {
+      int xerrno = errno;
+
+      if (xerrno == EINTR) {
+        pr_signals_handle();
+        continue;
+      }
+
+      if (xerrno == EACCES) {
+        struct flock locker;
+
+        /* Get the PID of the process blocking this lock. */
+        if (fcntl(quota_lockfd, F_GETLK, &locker) == 0) {
+          pr_trace_msg("lock", 3, "process ID %lu has blocking %s on "
+            "QuotaLock fd %d", (unsigned long) locker.l_pid,
+            (locker.l_type == F_WRLCK ? "write-lock" :
+             locker.l_type == F_RDLCK ? "read-lock" : "unlock"),
+            quota_lockfd);
+        }
+      }
+
+      if (xerrno == EAGAIN ||
+          xerrno == EACCES) {
+        /* Treat this as an interrupted call, call pr_signals_handle() (which
+         * will delay for a few msecs because of EINTR), and try again.
+         * After QUOTA_MAX_LOCK_ATTEMPTS attempts, give up altogether.
+         */
+
+        nattempts++;
+        if (nattempts <= QUOTA_MAX_LOCK_ATTEMPTS) {
+          errno = EINTR;
+
+          pr_signals_handle();
+          continue;
+        }
+      }
+
+      quotatab_log("unable to acquire write lock on QuotaLock for "
+        "user '%s': %s", session.user, strerror(xerrno));
+      errno = xerrno;
+      return -1;
+    }
   }
 
-  if (res == 0) {
-    tab->wlock_count++;
-  }
-
-  return res;
+  tab->wlock_count++;
+  return 0;
 }
 
 static int quotatab_wunlock(quota_table_t *tab) {
@@ -978,7 +1134,17 @@ static int quotatab_wunlock(quota_table_t *tab) {
 
     if (tab->rlock_count == 0) {
       /* The write-lock is the only lock left on the table; do a full unlock. */
-      res = tab->tab_unlock(tab);
+      while (tab->tab_unlock(tab) < 0) {
+        int xerrno = errno;
+
+        if (xerrno == EINTR) {
+          pr_signals_handle();
+          continue;
+        }
+
+        res = -1;
+        break;
+      }
 
     } else {
       /* We have some read-locks on the table; downgrade the write-lock to
@@ -1141,32 +1307,21 @@ static int quotatab_fsio_write(pr_fh_t *fh, int fd, const char *buf,
 
   if (sess_limit.bytes_in_avail > 0.0 &&
       sess_tally.bytes_in_used + session.xfer.total_bytes > sess_limit.bytes_in_avail) {
-#if defined(EDQUOT)
-    quotatab_log("quotatab write(): limit exceeded, returning EDQUOT");
-    errno = EDQUOT;
-#elif defined(EFBIG)
-    quotatab_log("quotatab write(): limit exceeded, returning EFBIG");
-    errno = EFBIG;
-#else
-    quotatab_log("quotatab write(): limit exceeded, returning EIO");
-    errno = EIO;
-#endif
+    char *errstr = NULL;
+
+    errno = get_quota_exceeded_errno(EIO, &errstr);
+    quotatab_log("quotatab write(): limit exceeded, returning %s", errstr);
 
     return -1;
   }
 
   if (sess_limit.bytes_xfer_avail > 0.0 &&
       sess_tally.bytes_xfer_used + session.xfer.total_bytes > sess_limit.bytes_xfer_avail) {
-#if defined(EDQUOT)
-    quotatab_log("quotatab write(): transfer limit exceeded, returning EDQUOT");
-    errno = EDQUOT;
-#elif defined(EFBIG)
-    quotatab_log("quotatab write(): transfer limit exceeded, returning EFBIG");
-    errno = EFBIG;
-#else
-    quotatab_log("quotatab write(): transfer limit exceeded, returning EIO");
-    errno = EIO;
-#endif
+    char *errstr = NULL;
+
+    errno = get_quota_exceeded_errno(EIO, &errstr);
+    quotatab_log("quotatab write(): transfer limit exceeded, returning %s",
+      errstr);
 
     return -1;
   }
@@ -1251,8 +1406,8 @@ MODRET set_quotaengine(cmd_rec *cmd) {
 
 /* usage: QuotaExcludeFilter regex|"none" */
 MODRET set_quotaexcludefilter(cmd_rec *cmd) {
-#if defined(HAVE_REGEX_H) && defined(HAVE_REGCOMP)
-  regex_t *re = NULL;
+#ifdef PR_USE_REGEX
+  pr_regex_t *pre = NULL;
   config_rec *c;
   int res;
 
@@ -1264,14 +1419,14 @@ MODRET set_quotaexcludefilter(cmd_rec *cmd) {
     return PR_HANDLED(cmd);
   }
 
-  re = pr_regexp_alloc();
+  pre = pr_regexp_alloc(&quotatab_module);
 
-  res = regcomp(re, cmd->argv[1], REG_EXTENDED|REG_NOSUB);
+  res = pr_regexp_compile(pre, cmd->argv[1], REG_EXTENDED|REG_NOSUB);
   if (res != 0) {
     char errstr[256] = {'\0'};
 
-    regerror(res, re, errstr, sizeof(errstr));
-    pr_regexp_free(re);
+    pr_regexp_error(res, pre, errstr, sizeof(errstr));
+    pr_regexp_free(NULL, pre);
 
     CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "'", cmd->argv[1], "' failed regex "
       "compilation: ", errstr, NULL));
@@ -1279,7 +1434,7 @@ MODRET set_quotaexcludefilter(cmd_rec *cmd) {
 
   c = add_config_param(cmd->argv[0], 2, NULL, NULL);
   c->argv[0] = pstrdup(c->pool, cmd->argv[1]);
-  c->argv[1] = (void *) re;
+  c->argv[1] = (void *) pre;
   return PR_HANDLED(cmd);
 
 #else
@@ -1526,15 +1681,7 @@ MODRET quotatab_pre_appe(cmd_rec *cmd) {
     have_err_response = TRUE;
 
     /* Set an appropriate errno value. */
-#if defined(EDQUOT)
-    errno = EDQUOT;
-#elif defined(EFBIG)
-    errno = EFBIG;
-#elif defined(ENOSPC)
-    errno = ENOSPC;
-#else
-    errno = EPERM;
-#endif
+    errno = get_quota_exceeded_errno(EPERM, NULL);
 
     return PR_ERROR(cmd);
 
@@ -1549,15 +1696,7 @@ MODRET quotatab_pre_appe(cmd_rec *cmd) {
     have_err_response = TRUE;
 
     /* Set an appropriate errno value. */
-#if defined(EDQUOT)
-    errno = EDQUOT;
-#elif defined(EFBIG)
-    errno = EFBIG;
-#elif defined(ENOSPC)
-    errno = ENOSPC;
-#else
-    errno = EPERM;
-#endif
+    errno = get_quota_exceeded_errno(EPERM, NULL);
 
     return PR_ERROR(cmd);
   }
@@ -1809,15 +1948,7 @@ MODRET quotatab_pre_copy(cmd_rec *cmd) {
     have_err_response = TRUE;
 
     /* Set an appropriate errno value. */
-#if defined(EDQUOT)
-    errno = EDQUOT;
-#elif defined(EFBIG)
-    errno = EFBIG;
-#elif defined(ENOSPC)
-    errno = ENOSPC;
-#else
-    errno = EPERM;
-#endif
+    errno = get_quota_exceeded_errno(EPERM, NULL);
 
     return PR_ERROR(cmd);
 
@@ -1832,15 +1963,7 @@ MODRET quotatab_pre_copy(cmd_rec *cmd) {
     have_err_response = TRUE;
 
     /* Set an appropriate errno value. */
-#if defined(EDQUOT)
-    errno = EDQUOT;
-#elif defined(EFBIG)
-    errno = EFBIG;
-#elif defined(ENOSPC)
-    errno = ENOSPC;
-#else
-    errno = EPERM;
-#endif
+    errno = get_quota_exceeded_errno(EPERM, NULL);
 
     return PR_ERROR(cmd);
   }
@@ -1879,16 +2002,8 @@ MODRET quotatab_pre_copy(cmd_rec *cmd) {
         cmd->argv[0], DISPLAY_FILES_IN(cmd));
       have_err_response = TRUE;
 
-    /* Set an appropriate errno value. */
-#if defined(EDQUOT)
-    errno = EDQUOT;
-#elif defined(EFBIG)
-    errno = EFBIG;
-#elif defined(ENOSPC)
-    errno = ENOSPC;
-#else
-    errno = EPERM;
-#endif
+      /* Set an appropriate errno value. */
+      errno = get_quota_exceeded_errno(EPERM, NULL);
 
       return PR_ERROR(cmd);
 
@@ -1902,16 +2017,8 @@ MODRET quotatab_pre_copy(cmd_rec *cmd) {
         cmd->argv[0], DISPLAY_FILES_XFER(cmd));
       have_err_response = TRUE;
 
-    /* Set an appropriate errno value. */
-#if defined(EDQUOT)
-    errno = EDQUOT;
-#elif defined(EFBIG)
-    errno = EFBIG;
-#elif defined(ENOSPC)
-    errno = ENOSPC;
-#else
-    errno = EPERM;
-#endif
+      /* Set an appropriate errno value. */
+      errno = get_quota_exceeded_errno(EPERM, NULL);
 
       return PR_ERROR(cmd);
     }
@@ -2326,9 +2433,18 @@ MODRET quotatab_post_pass(cmd_rec *cmd) {
 
     if (quotatab_lookup(TYPE_TALLY, &sess_tally, session.user, USER_QUOTA)) {
       quotatab_log("found tally entry for user '%s'", session.user);
-      quotatab_mutex_lock(F_UNLCK);
       have_quota_entry = TRUE;
 
+    } else {
+      if (quotatab_create_tally()) {
+        quotatab_log("created tally entry for user '%s'", session.user);
+        have_quota_entry = TRUE;
+      }
+    }
+
+    quotatab_mutex_lock(F_UNLCK);
+
+    if (have_quota_entry) {
       if ((quotatab_opts & QUOTA_OPT_SCAN_ON_LOGIN) &&
           (sess_limit.bytes_in_avail > 0 ||
            sess_limit.files_in_avail > 0)) {
@@ -2350,12 +2466,13 @@ MODRET quotatab_post_pass(cmd_rec *cmd) {
             (byte_count - sess_tally.bytes_in_used);
           int files_diff = file_count - sess_tally.files_in_used;
 
-          quotatab_log("found %0.2lf bytes in %u files for user '%s' "
-            "in %lu secs", byte_count, file_count, session.user,
+          quotatab_log("found %0.2lf bytes in %u %s for user '%s' "
+            "in %lu secs", byte_count, file_count,
+            file_count != 1 ? "files" : "file", session.user,
             (unsigned long) time(NULL) - then);
 
-          quotatab_log("updating tally (%0.2lf bytes, %d files difference)",
-            bytes_diff, files_diff);
+          quotatab_log("updating tally (%0.2lf bytes, %d %s difference)",
+            bytes_diff, files_diff, files_diff != 1 ? "files" : "file");
 
           /* Write out an updated quota entry */
           QUOTATAB_TALLY_WRITE(bytes_diff, 0, 0, files_diff, 0, 0);
@@ -2398,9 +2515,18 @@ MODRET quotatab_post_pass(cmd_rec *cmd) {
     if (have_limit_entry) {
       if (quotatab_lookup(TYPE_TALLY, &sess_tally, group_name, GROUP_QUOTA)) {
         quotatab_log("found tally entry for group '%s'", group_name);
-        quotatab_mutex_lock(F_UNLCK);
         have_quota_entry = TRUE;
 
+      } else {
+        if (quotatab_create_tally()) {
+          quotatab_log("created tally entry for group '%s'", group_name);
+          have_quota_entry = TRUE;
+        }
+      }
+
+      quotatab_mutex_lock(F_UNLCK);
+
+      if (have_quota_entry) {
         if ((quotatab_opts & QUOTA_OPT_SCAN_ON_LOGIN) &&
             (sess_limit.bytes_in_avail > 0 ||
              sess_limit.files_in_avail > 0)) {
@@ -2421,12 +2547,13 @@ MODRET quotatab_post_pass(cmd_rec *cmd) {
             double bytes_diff = byte_count - sess_tally.bytes_in_used;
             int files_diff = file_count - sess_tally.files_in_used;
 
-            quotatab_log("found %0.2lf bytes in %u files for group '%s' "
-              "in %lu secs", byte_count, file_count, group_name,
+            quotatab_log("found %0.2lf bytes in %u %s for group '%s' "
+              "in %lu secs", byte_count, file_count,
+              file_count != 1 ? "files" : "file", group_name,
               (unsigned long) time(NULL) - then);
 
-            quotatab_log("updating tally (%0.2lf bytes, %d files difference)",
-              bytes_diff, files_diff);
+            quotatab_log("updating tally (%0.2lf bytes, %d %s difference)",
+              bytes_diff, files_diff, files_diff != 1 ? "files" : "file");
 
             /* Write out an updated quota entry */
             QUOTATAB_TALLY_WRITE(bytes_diff, 0, 0, files_diff, 0, 0);
@@ -2448,9 +2575,19 @@ MODRET quotatab_post_pass(cmd_rec *cmd) {
           CLASS_QUOTA)) {
         quotatab_log("found tally entry for class '%s'",
           session.class->cls_name);
-        quotatab_mutex_lock(F_UNLCK);
         have_quota_entry = TRUE;
 
+      } else {
+        if (quotatab_create_tally()) {
+          quotatab_log("created tally entry for class '%s'",
+            session.class->cls_name);
+          have_quota_entry = TRUE;
+        }
+      }
+
+      quotatab_mutex_lock(F_UNLCK);
+
+      if (have_quota_entry) {
         if ((quotatab_opts & QUOTA_OPT_SCAN_ON_LOGIN) &&
             (sess_limit.bytes_in_avail > 0 ||
              sess_limit.files_in_avail > 0)) {
@@ -2473,12 +2610,13 @@ MODRET quotatab_post_pass(cmd_rec *cmd) {
               (byte_count - sess_tally.bytes_in_used);
             int files_diff = file_count - sess_tally.files_in_used;
 
-            quotatab_log("found %0.2lf bytes in %u files for class '%s' "
-              "in %lu secs", byte_count, file_count, session.class->cls_name,
+            quotatab_log("found %0.2lf bytes in %u %s for class '%s' "
+              "in %lu secs", byte_count, file_count,
+              file_count != 1 ? "files" : "file", session.class->cls_name,
               (unsigned long) time(NULL) - then);
 
-            quotatab_log("updating tally (%0.2lf bytes, %d files difference)",
-              bytes_diff, files_diff);
+            quotatab_log("updating tally (%0.2lf bytes, %d %s difference)",
+              bytes_diff, files_diff, files_diff != 1 ? "files" : "file");
 
             /* Write out an updated quota entry */
             QUOTATAB_TALLY_WRITE(bytes_diff, 0, 0, files_diff, 0, 0);
@@ -2496,9 +2634,18 @@ MODRET quotatab_post_pass(cmd_rec *cmd) {
 
       if (quotatab_lookup(TYPE_TALLY, &sess_tally, NULL, ALL_QUOTA)) {
         quotatab_log("found tally entry for all");
-        quotatab_mutex_lock(F_UNLCK);
         have_quota_entry = TRUE;
 
+      } else {
+        if (quotatab_create_tally()) {
+          quotatab_log("created tally entry for all");
+          have_quota_entry = TRUE;
+        }
+      }
+
+      quotatab_mutex_lock(F_UNLCK);
+
+      if (have_quota_entry) {
         if ((quotatab_opts & QUOTA_OPT_SCAN_ON_LOGIN) &&
             (sess_limit.bytes_in_avail > 0 ||
              sess_limit.files_in_avail > 0)) {
@@ -2520,12 +2667,13 @@ MODRET quotatab_post_pass(cmd_rec *cmd) {
               (byte_count - sess_tally.bytes_in_used);
             int files_diff = file_count - sess_tally.files_in_used;
 
-            quotatab_log("found %0.2lf bytes in %u files for all "
+            quotatab_log("found %0.2lf bytes in %u %s for all "
               "in %lu secs", byte_count, file_count,
+              file_count != 1 ? "files" : "file",
               (unsigned long) time(NULL) - then);
 
-            quotatab_log("updating tally (%0.2lf bytes, %d files difference)",
-              bytes_diff, files_diff);
+            quotatab_log("updating tally (%0.2lf bytes, %d %s difference)",
+              bytes_diff, files_diff, files_diff != 1 ? "files" : "file");
 
             /* Write out an updated quota entry */
             QUOTATAB_TALLY_WRITE(bytes_diff, 0, 0, files_diff, 0, 0);
@@ -2539,41 +2687,6 @@ MODRET quotatab_post_pass(cmd_rec *cmd) {
    * open anyway, in order to look up limits for _other_ users (e.g. when
    * handling deleted files).
    */
-
-  /* Only create a new tally entry if there is a corresponding limit
-   * entry.
-   */
-
-  if (have_limit_entry &&
-      !have_quota_entry) {
-    memset(sess_tally.name, '\0', sizeof(sess_tally.name));
-    snprintf(sess_tally.name, sizeof(sess_tally.name), "%s",
-      sess_limit.name);
-    sess_tally.name[sizeof(sess_tally.name)-1] = '\0';
-
-    sess_tally.quota_type = sess_limit.quota_type;
-
-    /* Initial tally values. */
-    sess_tally.bytes_in_used = 0.0F;
-    sess_tally.bytes_out_used = 0.0F;
-    sess_tally.bytes_xfer_used = 0.0F;
-    sess_tally.files_in_used = 0U;
-    sess_tally.files_out_used = 0U;
-    sess_tally.files_xfer_used = 0U;
-
-    quotatab_log("creating new tally entry to match limit entry");
-
-    if (quotatab_create(&sess_tally)) {
-      quotatab_log("new tally entry successfully created");
-      have_quota_entry = TRUE;
-
-    } else {
-      quotatab_log("error: unable to create tally entry: %s",
-        strerror(errno));
-    }
-
-    quotatab_mutex_lock(F_UNLCK);
-  }
 
   if (have_quota_entry) {
 
@@ -2740,11 +2853,7 @@ MODRET quotatab_pre_retr(cmd_rec *cmd) {
     have_err_response = TRUE;
 
     /* Set an appropriate errno value. */
-#if defined(EDQUOT)
-    errno = EDQUOT;
-#else
-    errno = EPERM;
-#endif
+    errno = get_quota_exceeded_errno(EPERM, NULL);
 
     return PR_ERROR(cmd);
 
@@ -2759,11 +2868,7 @@ MODRET quotatab_pre_retr(cmd_rec *cmd) {
     have_err_response = TRUE;
 
     /* Set an appropriate errno value. */
-#if defined(EDQUOT)
-    errno = EDQUOT;
-#else
-    errno = EPERM;
-#endif
+    errno = get_quota_exceeded_errno(EPERM, NULL);
 
     return PR_ERROR(cmd);
   }
@@ -2782,11 +2887,7 @@ MODRET quotatab_pre_retr(cmd_rec *cmd) {
     have_err_response = TRUE;
 
     /* Set an appropriate errno value. */
-#if defined(EDQUOT)
-    errno = EDQUOT;
-#else
-    errno = EPERM;
-#endif
+    errno = get_quota_exceeded_errno(EPERM, NULL);
 
     return PR_ERROR(cmd);
 
@@ -2801,11 +2902,7 @@ MODRET quotatab_pre_retr(cmd_rec *cmd) {
     have_err_response = TRUE;
 
     /* Set an appropriate errno value. */
-#if defined(EDQUOT)
-    errno = EDQUOT;
-#else
-    errno = EPERM;
-#endif
+    errno = get_quota_exceeded_errno(EPERM, NULL);
 
     return PR_ERROR(cmd);
   }
@@ -3079,15 +3176,7 @@ MODRET quotatab_pre_stor(cmd_rec *cmd) {
     have_err_response = TRUE;
 
     /* Set an appropriate errno value. */
-#if defined(EDQUOT)
-    errno = EDQUOT;
-#elif defined(EFBIG)
-    errno = EFBIG;
-#elif defined(ENOSPC)
-    errno = ENOSPC;
-#else
-    errno = EPERM;
-#endif
+    errno = get_quota_exceeded_errno(EPERM, NULL);
 
     return PR_ERROR(cmd);
 
@@ -3102,15 +3191,7 @@ MODRET quotatab_pre_stor(cmd_rec *cmd) {
     have_err_response = TRUE;
 
     /* Set an appropriate errno value. */
-#if defined(EDQUOT)
-    errno = EDQUOT;
-#elif defined(EFBIG)
-    errno = EFBIG;
-#elif defined(ENOSPC)
-    errno = ENOSPC;
-#else
-    errno = EPERM;
-#endif
+    errno = get_quota_exceeded_errno(EPERM, NULL);
 
     return PR_ERROR(cmd);
   }
@@ -3129,15 +3210,7 @@ MODRET quotatab_pre_stor(cmd_rec *cmd) {
     have_err_response = TRUE;
 
     /* Set an appropriate errno value. */
-#if defined(EDQUOT)
-    errno = EDQUOT;
-#elif defined(EFBIG)
-    errno = EFBIG;
-#elif defined(ENOSPC)
-    errno = ENOSPC;
-#else
-    errno = EPERM;
-#endif
+    errno = get_quota_exceeded_errno(EPERM, NULL);
 
     return PR_ERROR(cmd);
 
@@ -3152,15 +3225,7 @@ MODRET quotatab_pre_stor(cmd_rec *cmd) {
     have_err_response = TRUE;
 
     /* Set an appropriate errno value. */
-#if defined(EDQUOT)
-    errno = EDQUOT;
-#elif defined(EFBIG)
-    errno = EFBIG;
-#elif defined(ENOSPC)
-    errno = ENOSPC;
-#else
-    errno = EPERM;
-#endif
+    errno = get_quota_exceeded_errno(EPERM, NULL);
 
     return PR_ERROR(cmd);
   }
@@ -3333,25 +3398,34 @@ MODRET quotatab_post_stor_err(cmd_rec *cmd) {
     return PR_DECLINED(cmd);
   }
 
-  /* Check on the size of the stored file again, and use the difference
-   * in file size as the increment.  Make sure that no caching effects 
-   * mess with the stat.
-   */
-  pr_fs_clear_cache();
-  if (pr_fsio_lstat(cmd->arg, &st) >= 0) {
-    store_bytes = st.st_size - quotatab_disk_nbytes;
+  if (store_bytes > 0) {
+    /* Check on the size of the stored file again, and use the difference
+     * in file size as the increment.  Make sure that no caching effects 
+     * mess with the stat.
+     */
+    pr_fs_clear_cache();
+    if (pr_fsio_lstat(cmd->arg, &st) >= 0) {
+      store_bytes = st.st_size - quotatab_disk_nbytes;
 
-  } else {
-    if (errno == ENOENT)
-      store_bytes = 0;
+    } else {
+      if (errno == ENOENT) {
+        store_bytes = 0;
 
-    else
-      quotatab_log("%s: error checking '%s': %s", cmd->argv[0], cmd->arg,
-        strerror(errno));
+      } else {
+        quotatab_log("%s: error checking '%s': %s", cmd->argv[0], cmd->arg,
+          strerror(errno));
+      }
+    }
   }
 
-  /* Write out an updated quota entry */
-  QUOTATAB_TALLY_WRITE(store_bytes, 0, session.xfer.total_bytes, 0, 0, 0)
+  if (store_bytes != 0 ||
+      session.xfer.total_bytes != 0) {
+
+    /* Write out an updated quota entry, but only if we have differences
+     * to write out.
+     */
+    QUOTATAB_TALLY_WRITE(store_bytes, 0, session.xfer.total_bytes, 0, 0, 0)
+  }
 
   /* Check quotas to see if bytes upload or total quota has been reached.
    * Report this to user if so (if not already reported).  If it is a hard
@@ -3642,6 +3716,7 @@ static void quotatab_exit_ev(const void *event_data, void *user_data) {
 static void quotatab_mod_unload_ev(const void *event_data, void *user_data) {
   if (strcmp("mod_quotatab.c", (const char *) event_data) == 0) {
     pr_event_unregister(&quotatab_module, NULL, NULL);
+    pr_regex_free(NULL, quota_exclude_pre);
 
     if (quotatab_pool) {
       destroy_pool(quotatab_pool);
@@ -3777,7 +3852,7 @@ static int quotatab_sess_init(void) {
   if (c &&
       c->argc == 2) {
      quota_exclude_filter = c->argv[0];
-     quota_exclude_re = c->argv[1];
+     quota_exclude_pre = c->argv[1];
   }
 
   c = find_config(main_server->conf, CONF_PARAM, "QuotaOptions", FALSE);

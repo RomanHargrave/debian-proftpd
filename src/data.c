@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2010 The ProFTPD Project team
+ * Copyright (c) 2001-2011 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,12 +25,10 @@
  */
 
 /* Data connection management functions
- * $Id: data.c,v 1.120.2.3 2010/09/01 20:46:00 castaglia Exp $
+ * $Id: data.c,v 1.136 2011/03/03 17:09:11 castaglia Exp $
  */
 
 #include "conf.h"
-
-#include <signal.h>
 
 #ifdef HAVE_SYS_SENDFILE_H
 #include <sys/sendfile.h>
@@ -64,7 +62,8 @@ static int stalled_timeout_cb(CALLBACK_FRAME) {
   pr_event_generate("core.timeout-stalled", NULL);
   pr_log_pri(PR_LOG_NOTICE, "Data transfer stall timeout: %d seconds",
     timeout_stalled);
-  end_login(1);
+  pr_session_disconnect(NULL, PR_SESS_DISCONNECT_TIMEOUT,
+    "TimeoutStalled during data transfer");
 
   /* Prevent compiler warning.
    */
@@ -229,8 +228,10 @@ static void data_new_xfer(char *filename, int direction) {
 
   session.xfer.filename = pstrdup(session.xfer.p, filename);
   session.xfer.direction = direction;
-  session.xfer.bufsize = pr_config_get_xfer_bufsz();
+  session.xfer.bufsize = pr_config_get_server_xfer_bufsz(direction);
   session.xfer.buf = pcalloc(session.xfer.p, session.xfer.bufsize + 1);
+  pr_trace_msg("data", 8, "allocated data transfer buffer of %lu bytes",
+    (unsigned long) session.xfer.bufsize);
   session.xfer.buf++;	/* leave room for ascii translation */
   session.xfer.buflen = 0;
 }
@@ -245,9 +246,10 @@ static int data_pasv_open(char *reason, off_t size) {
   /* Set the "stalled" timer, if any, to prevent the connection
    * open from taking too long
    */
-  if (timeout_stalled)
+  if (timeout_stalled) {
     pr_timer_add(timeout_stalled, PR_TIMER_STALLED, NULL, stalled_timeout_cb,
       "TimeoutStalled");
+  }
 
   /* We save the state of our current disposition for doing reverse
    * lookups, and then set it to what the configuration wants it to
@@ -259,15 +261,11 @@ static int data_pasv_open(char *reason, off_t size) {
 
   if (session.xfer.direction == PR_NETIO_IO_RD) {
     pr_inet_set_socket_opts(session.d->pool, session.d,
-      (main_server->tcp_rcvbuf_override ?  main_server->tcp_rcvbuf_len : 0), 0);
-    pr_inet_set_proto_opts(session.pool, session.d, main_server->tcp_mss_len, 0,
-      0, 1, 1);
-    
+      (main_server->tcp_rcvbuf_override ? main_server->tcp_rcvbuf_len : 0), 0);
+
   } else {
     pr_inet_set_socket_opts(session.d->pool, session.d,
-      0, (main_server->tcp_sndbuf_override ?  main_server->tcp_sndbuf_len : 0));
-    pr_inet_set_proto_opts(session.pool, session.d, main_server->tcp_mss_len, 0,
-      0, 1, 1);
+      0, (main_server->tcp_sndbuf_override ? main_server->tcp_sndbuf_len : 0));
   }
 
   c = pr_inet_accept(session.pool, session.d, session.c, -1, -1, TRUE);
@@ -284,12 +282,14 @@ static int data_pasv_open(char *reason, off_t size) {
       pr_netaddr_get_ipstr(session.d->remote_addr), session.d->remote_port);
 
     if (session.xfer.xfer_type != STOR_UNIQUE) {
-      if (size)
+      if (size) {
         pr_response_send(R_150, _("Opening %s mode data connection for %s "
           "(%" PR_LU " bytes)"), MODE_STRING, reason, (pr_off_t) size);
-      else
+
+      } else {
         pr_response_send(R_150, _("Opening %s mode data connection for %s"),
           MODE_STRING, reason);
+      }
 
     } else {
 
@@ -333,19 +333,31 @@ static int data_pasv_open(char *reason, off_t size) {
 static int data_active_open(char *reason, off_t size) {
   conn_t *c;
   int rev;
+  pr_netaddr_t *bind_addr;
 
   if (!reason && session.xfer.filename)
     reason = session.xfer.filename;
 
-  session.d = pr_inet_create_conn(session.pool, NULL, -1,
-    session.c->local_addr, session.c->local_port-1, TRUE);
+  if (pr_netaddr_get_family(session.c->local_addr) == pr_netaddr_get_family(session.c->remote_addr)) {
+    bind_addr = session.c->local_addr;
+
+  } else {
+    /* In this scenario, the server has an IPv6 socket, but the remote client
+     * is an IPv4 (or IPv4-mapped IPv6) peer.
+     */
+    bind_addr = pr_netaddr_v6tov4(session.xfer.p, session.c->local_addr);
+  }
+
+  session.d = pr_inet_create_conn(session.pool, -1, bind_addr,
+    session.c->local_port-1, TRUE);
 
   /* Set the "stalled" timer, if any, to prevent the connection
    * open from taking too long
    */
-  if (timeout_stalled)
+  if (timeout_stalled) {
     pr_timer_add(timeout_stalled, PR_TIMER_STALLED, NULL, stalled_timeout_cb,
       "TimeoutStalled");
+  }
 
   rev = pr_netaddr_set_reverse_dns(ServerUseReverseDNS);
 
@@ -353,16 +365,20 @@ static int data_active_open(char *reason, off_t size) {
 
   if (session.xfer.direction == PR_NETIO_IO_RD) {
     pr_inet_set_socket_opts(session.d->pool, session.d,
-      (main_server->tcp_rcvbuf_override ?  main_server->tcp_rcvbuf_len : 0), 0);
-    pr_inet_set_proto_opts(session.pool, session.d, main_server->tcp_mss_len, 0,
-      0, 1, 1);
+      (main_server->tcp_rcvbuf_override ? main_server->tcp_rcvbuf_len : 0), 0);
     
   } else {
     pr_inet_set_socket_opts(session.d->pool, session.d,
-      0, (main_server->tcp_sndbuf_override ?  main_server->tcp_sndbuf_len : 0));
-    pr_inet_set_proto_opts(session.pool, session.d, main_server->tcp_mss_len, 0,
-      0, 1, 1);
+      0, (main_server->tcp_sndbuf_override ? main_server->tcp_sndbuf_len : 0));
   }
+
+  /* Make sure that the necessary socket options are set on the socket prior
+   * to the call to connect(2).
+   */
+  pr_inet_set_proto_opts(session.pool, session.d, main_server->tcp_mss_len, 0,
+    IPTOS_THROUGHPUT, 1);
+  pr_inet_generate_socket_event("core.data-connect", main_server,
+    session.d->local_addr, session.d->listen_fd);
 
   if (pr_inet_connect(session.d->pool, session.d, &session.data_addr,
       session.data_port) == -1) {
@@ -523,20 +539,20 @@ int pr_data_open(char *filename, char *reason, int direction, off_t size) {
   /* Passive data transfers... */
   if (session.sf_flags & SF_PASSIVE ||
       session.sf_flags & SF_EPSV_ALL) {
-    if (!session.d) {
+    if (session.d == NULL) {
       pr_log_pri(PR_LOG_ERR, "Internal error: PASV mode set, but no data "
-        "connection listening.");
-      end_login(1);
+        "connection listening");
+      pr_session_disconnect(NULL, PR_SESS_DISCONNECT_BY_APPLICATION, NULL);
     }
 
     res = data_pasv_open(reason, size);
 
   /* Active data transfers... */
   } else {
-    if (session.d) {
+    if (session.d != NULL) {
       pr_log_pri(PR_LOG_ERR, "Internal error: non-PASV mode, yet data "
         "connection already exists?!?");
-      end_login(1);
+      pr_session_disconnect(NULL, PR_SESS_DISCONNECT_BY_APPLICATION, NULL);
     }
 
     res = data_active_open(reason, size);
@@ -624,11 +640,13 @@ void pr_data_close(int quiet) {
   /* Aborts no longer necessary */
   signal(SIGURG, SIG_IGN);
 
-  if (timeout_noxfer)
+  if (timeout_noxfer) {
     pr_timer_reset(PR_TIMER_NOXFER, ANY_MODULE);
+  }
 
-  if (timeout_stalled)
+  if (timeout_stalled) {
     pr_timer_remove(PR_TIMER_STALLED, ANY_MODULE);
+  }
 
   session.sf_flags &= (SF_ALL^SF_PASSIVE);
   session.sf_flags &= (SF_ALL^(SF_ABORT|SF_XFER|SF_PASSIVE|SF_ASCII_OVERRIDE));
@@ -655,6 +673,12 @@ void pr_data_cleanup(void) {
   }
 
   pr_data_clear_xfer_pool();
+
+  /* Clear/restore the default data transfer type. Otherwise, things like
+   * APPEs or STOUs will be preserved for the next upload erroneously
+   * (see Bug#3612).
+   */
+  session.xfer.xfer_type = STOR_DEFAULT;
 }
 
 /* In order to avoid clearing the transfer counters in session.xfer, we don't
@@ -675,11 +699,13 @@ void pr_data_abort(int err, int quiet) {
     session.d = NULL;
   }
 
-  if (timeout_noxfer)
+  if (timeout_noxfer) {
     pr_timer_reset(PR_TIMER_NOXFER, ANY_MODULE);
+  }
 
-  if (timeout_stalled)
+  if (timeout_stalled) {
     pr_timer_remove(PR_TIMER_STALLED, ANY_MODULE);
+  }
 
   session.sf_flags &= (SF_ALL^SF_PASSIVE);
   session.sf_flags &= (SF_ALL^(SF_XFER|SF_PASSIVE|SF_ASCII_OVERRIDE));
@@ -883,8 +909,29 @@ int pr_data_xfer(char *cl_buf, int cl_size) {
       "data available for reading on control channel during data transfer, "
       "reading control data");
     res = pr_cmd_read(&cmd);
-    if (res >= 0 &&
-        cmd) {
+    if (res < 0) {
+      int xerrno;
+#if defined(ECONNABORTED)
+      xerrno = ECONNABORTED;
+#elif defined(ENOTCONN)
+      xerrno = ENOTCONN;
+#else
+      xerrno = EIO;
+#endif
+
+      pr_trace_msg(trace_channel, 1,
+        "unable to read control command during data transfer: %s",
+        strerror(xerrno));
+      errno = xerrno;
+
+#ifndef PR_DEVEL_NO_DAEMON
+      /* Otherwise, EOF */
+      pr_session_disconnect(NULL, PR_SESS_DISCONNECT_CLIENT_EOF, NULL);
+#else
+      return -1;
+#endif /* PR_DEVEL_NO_DAEMON */
+
+    } else if (cmd != NULL) {
       char *ch;
 
       for (ch = cmd->argv[0]; *ch; ch++)
@@ -924,7 +971,7 @@ int pr_data_xfer(char *cl_buf, int cl_size) {
 
         pr_response_set_pool(cmd->pool);
 
-        pr_response_add_err(R_450, _("%s: data tranfer in progress"),
+        pr_response_add_err(R_450, _("%s: data transfer in progress"),
           cmd->argv[0]);
 
         pr_response_flush(&resp_err_list);
@@ -950,7 +997,7 @@ int pr_data_xfer(char *cl_buf, int cl_size) {
 
         pr_response_set_pool(cmd->pool);
 
-        pr_response_add(R_200, _("%s: data tranfer in progress"),
+        pr_response_add(R_200, _("%s: data transfer in progress"),
           cmd->argv[0]);
 
         pr_response_flush(&resp_list);
@@ -1014,7 +1061,7 @@ int pr_data_xfer(char *cl_buf, int cl_size) {
     pr_trace_msg(trace_channel, 1,
       "data connection is null prior to data transfer (possibly from "
       "aborted transfer), returning '%s' error", strerror(xerrno));
-    pr_log_debug(DEBUG5,
+    pr_log_debug(DEBUG5, 
       "data connection is null prior to data transfer (possibly from "
        "aborted transfer), returning '%s' error", strerror(xerrno));
 
@@ -1024,6 +1071,7 @@ int pr_data_xfer(char *cl_buf, int cl_size) {
 
   if (session.xfer.direction == PR_NETIO_IO_RD) {
     char *buf = session.xfer.buf;
+    pr_buffer_t *pbuf;
 
     if (session.sf_flags & (SF_ASCII|SF_ASCII_OVERRIDE)) {
       int adjlen, buflen;
@@ -1039,11 +1087,28 @@ int pr_data_xfer(char *cl_buf, int cl_size) {
         if (len < 0)
           return -1;
 
+        /* Before we process the data read from the client, generate an event
+         * for any listeners which may want to examine this data.
+         */
+
+        pbuf = pcalloc(session.xfer.p, sizeof(pr_buffer_t));
+        pbuf->buf = buf;
+        pbuf->buflen = len;
+        pbuf->current = pbuf->buf;
+        pbuf->remaining = 0;
+
+        pr_event_generate("core.data-read", pbuf);
+
+        /* The event listeners may have changed the data to write out. */
+        buf = pbuf->buf;
+        len = pbuf->buflen - pbuf->remaining;
+
         if (len > 0) {
           buflen += len;
 
-          if (timeout_stalled)
+          if (timeout_stalled) {
             pr_timer_reset(PR_TIMER_STALLED, ANY_MODULE);
+          }
         }
 
         /* If buflen > 0, data remains in the buffer to be copied. */
@@ -1104,9 +1169,26 @@ int pr_data_xfer(char *cl_buf, int cl_size) {
     } else if ((len = pr_netio_read(session.d->instrm, cl_buf,
         cl_size, 1)) > 0) {
 
+      /* Before we process the data read from the client, generate an event
+       * for any listeners which may want to examine this data.
+       */
+
+      pbuf = pcalloc(session.xfer.p, sizeof(pr_buffer_t));
+      pbuf->buf = buf;
+      pbuf->buflen = len;
+      pbuf->current = pbuf->buf;
+      pbuf->remaining = 0;
+
+      pr_event_generate("core.data-read", pbuf);
+
+      /* The event listeners may have changed the data to write out. */
+      buf = pbuf->buf;
+      len = pbuf->buflen - pbuf->remaining;
+
       /* Non-ASCII mode doesn't need to use session.xfer.buf */
-      if (timeout_stalled)
+      if (timeout_stalled) {
         pr_timer_reset(PR_TIMER_STALLED, ANY_MODULE);
+      }
 
       total += len;
     }
@@ -1120,8 +1202,8 @@ int pr_data_xfer(char *cl_buf, int cl_size) {
 
       pr_signals_handle();
 
-      if (buflen > pr_config_get_xfer_bufsz())
-        buflen = pr_config_get_xfer_bufsz();
+      if (buflen > pr_config_get_server_xfer_bufsz(PR_NETIO_IO_WR))
+        buflen = pr_config_get_server_xfer_bufsz(PR_NETIO_IO_WR);
 
       xferbuflen = buflen;
 
@@ -1144,8 +1226,9 @@ int pr_data_xfer(char *cl_buf, int cl_size) {
         return -1;
 
       if (bwrote > 0) {
-        if (timeout_stalled)
+        if (timeout_stalled) {
           pr_timer_reset(PR_TIMER_STALLED, ANY_MODULE);
+        }
 
         cl_size -= buflen;
         cl_buf += buflen;
@@ -1247,6 +1330,7 @@ pr_sendfile_t pr_data_sendfile(int retr_fd, off_t *offset, off_t count) {
         session.xfer.total_bytes += len;
         session.total_bytes += len;
         session.total_bytes_out += len;
+        session.total_raw_out += len;
 
         return -1;
       }
@@ -1255,16 +1339,19 @@ pr_sendfile_t pr_data_sendfile(int retr_fd, off_t *offset, off_t count) {
 
       /* Only reset the timers if data have actually been written out. */
       if (len > 0) {
-        if (timeout_stalled)
+        if (timeout_stalled) {
           pr_timer_reset(PR_TIMER_STALLED, ANY_MODULE);
+        }
 
-        if (timeout_idle)
+        if (timeout_idle) {
           pr_timer_reset(PR_TIMER_IDLE, ANY_MODULE);
+        }
       }
 
       session.xfer.total_bytes += len;
       session.total_bytes += len;
       session.total_bytes_out += len;
+      session.total_raw_out += len;
       total += len;
 
       pr_signals_handle();
@@ -1357,6 +1444,7 @@ pr_sendfile_t pr_data_sendfile(int retr_fd, off_t *offset, off_t count) {
           session.xfer.total_bytes += len;
           session.total_bytes += len;
           session.total_bytes_out += len;
+          session.total_raw_out += len;
 
           return -1;
         }
@@ -1371,20 +1459,23 @@ pr_sendfile_t pr_data_sendfile(int retr_fd, off_t *offset, off_t count) {
           count -= len;
         }
 
-	*offset += len;
-	
-	if (timeout_stalled)
-	  pr_timer_reset(PR_TIMER_STALLED, ANY_MODULE);
-	
-	if (timeout_idle)
-	  pr_timer_reset(PR_TIMER_IDLE, ANY_MODULE);
-	
-	session.xfer.total_bytes += len;
-	session.total_bytes += len;
-	session.total_bytes_out += len;
-	total += len;
-	
-	continue;
+        *offset += len;
+
+        if (timeout_stalled) {
+          pr_timer_reset(PR_TIMER_STALLED, ANY_MODULE);
+        }
+
+        if (timeout_idle) {
+          pr_timer_reset(PR_TIMER_IDLE, ANY_MODULE);
+        }
+
+        session.xfer.total_bytes += len;
+        session.total_bytes += len;
+        session.total_bytes_out += len;
+        session.total_raw_out += len;
+        total += len;
+
+        continue;
       }
 
       error = errno;
@@ -1400,15 +1491,18 @@ pr_sendfile_t pr_data_sendfile(int retr_fd, off_t *offset, off_t count) {
   if (flags & O_NONBLOCK)
     fcntl(PR_NETIO_FD(session.d->outstrm), F_SETFL, flags);
 
-  if (timeout_stalled)
+  if (timeout_stalled) {
     pr_timer_reset(PR_TIMER_STALLED, ANY_MODULE);
+  }
 
-  if (timeout_idle)
+  if (timeout_idle) {
     pr_timer_reset(PR_TIMER_IDLE, ANY_MODULE);
+  }
 
   session.xfer.total_bytes += len;
   session.total_bytes += len;
   session.total_bytes_out += len;
+  session.total_raw_out += len;
   total += len;
 
   return total;

@@ -1,6 +1,6 @@
 /*
  * ProFTPD - mod_sftp
- * Copyright (c) 2008-2010 TJ Saunders
+ * Copyright (c) 2008-2011 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,7 +24,7 @@
  * DO NOT EDIT BELOW THIS LINE
  * $Archive: mod_sftp.a $
  * $Libraries: -lcrypto -lz $
- * $Id: mod_sftp.c,v 1.29.2.1 2010/03/03 00:55:15 castaglia Exp $
+ * $Id: mod_sftp.c,v 1.49 2011/03/03 21:38:54 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -53,6 +53,7 @@ pool *sftp_pool = NULL;
 conn_t *sftp_conn = NULL;
 unsigned int sftp_sess_state = 0;
 unsigned long sftp_opts = 0UL;
+unsigned int sftp_services = SFTP_SERVICE_FL_SFTP|SFTP_SERVICE_FL_SCP;
 
 static int sftp_engine = 0;
 static const char *sftp_client_version = NULL;
@@ -77,18 +78,19 @@ static int sftp_get_client_version(conn_t *conn) {
 
   while (TRUE) {
     register unsigned int i;
+    int bad_proto = FALSE;
 
     pr_signals_handle();
 
     memset(buf, '\0', sizeof(buf));
 
     for (i = 0; i < sizeof(buf) - 1; i++) {
-      res = sftp_ssh2_packet_sock_read(conn->rfd, &buf[i], 1);
+      res = sftp_ssh2_packet_sock_read(conn->rfd, &buf[i], 1, 0);
       while (res <= 0) {
         if (errno == EINTR) {
           pr_signals_handle();
 
-          res = sftp_ssh2_packet_sock_read(conn->rfd, &buf[i], 1);
+          res = sftp_ssh2_packet_sock_read(conn->rfd, &buf[i], 1, 0);
           continue;
         }
 
@@ -120,11 +122,24 @@ static int sftp_get_client_version(conn_t *conn) {
      * 4.2 does not specify what should happen if the client sends data
      * other than the proper version string initially.
      *
+     * If we have been configured for compatibility with old protocol
+     * implementations, check for "SSH-1.99-" as well.
+     *
      * OpenSSH simply disconnects the client after saying "Protocol mismatch"
-     * if the client's version string does not begin with "SSH-2.0-".  Works
-     * for me.
+     * if the client's version string does not begin with "SSH-2.0-"
+     * (or "SSH-1.99-").  Works for me.
      */
     if (strncmp(buf, "SSH-2.0-", 8) != 0) {
+      bad_proto = TRUE;
+
+      if (sftp_opts & SFTP_OPT_OLD_PROTO_COMPAT) {
+        if (strncmp(buf, "SSH-1.99-", 9) == 0) {
+          bad_proto = FALSE;
+        }
+      } 
+    }
+
+    if (bad_proto) {
       const char *errstr = "Protocol mismatch.\n";
 
       (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
@@ -165,14 +180,29 @@ static void sftp_cmd_loop(server_rec *s, conn_t *conn) {
   pr_session_set_protocol("ssh2");
   sftp_conn = conn;
 
-  res = sftp_kex_send_first_kexinit();
+  if (sftp_opts & SFTP_OPT_PESSIMISTIC_KEXINIT) {
+    /* If we are being pessimistic, we will send our version string to the
+     * client now, and send our KEXINIT message later.
+     */
+    res = sftp_ssh2_packet_send_version();
+
+  } else {
+    /* If we are being optimistic, we can reduce the connection latency
+     * by sending our KEXINIT message now; this will have the server version
+     * string automatically prepended.
+     */  
+    res = sftp_kex_send_first_kexinit();
+  }
+
   if (res < 0) {
-    end_login(1);
+    pr_session_disconnect(&sftp_module, PR_SESS_DISCONNECT_BY_APPLICATION,
+      NULL);
   }
 
   res = sftp_get_client_version(conn);
   if (res < 0) {
-    end_login(1);
+    pr_session_disconnect(&sftp_module, PR_SESS_DISCONNECT_BY_APPLICATION,
+      NULL);
   }
 
   sftp_kex_init(sftp_client_version, SFTP_ID_STRING);
@@ -200,6 +230,15 @@ static void sftp_cmd_loop(server_rec *s, conn_t *conn) {
     pr_netaddr_get_ipstr(conn->local_addr), conn->local_port);
   v = pstrdup(session.pool, buf);
   pr_env_set(session.pool, k, v);
+
+  /* If we didn't send our KEXINIT earlier, send it now. */
+  if (sftp_opts & SFTP_OPT_PESSIMISTIC_KEXINIT) {
+    res = sftp_kex_send_first_kexinit();
+    if (res < 0) {
+      pr_session_disconnect(&sftp_module, PR_SESS_DISCONNECT_BY_APPLICATION,
+        NULL);
+    }
+  }
 
   while (1) {
     pr_signals_handle();
@@ -419,13 +458,42 @@ static uint32_t get_size(const char *bytes, const char *units) {
   return nbytes;
 }
 
+/* usage: SFTPClientAlive count interval */
+MODRET set_sftpclientalive(cmd_rec *cmd) {
+  int count, interval;
+  config_rec *c;
+
+  CHECK_ARGS(cmd, 2);
+  CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
+
+  count = atoi(cmd->argv[1]);
+  if (count < 0) {
+    CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "max count '", cmd->argv[1],
+      "' must be equal to or greater than zero", NULL));
+  }
+
+  interval = atoi(cmd->argv[2]);
+  if (interval < 0) {
+    CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "interval '", cmd->argv[2],
+      "' must be equal to or greater than zero", NULL));
+  }
+
+  c = add_config_param(cmd->argv[0], 2, NULL, NULL);
+  c->argv[0] = palloc(c->pool, sizeof(unsigned int));
+  *((unsigned int *) c->argv[0]) = count;
+  c->argv[1] = palloc(c->pool, sizeof(unsigned int));
+  *((unsigned int *) c->argv[1]) = interval;
+ 
+  return PR_HANDLED(cmd);
+}
+
 /* usage: SFTPClientMatch pattern key1 val1 ... */
 MODRET set_sftpclientmatch(cmd_rec *cmd) {
-#if defined(HAVE_REGEX_H) && defined(HAVE_REGCOMP)
+#ifdef PR_USE_REGEX
   register unsigned int i;
   config_rec *c;
   pr_table_t *tab;
-  regex_t *preg;
+  pr_regex_t *pre;
   int res;
 
   if (cmd->argc < 4) {
@@ -444,15 +512,15 @@ MODRET set_sftpclientmatch(cmd_rec *cmd) {
 
   CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
 
-  preg = pr_regexp_alloc();
+  pre = pr_regexp_alloc(&sftp_module);
 
-  res = regcomp(preg, cmd->argv[1], REG_EXTENDED|REG_NOSUB);
+  res = pr_regexp_compile(pre, cmd->argv[1], REG_EXTENDED|REG_NOSUB);
   if (res != 0) {
     char errstr[200];
 
     memset(errstr, '\0', sizeof(errstr));
-    regerror(res, preg, errstr, sizeof(errstr));
-    pr_regexp_free(preg);
+    pr_regexp_error(res, pre, errstr, sizeof(errstr));
+    pr_regexp_free(NULL, pre);
 
     CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "'", cmd->argv[1], "' failed regex "
       "compilation: ", errstr, NULL));
@@ -460,7 +528,7 @@ MODRET set_sftpclientmatch(cmd_rec *cmd) {
 
   c = add_config_param(cmd->argv[0], 3, NULL, NULL, NULL);
   c->argv[0] = pstrdup(c->pool, cmd->argv[1]);
-  c->argv[1] = preg;
+  c->argv[1] = pre;
 
   tab = pr_table_alloc(c->pool, 0);
 
@@ -612,6 +680,27 @@ MODRET set_sftpclientmatch(cmd_rec *cmd) {
           sizeof(uint32_t)) < 0) {
         CONF_ERROR(cmd, pstrcat(cmd->tmp_pool,
           "error storing 'channelPacketSize' value: ", strerror(errno), NULL));
+      }
+
+      /* Don't forget to advance i past the value. */
+      i++;
+
+    } else if (strcmp(cmd->argv[i], "pessimisticNewkeys") == 0) {
+      int pessimistic_newkeys;
+      void *value;
+
+      pessimistic_newkeys = get_boolean(cmd, i+1);
+      if (pessimistic_newkeys == -1) {
+        CONF_ERROR(cmd, "expected Boolean parameter");
+      }
+
+      value = palloc(c->pool, sizeof(int));
+      *((int *) value) = pessimistic_newkeys;
+
+      if (pr_table_add(tab, pstrdup(c->pool, "pessimisticNewkeys"), value,
+          sizeof(int)) < 0) {
+        CONF_ERROR(cmd, pstrcat(cmd->tmp_pool,
+          "error storing 'pessimisticNewkeys' value: ", strerror(errno), NULL));
       }
 
       /* Don't forget to advance i past the value. */
@@ -955,6 +1044,23 @@ MODRET set_sftpextensions(cmd_rec *cmd) {
           break;
       }
 
+    } else if (strcasecmp(ext, "spaceAvailable") == 0) {
+#ifdef HAVE_SYS_STATVFS_H
+      switch (action) {
+        case '-':
+          ext_flags &= ~SFTP_FXP_EXT_SPACE_AVAIL;
+          break;
+
+        case '+':
+          ext_flags |= SFTP_FXP_EXT_SPACE_AVAIL;
+          break;
+      }
+#else
+      pr_log_debug(DEBUG0, "%s: spaceAvailable extension not supported "
+        "on this system; requires statvfs(3) support", cmd->argv[0]);
+#endif /* !HAVE_SYS_STATVFS_H */
+
+
     } else if (strcasecmp(ext, "statvfs") == 0) {
 #ifdef HAVE_SYS_STATVFS_H
       switch (action) {
@@ -1123,8 +1229,25 @@ MODRET set_sftpoptions(cmd_rec *cmd) {
     if (strcmp(cmd->argv[i], "IgnoreSFTPUploadPerms") == 0) {
       opts |= SFTP_OPT_IGNORE_SFTP_UPLOAD_PERMS;
 
+    } else if (strcmp(cmd->argv[i], "IgnoreSFTPSetPerms") == 0) {
+      opts |= SFTP_OPT_IGNORE_SFTP_SET_PERMS;
+
     } else if (strcmp(cmd->argv[i], "IgnoreSCPUploadPerms") == 0) {
       opts |= SFTP_OPT_IGNORE_SCP_UPLOAD_PERMS;
+
+    } else if (strcmp(cmd->argv[i], "OldProtocolCompat") == 0) {
+      opts |= SFTP_OPT_OLD_PROTO_COMPAT;
+
+      /* This option also automatically enables PessimisticKexint,
+       * as per the comments in RFC4253, Section 5.1.
+       */
+      opts |= SFTP_OPT_PESSIMISTIC_KEXINIT;
+ 
+    } else if (strcmp(cmd->argv[i], "PessimisticKexinit") == 0) {
+      opts |= SFTP_OPT_PESSIMISTIC_KEXINIT;
+
+    } else if (strcmp(cmd->argv[i], "MatchKeySubject") == 0) {
+      opts |= SFTP_OPT_MATCH_KEY_SUBJECT;
 
     } else {
       CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, ": unknown SFTPOption '",
@@ -1287,6 +1410,21 @@ static void sftp_exit_ev(const void *event_data, void *user_data) {
   sftp_logfd = -1;
 }
 
+static void sftp_ban_class_ev(const void *event_data, void *user_data) {
+  sftp_disconnect_send(SFTP_SSH2_DISCONNECT_BY_APPLICATION, "Banned",
+    __FILE__, __LINE__, "");
+}
+
+static void sftp_ban_host_ev(const void *event_data, void *user_data) {
+  sftp_disconnect_send(SFTP_SSH2_DISCONNECT_BY_APPLICATION, "Banned",
+    __FILE__, __LINE__, "");
+}
+
+static void sftp_ban_user_ev(const void *event_data, void *user_data) {
+  sftp_disconnect_send(SFTP_SSH2_DISCONNECT_BY_APPLICATION, "Banned",
+    __FILE__, __LINE__, "");
+}
+
 static void sftp_max_conns_ev(const void *event_data, void *user_data) {
   sftp_disconnect_send(SFTP_SSH2_DISCONNECT_TOO_MANY_CONNECTIONS,
     "Maximum connections for host/user reached", __FILE__, __LINE__, "");
@@ -1389,6 +1527,9 @@ static int sftp_init(void) {
     sftp_max_conns_ev, NULL);
   pr_event_register(&sftp_module, "mod_auth.max-hosts-per-user",
     sftp_max_conns_ev, NULL);
+  pr_event_register(&sftp_module, "mod_ban.ban-class", sftp_ban_class_ev, NULL);
+  pr_event_register(&sftp_module, "mod_ban.ban-host", sftp_ban_host_ev, NULL);
+  pr_event_register(&sftp_module, "mod_ban.ban-user", sftp_ban_user_ev, NULL);
 #if defined(PR_SHARED_MODULE)
   pr_event_register(&sftp_module, "core.module-unload", sftp_mod_unload_ev,
     NULL);
@@ -1536,6 +1677,17 @@ static int sftp_sess_init(void) {
     sftp_opts = *((unsigned long *) c->argv[0]);
   }
 
+  c = find_config(main_server->conf, CONF_PARAM, "DisplayLogin", FALSE);
+  if (c) {
+    const char *path;
+
+    path = c->argv[0];
+    if (sftp_fxp_set_displaylogin(path) < 0) {
+      (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+        "error using DisplayLogin '%s': %s", path, strerror(errno));
+    }
+  }
+
   c = find_config(main_server->conf, CONF_PARAM, "TimesGMT", FALSE);
   if (c) {
     times_gmt = *((unsigned char *) c->argv[0]);
@@ -1549,6 +1701,20 @@ static int sftp_sess_init(void) {
   }
 
   sftp_fxp_use_gmt(times_gmt);
+
+  c = find_config(main_server->conf, CONF_PARAM, "SFTPClientAlive", FALSE);
+  if (c) {
+    unsigned int count, interval;
+
+    count = *((unsigned int *) c->argv[0]);
+    interval = *((unsigned int *) c->argv[1]);
+
+    (void) sftp_ssh2_packet_set_client_alive(count, interval);
+
+    pr_trace_msg("ssh2", 7,
+      "client alive checks requested after %u secs, up to %u times",
+      interval, count);
+  }
 
   /* Check for any rekey policy. */
   c = find_config(main_server->conf, CONF_PARAM, "SFTPRekey", FALSE);
@@ -1579,8 +1745,8 @@ static int sftp_sess_init(void) {
 
         rekey_timeout = *((int *) c->argv[3]);
 
-        pr_trace_msg("ssh2", 6, "SSH2 rekeying has %d secs to complete",
-          rekey_timeout);
+        pr_trace_msg("ssh2", 6, "SSH2 rekeying has %d %s to complete",
+          rekey_timeout, rekey_timeout != 1 ? "secs" : "sec");
         sftp_kex_rekey_set_timeout(rekey_timeout);
       }
 
@@ -1667,6 +1833,7 @@ static conftable sftp_conftab[] = {
   { "SFTPAuthorizedHostKeys",	set_sftpauthorizedkeys,		NULL },
   { "SFTPAuthorizedUserKeys",	set_sftpauthorizedkeys,		NULL },
   { "SFTPCiphers",		set_sftpciphers,		NULL },
+  { "SFTPClientAlive",		set_sftpclientalive,		NULL },
   { "SFTPClientMatch",		set_sftpclientmatch,		NULL },
   { "SFTPCompression",		set_sftpcompression,		NULL },
   { "SFTPCryptoDevice",		set_sftpcryptodevice,		NULL },
