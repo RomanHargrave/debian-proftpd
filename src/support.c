@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2010 The ProFTPD Project team
+ * Copyright (c) 2001-2011 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -27,24 +27,10 @@
 /* Various basic support routines for ProFTPD, used by all modules
  * and not specific to one or another.
  *
- * $Id: support.c,v 1.104.2.1 2010/06/15 16:58:38 castaglia Exp $
+ * $Id: support.c,v 1.109 2011/01/12 06:54:49 castaglia Exp $
  */
 
 #include "conf.h"
-
-#include <signal.h>
-
-#ifdef HAVE_SYS_STATVFS_H
-# include <sys/statvfs.h>
-#elif defined(HAVE_SYS_VFS_H)
-# include <sys/vfs.h>
-#elif defined(HAVE_SYS_MOUNT_H)
-# include <sys/mount.h>
-#endif
-
-#ifdef AIX3
-# include <sys/statfs.h>
-#endif
 
 #ifdef PR_USE_OPENSSL
 # include <openssl/crypto.h>
@@ -415,7 +401,7 @@ char *dir_abs_path(pool *p, const char *path, int interpolate) {
  * PATH, or 0 if it doesn't exist. Catch symlink loops using LAST_INODE and
  * RCOUNT.
  */
-static mode_t _symlink(char *path, ino_t last_inode, int rcount) {
+static mode_t _symlink(const char *path, ino_t last_inode, int rcount) {
   char buf[PR_TUNABLE_PATH_MAX + 1];
   struct stat sbuf;
   int i;
@@ -438,15 +424,17 @@ static mode_t _symlink(char *path, ino_t last_inode, int rcount) {
       return 0;
     }
 
-    if (S_ISLNK(sbuf.st_mode))
+    if (S_ISLNK(sbuf.st_mode)) {
       return _symlink(buf, (ino_t) sbuf.st_ino, rcount);
+    }
+
     return sbuf.st_mode;
   }
 
   return 0;
 }
 
-mode_t file_mode(char *path) {
+mode_t file_mode(const char *path) {
   struct stat sbuf;
   mode_t res = 0;
 
@@ -455,12 +443,14 @@ mode_t file_mode(char *path) {
     if (S_ISLNK(sbuf.st_mode)) {
       res = _symlink(path, (ino_t) 0, 0);
 
-      if (res == 0)
+      if (res == 0) {
 	/* a dangling symlink, but it exists to rename or delete. */
 	res = sbuf.st_mode;
+      }
 
-    } else
+    } else {
       res = sbuf.st_mode;
+    }
   }
 
   return res;
@@ -471,15 +461,19 @@ mode_t file_mode(char *path) {
  * If DIRP == -1, fail unless PATH exists; the caller doesn't care whether
  * PATH is a file or a directory.
  */
-static int _exists(char *path, int dirp) {
+static int _exists(const char *path, int dirp) {
   mode_t fmode;
 
-  if ((fmode = file_mode(path)) != 0) {
-    if (dirp == 1 && !S_ISDIR(fmode))
+  fmode = file_mode(path);
+  if (fmode != 0) {
+    if (dirp == 1 &&
+        !S_ISDIR(fmode)) {
       return FALSE;
 
-    else if (dirp == 0 && S_ISDIR(fmode))
+    } else if (dirp == 0 &&
+               S_ISDIR(fmode)) {
       return FALSE;
+    }
 
     return TRUE;
   }
@@ -487,15 +481,15 @@ static int _exists(char *path, int dirp) {
   return FALSE;
 }
 
-int file_exists(char *path) {
+int file_exists(const char *path) {
   return _exists(path, 0);
 }
 
-int dir_exists(char *path) {
+int dir_exists(const char *path) {
   return _exists(path, 1);
 }
 
-int exists(char *path) {
+int exists(const char *path) {
   return _exists(path, -1);
 }
 

@@ -21,7 +21,7 @@
  * the resulting executable, without including the source code for OpenSSL in
  * the source distribution.
  *
- * $Id: wtmp.c,v 1.2.2.1 2010/03/14 01:51:33 castaglia Exp $
+ * $Id: wtmp.c,v 1.4 2010/03/14 01:52:04 castaglia Exp $
  */
 
 #include "conf.h"

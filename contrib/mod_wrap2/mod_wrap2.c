@@ -1,7 +1,7 @@
 /*
  * ProFTPD: mod_wrap2 -- tcpwrappers-like access control
  *
- * Copyright (c) 2000-2010 TJ Saunders
+ * Copyright (c) 2000-2011 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -36,6 +36,7 @@ typedef struct regtab_obj {
 } wrap2_regtab_t;
 
 module wrap2_module;
+unsigned long wrap2_opts = 0UL;
 
 /* Wrap tables for the current session */
 static char *wrap2_allow_table = NULL;
@@ -51,7 +52,7 @@ static wrap2_regtab_t *wrap2_regtab_list = NULL;
 static int wrap2_logfd = -1;
 static char *wrap2_logname = NULL;
 
-static unsigned char wrap2_engine = FALSE;
+static int wrap2_engine = FALSE;
 static char *wrap2_service_name = WRAP2_DEFAULT_SERVICE_NAME;
 static char *wrap2_client_name = NULL;
 static config_rec *wrap2_ctxt = NULL;
@@ -305,9 +306,10 @@ static char *wrap2_get_user(wrap2_conn_t *conn) {
 }
 
 static char *wrap2_get_hostaddr(wrap2_host_t *host) {
-  if (*host->addr == '\0')
+  if (*host->addr == '\0') {
     sstrncpy(host->addr, pr_netaddr_get_ipstr(session.c->remote_addr),
       sizeof(host->addr));
+  }
 
   return host->addr;
 }
@@ -316,6 +318,7 @@ static char *wrap2_get_hostname(wrap2_host_t *host) {
 
   if (*host->name == '\0') {
     int reverse_dns;
+    size_t namelen;
 
     /* Manually tweak the UseReverseDNS setting, and any caches, so that
      * we really do use the DNS name here if possible.
@@ -327,8 +330,15 @@ static char *wrap2_get_hostname(wrap2_host_t *host) {
     sstrncpy(host->name, pr_netaddr_get_dnsstr(session.c->remote_addr),
       sizeof(host->name));
 
+    /* If the retrieved hostname ends in a trailing period, trim it off. */
+    namelen = strlen(host->name); 
+    if (host->name[namelen-1] == '.') {
+      host->name[namelen-1] = '\0';
+      namelen--;
+    }
+
     pr_netaddr_set_reverse_dns(reverse_dns);
-    session.c->remote_addr->na_have_dnsstr = FALSE;
+    session.c->remote_addr->na_have_dnsstr = TRUE;
   }
 
   return host->name;
@@ -446,11 +456,15 @@ static unsigned char wrap2_match_netmask(const char *net_tok,
    * access control language. John P. Rouillard <rouilj@cs.umb.edu>.
    */
 
-  if ((addr = wrap2_addr_a2n(str)) == INADDR_NONE)
+  addr = wrap2_addr_a2n(str);
+  if (addr == INADDR_NONE) {
     return FALSE;
+  }
 
-  if ((net = wrap2_addr_a2n(net_tok)) == INADDR_NONE ||
-      (mask = wrap2_addr_a2n(mask_tok)) == INADDR_NONE) {
+  net = wrap2_addr_a2n(net_tok);
+  mask = wrap2_addr_a2n(mask_tok);
+  if (net == INADDR_NONE ||
+      mask == INADDR_NONE) {
     wrap2_log("warning: bad net/mask expression: '%s/%s'", net_tok, mask_tok);
     return FALSE;
   }
@@ -512,13 +526,52 @@ static unsigned char wrap2_match_host(char *tok, wrap2_host_t *host) {
     return (strncasecmp(tok, ip_str, len) == 0);
 
   } else if (tok[0] == '.') {
-    char *name;
+    register unsigned int i;
+    char *primary_name;
+    array_header *dns_names;
 
     /* Suffix */
-    name = wrap2_get_hostname(host);
-    len = strlen(name) - strlen(tok);
+    primary_name = wrap2_get_hostname(host);
+    len = strlen(primary_name) - strlen(tok);
 
-    return (len > 0 && (strcasecmp(tok, name + len) == 0));
+    wrap2_log("comparing client hostname '%s' (part %s) against DNS "
+      "pattern '%s'", primary_name, primary_name+len, tok);
+
+    if (len > 0 &&
+        strcasecmp(tok, primary_name + len) == 0) {
+      return TRUE;
+    }
+
+    if (!(wrap2_opts & WRAP_OPT_CHECK_ALL_NAMES)) {
+      return FALSE;
+    }
+
+    dns_names = pr_netaddr_get_dnsstr_list(session.pool,
+      session.c->remote_addr);
+    if (dns_names != NULL &&
+        dns_names->nelts > 0) {
+      char **names;
+
+      names = dns_names->elts;
+      for (i = 0; i < dns_names->nelts; i++) {
+        char *name;
+
+        name = names[i];
+        if (name != NULL) {
+          len = strlen(name) - strlen(tok);
+
+          wrap2_log("comparing client hostname '%s' (part %s) against DNS "
+            "pattern '%s'", name, name+len, tok);
+
+          if (len > 0 &&
+              strcasecmp(tok, name + len) == 0) {
+            return TRUE;
+          }
+        }
+      }
+    }
+
+    return FALSE;
 
 #ifdef PR_USE_IPV6 
   } else if (pr_netaddr_use_ipv6() &&
@@ -529,24 +582,34 @@ static unsigned char wrap2_match_host(char *tok, wrap2_host_t *host) {
 
     /* IPv6 address */
 
-    if (pr_netaddr_get_family(session.c->remote_addr) == AF_INET)
+    if (pr_netaddr_get_family(session.c->remote_addr) == AF_INET) {
       /* No need to try to match an IPv6 address against an IPv4 client. */
       return FALSE;
+    }
 
     /* Find the terminating ']'. */
     cp = strchr(tok, ']');
-    if (cp)
-      *cp = '\0';
+    if (cp == NULL) {
+      wrap2_log("bad IPv6 address syntax: '%s'", tok);
+      return FALSE;
+    }
+
+    *cp = '\0';
 
     /* Lookup a netaddr for the IPv6 address. */
-    acl_addr = pr_netaddr_get_addr(wrap2_pool, tok, NULL);
+    acl_addr = pr_netaddr_get_addr(wrap2_pool, tok + 1, NULL);
     if (!acl_addr) {
-      wrap2_log("unable to resolve IPv6 address '%s'", tok);
+      wrap2_log("unable to resolve IPv6 address '%s'", tok + 1);
+      return FALSE;
+    }
+
+    if (*(cp + 1) != '/') {
+      wrap2_log("bad mask syntax: '%s'", cp + 1);
       return FALSE;
     }
 
     /* Determine the number of mask bits. */
-    nmaskbits = strtol(cp + 1, &tmp, 10);
+    nmaskbits = strtol(cp + 2, &tmp, 10);
     if (tmp && *tmp) {
       wrap2_log("bad mask syntax: '%s'", tmp);
       return FALSE;
@@ -585,9 +648,44 @@ static unsigned char wrap2_match_host(char *tok, wrap2_host_t *host) {
       }
     }
 
-    if (WRAP2_IS_NOT_INADDR(tok) &&
-        wrap2_match_string(tok, wrap2_get_hostname(host))) {
-      return TRUE;
+    if (WRAP2_IS_NOT_INADDR(tok)) {
+      register unsigned int i;
+      char *primary_name;
+      array_header *dns_names;
+
+      primary_name = wrap2_get_hostname(host);
+      wrap2_log("comparing client hostname '%s' against DNS name '%s'",
+        primary_name, tok);
+
+      if (wrap2_match_string(tok, primary_name)) {
+        return TRUE;
+      }
+
+      if (!(wrap2_opts & WRAP_OPT_CHECK_ALL_NAMES)) {
+        return FALSE;
+      }
+
+      dns_names = pr_netaddr_get_dnsstr_list(session.pool,
+        session.c->remote_addr);
+      if (dns_names != NULL &&
+          dns_names->nelts > 0) {
+        char **names;
+
+        names = dns_names->elts;
+        for (i = 0; i < dns_names->nelts; i++) {
+          char *name;
+
+          name = names[i];
+          if (name != NULL) {
+            wrap2_log("comparing client hostname '%s' against DNS name '%s'",
+              name, tok);
+
+            if (wrap2_match_string(tok, name)) {
+              return TRUE;
+            }
+          }
+        }
+      }
     }
   }
 
@@ -1275,12 +1373,13 @@ MODRET set_wrapengine(cmd_rec *cmd) {
   CHECK_ARGS(cmd, 1);
   CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
 
-  if ((bool = get_boolean(cmd, 1)) == -1)
+  bool = get_boolean(cmd, 1);
+  if (bool == -1)
     CONF_ERROR(cmd, "expecting Boolean parameter");
 
   c = add_config_param(cmd->argv[0], 1, NULL);
-  c->argv[0] = pcalloc(c->pool, sizeof(unsigned char));
-  *((unsigned char *) c->argv[0]) = (unsigned char) bool;
+  c->argv[0] = pcalloc(c->pool, sizeof(int));
+  *((int *) c->argv[0]) = bool;
 
   return PR_HANDLED(cmd);
 }
@@ -1360,6 +1459,38 @@ MODRET set_wraplog(cmd_rec *cmd) {
   CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
 
   add_config_param_str(cmd->argv[0], 1, cmd->argv[1]);
+
+  return PR_HANDLED(cmd);
+}
+
+/* usage: WrapOptions opt1 ... optN */
+MODRET set_wrapoptions(cmd_rec *cmd) {
+  config_rec *c = NULL;
+  register unsigned int i = 0;
+  unsigned long opts = 0UL;
+
+  if (cmd->argc-1 == 0)
+    CONF_ERROR(cmd, "wrong number of parameters");
+
+  CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
+
+  c = add_config_param(cmd->argv[0], 1, NULL);
+
+  for (i = 1; i < cmd->argc; i++) {
+    if (strcmp(cmd->argv[i], "CheckOnConnect") == 0) {
+      opts |= WRAP_OPT_CHECK_ON_CONNECT;
+
+    } else if (strcmp(cmd->argv[i], "CheckAllNames") == 0) {
+      opts |= WRAP_OPT_CHECK_ALL_NAMES;
+
+    } else {
+      CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, ": unknown WrapOption '",
+        cmd->argv[i], "'", NULL));
+    }
+  }
+
+  c->argv[0] = pcalloc(c->pool, sizeof(unsigned long));
+  *((unsigned long *) c->argv[0]) = opts;
 
   return PR_HANDLED(cmd);
 }
@@ -1531,11 +1662,12 @@ MODRET wrap2_pre_pass(cmd_rec *cmd) {
       session.login_gid = pw->pw_gid;
 
       gr = pr_auth_getgrgid(cmd->pool, session.login_gid);
-      if (gr != NULL)
+      if (gr != NULL) {
         session.group = pstrdup(cmd->pool, gr->gr_name);
 
-      else
+      } else {
         wrap2_log("unable to resolve GID for '%s'", user);
+      }
 
     } else {
       wrap2_log("unable to resolve UID for '%s'", user);
@@ -1549,9 +1681,12 @@ MODRET wrap2_pre_pass(cmd_rec *cmd) {
   
   c = find_config(wrap2_ctxt ? wrap2_ctxt->subset : main_server->conf,
     CONF_PARAM, "WrapUserTables", FALSE);
-
   while (c) {
-    array_header *user_array = make_array(cmd->tmp_pool, 0, sizeof(char *));
+    array_header *user_array;
+
+    pr_signals_handle();
+
+    user_array = make_array(cmd->tmp_pool, 0, sizeof(char *));
     *((char **) push_array(user_array)) = pstrdup(cmd->tmp_pool, user);
 
     /* Check the user OR expression. Do not forget the offset, to skip
@@ -1576,13 +1711,18 @@ MODRET wrap2_pre_pass(cmd_rec *cmd) {
   /* Next, search for group-specific access tables.  Multiple WrapGroupTables
    * directives are allowed.
    */ 
-  if (!have_tables)
+  if (!have_tables) {
     c = find_config(wrap2_ctxt ? wrap2_ctxt->subset : main_server->conf,
       CONF_PARAM, "WrapGroupTables", FALSE);
+  }
 
   while (c) {
-    array_header *gid_array = make_array(cmd->pool, 0, sizeof(gid_t));
-    array_header *group_array = make_array(cmd->pool, 0, sizeof(char *));
+    array_header *gid_array, *group_array;
+
+    pr_signals_handle();
+
+    gid_array = make_array(cmd->pool, 0, sizeof(gid_t));
+    group_array = make_array(cmd->pool, 0, sizeof(char *));
 
     if (pr_auth_getgroups(cmd->pool, user, &gid_array, &group_array) < 1) {
       wrap2_log("no supplemental groups found for user '%s'", user);
@@ -1612,9 +1752,10 @@ MODRET wrap2_pre_pass(cmd_rec *cmd) {
   /* Finally for globally-applicable access files.  Only one such directive
    * is allowed.
    */
-  if (!have_tables)
+  if (!have_tables) {
     c = find_config(wrap2_ctxt ? wrap2_ctxt->subset : main_server->conf,
       CONF_PARAM, "WrapTables", FALSE);
+  }
 
   if (c) {
     wrap2_allow_table = c->argv[0];
@@ -1630,7 +1771,6 @@ MODRET wrap2_pre_pass(cmd_rec *cmd) {
     wrap2_log("using '%s' for deny table", wrap2_deny_table);
 
   } else {
-
     wrap2_log("no tables configured, allowing connection");
     return PR_DECLINED(cmd);
   }
@@ -1661,11 +1801,12 @@ MODRET wrap2_pre_pass(cmd_rec *cmd) {
      */
     msg = get_param_ptr(wrap2_ctxt ? wrap2_ctxt->subset : main_server->conf,
       "WrapDenyMsg", FALSE);
-    if (msg != NULL)
+    if (msg != NULL) {
       msg = sreplace(cmd->tmp_pool, msg, "%u", user, NULL);
+    }
 
     pr_response_send(R_530, "%s", msg ? msg : _("Access denied"));
-    end_login(0);
+    pr_session_disconnect(&wrap2_module, PR_SESS_DISCONNECT_MODULE_ACL, NULL);
   }
 
   wrap2_log("allowed connection from %s", wrap2_get_client(&conn));
@@ -1770,17 +1911,18 @@ static int wrap2_init(void) {
 }
 
 static int wrap2_sess_init(void) {
-  unsigned char *engine = NULL;
+  config_rec *c;
 
-  engine = get_param_ptr(main_server->conf, "WrapEngine", FALSE);
-  if (engine != NULL &&
-      *engine == TRUE)
-    wrap2_engine = TRUE;
+  c = find_config(main_server->conf, CONF_PARAM, "WrapEngine", FALSE);
+  if (c) {
+    wrap2_engine = *((int *) c->argv[0]);
+  }
 
-  else {
-    wrap2_engine = FALSE;
+  if (!wrap2_engine) {
     return 0;
   }
+
+  wrap2_openlog();
 
   /* Look up any configured WrapServiceName */
   wrap2_service_name = get_param_ptr(main_server->conf, "WrapServiceName",
@@ -1788,10 +1930,59 @@ static int wrap2_sess_init(void) {
   if (wrap2_service_name == NULL)
     wrap2_service_name = WRAP2_DEFAULT_SERVICE_NAME;
 
-  wrap2_openlog();
-
   /* Make sure that tables will be closed when the child exits. */
   pr_event_register(&wrap2_module, "core.exit", wrap2_exit_ev, NULL);
+
+  c = find_config(main_server->conf, CONF_PARAM, "WrapOptions", FALSE);
+  if (c) {
+    wrap2_opts = *((unsigned long *) c->argv[0]);
+  }
+
+  if (wrap2_opts & WRAP_OPT_CHECK_ON_CONNECT) {
+    c = find_config(main_server->conf, CONF_PARAM, "WrapTables", FALSE);
+    if (c) {
+      wrap2_conn_t conn;
+
+      wrap2_allow_table = c->argv[0];
+      wrap2_deny_table = c->argv[1];
+      wrap2_client_name = "";
+
+      wrap2_log("using '%s' for allow table", wrap2_allow_table);
+      wrap2_log("using '%s' for deny table", wrap2_deny_table);
+      wrap2_log("looking under service name '%s'", wrap2_service_name);
+
+      memset(&conn, '\0', sizeof(conn));
+      wrap2_conn_set(&conn, WRAP2_CONN_DAEMON, wrap2_service_name,
+        WRAP2_CONN_SOCK_FD, session.c->rfd, 0);
+
+      wrap2_log("%s", "checking access rules for connection");
+
+      if (strcasecmp(wrap2_get_hostname(conn.client), WRAP2_PARANOID) == 0 ||
+          !wrap2_allow_access(&conn)) {
+        char *msg = NULL;
+
+        /* Log the denied connection */
+        wrap2_log("refused connection from %s", wrap2_get_client(&conn));
+
+        /* Broadcast this event to any interested listeners.  We use the same
+         * event name as mod_wrap for consistency.
+         */
+        pr_event_generate("mod_wrap.connection-denied", NULL);
+
+        /* Check for a configured WrapDenyMsg.  If not present, then use the
+         * default denied message.
+         */
+        msg = get_param_ptr(main_server->conf, "WrapDenyMsg", FALSE);
+        if (msg != NULL) {
+          msg = sreplace(session.pool, msg, "%u", "unknown", NULL);
+        }
+
+        pr_response_send(R_530, "%s", msg ? msg : _("Access denied"));
+        pr_session_disconnect(&wrap2_module, PR_SESS_DISCONNECT_MODULE_ACL,
+          NULL);
+      }
+    }
+  }
 
   return 0;
 }
@@ -1805,6 +1996,7 @@ static conftable wrap2_conftab[] = {
   { "WrapEngine",		set_wrapengine,		NULL },
   { "WrapGroupTables",		set_wrapgrouptables,	NULL },
   { "WrapLog",			set_wraplog,		NULL },
+  { "WrapOptions",		set_wrapoptions,	NULL },
   { "WrapServiceName",		set_wrapservicename,	NULL },
   { "WrapTables",		set_wraptables,		NULL },
   { "WrapUserTables",		set_wrapusertables,	NULL },

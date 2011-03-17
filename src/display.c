@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2004-2010 The ProFTPD Project team
+ * Copyright (c) 2004-2011 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,14 +23,14 @@
  */
 
 /* Display of files
- * $Id: display.c,v 1.16.2.4 2010/12/17 23:56:52 castaglia Exp $
+ * $Id: display.c,v 1.25 2011/02/21 02:32:59 castaglia Exp $
  */
 
 #include "conf.h"
 
 static int first_msg_sent = FALSE;
 static const char *first_msg = NULL;
-const const char *prev_msg = NULL;
+static const char *prev_msg = NULL;
 
 static void format_size_str(char *buf, size_t buflen, off_t size) {
   char units[] = {'K', 'M', 'G', 'T', 'P'};
@@ -46,17 +46,10 @@ static void format_size_str(char *buf, size_t buflen, off_t size) {
   snprintf(buf, buflen, "%.3" PR_LU "%cB", (pr_off_t) size, units[i]);
 }
 
-int pr_display_add_line(pool *p, const char *resp_code,
+static int display_add_line(pool *p, const char *resp_code,
     const char *resp_msg) {
 
-  /* Handle the case where the data to Display might contain only one line.
-   *
-   * We _could_ just use pr_response_add(), and let the response code
-   * automatically handle all of the multiline response formatting.
-   * However, some of the Display files are at times waiting for the
-   * response chains to be flushed, which won't work (e.g. login, logout).
-   * Thus we have to deal with multiline files appropriately here.
-   */
+  /* Handle the case where the data to Display might contain only one line. */
 
   if (first_msg_sent == FALSE &&
       first_msg == NULL) {
@@ -74,7 +67,7 @@ int pr_display_add_line(pool *p, const char *resp_code,
   }
 
   if (prev_msg != NULL) {
-    if (MultilineRFC2228) {
+    if (session.multiline_rfc2228) {
       pr_response_send_raw("%s-%s", resp_code, prev_msg);
 
     } else {
@@ -86,8 +79,7 @@ int pr_display_add_line(pool *p, const char *resp_code,
   return 0;
 }
 
-int pr_display_flush_lines(pool *p, const char *resp_code, int flags) {
-
+static int display_flush_lines(pool *p, const char *resp_code, int flags) {
   if (first_msg != NULL) {
     if (session.auth_mech != NULL) {
       if (flags & PR_DISPLAY_FL_NO_EOM) {
@@ -108,7 +100,7 @@ int pr_display_flush_lines(pool *p, const char *resp_code, int flags) {
 
   } else {
     if (prev_msg) {
-      if (MultilineRFC2228) {
+      if (session.multiline_rfc2228) {
         pr_response_send_raw("%s-%s", resp_code, prev_msg);
 
       } else {
@@ -134,7 +126,7 @@ static int display_fh(pr_fh_t *fh, const char *fs, const char *code,
     int flags) {
   struct stat st;
   char buf[PR_TUNABLE_BUFFER_SIZE] = {'\0'};
-  int len;
+  int len, res;
   unsigned int *current_clients = NULL;
   unsigned int *max_clients = NULL;
   off_t fs_size = 0;
@@ -158,15 +150,16 @@ static int display_fh(pr_fh_t *fh, const char *fs, const char *code,
   pr_fsio_fstat(fh, &st);
   fh->fh_iosz = st.st_blksize;
 
-#if defined(HAVE_STATFS) || defined(HAVE_SYS_STATVFS_H) || \
-   defined(HAVE_SYS_VFS_H)
-  fs_size = pr_fs_getsize((fs ? (char *) fs : (char *) fh->fh_path));
+  res = pr_fs_getsize2(fh->fh_path, &fs_size);
+  if (res < 0 &&
+      errno != ENOSYS) {
+    (void) pr_log_debug(DEBUG7, "error getting filesystem size for '%s': %s",
+      fh->fh_path, strerror(errno));
+    fs_size = 0;
+  }
+
   snprintf(mg_size, sizeof(mg_size), "%" PR_LU, (pr_off_t) fs_size);
   format_size_str(mg_size_units, sizeof(mg_size_units), fs_size);
-#else
-  snprintf(mg_size, sizeof(mg_size), "%" PR_LU, (pr_off_t) fs_size);
-  format_size_str(mg_size_units, sizeof(mg_size_units), fs_size);
-#endif
 
   p = make_sub_pool(session.pool);
   pr_pool_tag(p, "Display Pool");
@@ -206,6 +199,8 @@ static int display_fh(pr_fh_t *fh, const char *fs, const char *code,
       FALSE);
 
     while (maxc) {
+      pr_signals_handle();
+
       if (strcmp(maxc->argv[0], session.class->cls_name) != 0) {
         maxc = find_config_next(maxc, maxc->next, CONF_PARAM,
           "MaxClientsPerClass", FALSE);
@@ -287,7 +282,8 @@ static int display_fh(pr_fh_t *fh, const char *fs, const char *code,
     buf[sizeof(buf)-1] = '\0';
     len = strlen(buf);
 
-    while(len && (buf[len-1] == '\r' || buf[len-1] == '\n')) {
+    while (len &&
+           (buf[len-1] == '\r' || buf[len-1] == '\n')) {
       buf[len-1] = '\0';
       len--;
     }
@@ -386,10 +382,23 @@ static int display_fh(pr_fh_t *fh, const char *fs, const char *code,
 
     sstrncpy(buf, outs, sizeof(buf));
 
-    pr_display_add_line(p, code, outs);
+    if (flags & PR_DISPLAY_FL_SEND_NOW) {
+      /* Normally we use pr_response_add(), and let the response code
+       * automatically handle all of the multiline response formatting.
+       * However, some of the Display files are at times waiting for the
+       * response chains to be flushed, which won't work (i.e. DisplayConnect
+       * and DisplayQuit).
+       */
+      display_add_line(p, code, outs);
+
+    } else {
+      pr_response_add(code, "%s", outs);
+    }
   }
 
-  pr_display_flush_lines(p, code, flags);
+  if (flags & PR_DISPLAY_FL_SEND_NOW) {
+    display_flush_lines(p, code, flags);
+  }
 
   destroy_pool(p);
   return 0;

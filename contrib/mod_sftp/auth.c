@@ -1,6 +1,6 @@
 /*
  * ProFTPD - mod_sftp user authentication
- * Copyright (c) 2008-2010 TJ Saunders
+ * Copyright (c) 2008-2011 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: auth.c,v 1.23.2.2 2010/04/09 18:26:01 castaglia Exp $
+ * $Id: auth.c,v 1.31 2011/01/23 22:23:13 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -40,6 +40,7 @@
 #include "keystore.h"
 #include "kbdint.h"
 #include "utf8.h"
+#include "display.h"
 
 /* This value of 6 is the same default as OpenSSH's MaxAuthTries. */
 static unsigned int auth_attempts_max = 6;
@@ -386,6 +387,30 @@ static int setup_env(pool *p, char *user) {
     session.wtmp_log = FALSE;
   }
 
+  /* As per Bug#3482, we need to disable WtmpLog for FreeBSD 9.0, as
+   * an interim measure.
+   *
+   * The issue is that some platforms update multiple files for a single
+   * pututxline(3) call; proftpd tries to update those files manually,
+   * do to chroots (after which a pututxline(3) call will fail).  A proper
+   * solution requires a separate process, running with the correct
+   * privileges, which would handle wtmp logging. The proftpd session
+   * processes would send messages to this logging daemon (via Unix domain
+   * socket, or FIFO, or TCP socket).
+   *
+   * Also note that this hack to disable WtmpLog may need to be extended
+   * to other platforms in the future.
+   */
+#if defined(HAVE_UTMPX_H) && \
+    defined(__FreeBSD_version) && __FreeBSD_version >= 900007
+  if (session.wtmp_log == TRUE) {
+    session.wtmp_log = FALSE;
+
+    pr_log_debug(DEBUG5,
+      "WtpmLog automatically disabled; see Bug#3482 for details");
+  }
+#endif
+
   PRIVS_ROOT
 
   if (session.wtmp_log) {
@@ -460,8 +485,16 @@ static int setup_env(pool *p, char *user) {
   pr_signals_unblock();
 
   /* Should we give up root privs completely here? */
-  PRIVS_REVOKE
-  session.disable_id_switching = TRUE;
+  c = find_config(main_server->conf, CONF_PARAM, "RootRevoke", FALSE);
+  if (c != NULL &&
+      *((int *) c->argv[0]) == FALSE) {
+    pr_log_debug(DEBUG8, MOD_SFTP_VERSION
+      ": retaining root privileges per RootRevoke setting");
+
+  } else {
+    PRIVS_REVOKE
+    session.disable_id_switching = TRUE;
+  }
 
 #ifdef HAVE_GETEUID
   if (getegid() != pw->pw_gid ||
@@ -563,10 +596,10 @@ static int setup_env(pool *p, char *user) {
 
 static int send_userauth_banner_file(void) {
   struct ssh2_packet *pkt;
-  char *buf, *ptr, *mesg = "", *path;
-  char data[PR_TUNABLE_BUFFER_SIZE];
-  uint32_t buflen, bufsz;
+  char *path, *buf, *ptr;
+  const char *msg;
   int res;
+  uint32_t buflen, bufsz;
   config_rec *c;
   pr_fh_t *fh;
   pool *sub_pool;
@@ -598,36 +631,24 @@ static int send_userauth_banner_file(void) {
   sub_pool = make_sub_pool(auth_pool);
   pr_pool_tag(sub_pool, "SSH2 auth banner pool");
 
-  while (pr_fsio_gets(data, sizeof(data), fh) != NULL) {
-    size_t datalen;
-
-    pr_signals_handle();
-
-    data[sizeof(data)-1] = '\0';
-    datalen = strlen(data);
-
-    while (datalen &&
-           (data[datalen-1] == '\r' ||
-            data[datalen-1] == '\n')) {
-      data[datalen-1] = '\0';
-      datalen--;
-    }
-
-    /* XXX Add handling of Variables, etc here. */
-
-    /* We have to separate lines using CRLF, as per RFC 4252 Section 5.4. */
-    mesg = pstrcat(sub_pool, mesg, *mesg ? "\r\n" : "", data, NULL);
-  }
-
+  msg = sftp_display_fh_get_msg(sub_pool, fh);
   pr_fsio_close(fh);
 
-  pkt = sftp_ssh2_packet_create(auth_pool);
+  if (msg == NULL) {
+    destroy_pool(sub_pool);
+    return -1;
+  }
 
-  buflen = bufsz = strlen(mesg) + 32;
+  pr_trace_msg(trace_channel, 3,
+    "sending userauth banner from SFTPDisplayBanner file '%s'", path);
+
+  pkt = sftp_ssh2_packet_create(sub_pool);
+
+  buflen = bufsz = strlen(msg) + 32;
   ptr = buf = palloc(pkt->pool, bufsz);
 
   sftp_msg_write_byte(&buf, &buflen, SFTP_SSH2_MSG_USER_AUTH_BANNER);
-  sftp_msg_write_string(&buf, &buflen, mesg);
+  sftp_msg_write_string(&buf, &buflen, msg);
 
   /* XXX locale of banner */
   sftp_msg_write_string(&buf, &buflen, "");
@@ -635,22 +656,16 @@ static int send_userauth_banner_file(void) {
   pkt->payload = ptr;
   pkt->payload_len = (bufsz - buflen);
 
-  (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
-    "sending userauth banner");
-
   res = sftp_ssh2_packet_write(sftp_conn->wfd, pkt);
-  if (res < 0) {
-    destroy_pool(pkt->pool);
-    destroy_pool(sub_pool);
+  destroy_pool(pkt->pool);
 
+  if (res < 0) {
+    destroy_pool(sub_pool);
     return -1;
   }
 
   auth_sent_userauth_banner_file = TRUE;
-
-  destroy_pool(pkt->pool);
   destroy_pool(sub_pool);
-
   return 0;
 }
 
@@ -825,6 +840,7 @@ static int handle_userauth_req(struct ssh2_packet *pkt, char **service) {
   uint32_t buflen;
   cmd_rec *cmd, *user_cmd, *pass_cmd;
   int res, send_userauth_fail = FALSE;
+  config_rec *c;
 
   buf = pkt->payload;
   buflen = pkt->payload_len;
@@ -1137,6 +1153,36 @@ static int handle_userauth_req(struct ssh2_packet *pkt, char **service) {
 
   pr_cmd_dispatch_phase(pass_cmd, POST_CMD, 0);
   pr_cmd_dispatch_phase(pass_cmd, LOG_CMD, PR_CMD_DISPATCH_FL_CLEAR_RESPONSE);
+
+  /* At this point, we can look up the Protocols config, which may have
+   * been tweaked via mod_ifsession's user/group/class-specific sections.
+   */
+  c = find_config(main_server->conf, CONF_PARAM, "Protocols", FALSE);
+  if (c) {
+    register unsigned int i;
+    unsigned int services = 0UL;
+    array_header *protocols;
+    char **elts; 
+
+    protocols = c->argv[0];
+    elts = protocols->elts;
+
+    for (i = 0; i < protocols->nelts; i++) {
+      char *protocol;
+
+      protocol = elts[i];
+      if (protocol != NULL) {
+        if (strcasecmp(protocol, "sftp") == 0) {
+          services |= SFTP_SERVICE_FL_SFTP;
+
+        } else if (strcasecmp(protocol, "scp") == 0) {
+          services |= SFTP_SERVICE_FL_SCP;
+        }
+      }
+    }
+
+    sftp_services = services;
+  }
 
   return 1;
 }

@@ -1,0 +1,10 @@
+config.log
+config.status
+Makefile
+mod_load.c
+mod_load.h
+.libs
+*.la
+*.lo
+*.o
+*~

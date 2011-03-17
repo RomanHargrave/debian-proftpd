@@ -22,7 +22,7 @@
  * with OpenSSL, and distribute the resulting executable, without including
  * the source code for OpenSSL in the source distribution.
  *
- * $Id: mod_wrap2_sql.c,v 1.9.2.1 2010/06/22 13:59:23 castaglia Exp $
+ * $Id: mod_wrap2_sql.c,v 1.10 2010/06/22 13:59:10 castaglia Exp $
  */
 
 #include "mod_wrap2.h"

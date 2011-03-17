@@ -1,6 +1,6 @@
 /*
  * ProFTPD - mod_sftp UTF8 encoding
- * Copyright (c) 2008-2009 TJ Saunders
+ * Copyright (c) 2008-2010 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: utf8.c,v 1.7.2.3 2010/04/13 16:39:16 castaglia Exp $
+ * $Id: utf8.c,v 1.13 2010/04/18 18:42:16 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -45,6 +45,9 @@ static int utf8_convert(iconv_t conv, const char *inbuf, size_t *inbuflen,
     char *outbuf, size_t *outbuflen) {
 # ifdef HAVE_ICONV
 
+  /* Reset the state machine before each conversion. */
+  (void) iconv(conv, NULL, NULL, NULL, NULL);
+
   while (*inbuflen > 0) {
     size_t nconv;
 
@@ -62,9 +65,21 @@ static int utf8_convert(iconv_t conv, const char *inbuf, size_t *inbuflen,
 #endif
 
     if (nconv == (size_t) -1) {
+
+      /* Note: an errno of EILSEQ here can indicate badly encoded strings OR
+       * (more likely) that the source character set used in the iconv_open(3)
+       * call for this iconv_t descriptor does not accurately describe the
+       * character encoding of the given string.  E.g. a filename may use
+       * the ISO8859-1 character set, but iconv_open(3) was called using
+       * US-ASCII.
+       */
+
       return -1;
     }
 
+    /* XXX We should let the loop condition work, rather than breaking out
+     * of the loop here.
+     */
     break;
   }
 

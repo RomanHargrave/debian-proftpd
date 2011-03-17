@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2010 The ProFTPD Project team
+ * Copyright (c) 2001-2011 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,17 +25,13 @@
  */
 
 /* Read configuration file(s), and manage server/configuration structures.
- * $Id: dirtree.c,v 1.232.2.9 2010/11/10 19:24:42 castaglia Exp $
+ * $Id: dirtree.c,v 1.251 2011/03/03 21:38:54 castaglia Exp $
  */
 
 #include "conf.h"
 
 #ifdef HAVE_ARPA_INET_H
 # include <arpa/inet.h>
-#endif
-
-#ifdef HAVE_REGEX_H
-# include <regex.h>
 #endif
 
 xaset_t *server_list = NULL;
@@ -45,7 +41,6 @@ int SocketBindTight = FALSE;
 char ServerType = SERVER_STANDALONE;
 int ServerMaxInstances = 0;
 int ServerUseReverseDNS = TRUE;
-char MultilineRFC2228 = 0;
 
 /* Default TCP send/receive buffer sizes. */
 static int tcp_rcvbufsz = 0;
@@ -118,43 +113,6 @@ int is_dotdir(const char *dir) {
   if (strcmp(dir, ".") == 0 || strcmp(dir, "./") == 0 ||
       strcmp(dir, "..") == 0 || strcmp(dir, "../") == 0)
     return TRUE;
-
-  return FALSE;
-}
-
-/* Return true if str contains any of the glob(7) characters. */
-int is_fnmatch(const char *str) {
-  int have_bracket = 0;
-
-  while (*str) {
-    switch (*str) {
-      case '?':
-      case '*':
-        return TRUE;
-
-      case '\\':
-        if (*(str+1) == '\0')
-          return FALSE;
-
-        /* Advance past the escaped character */
-        str++;
-        break;
-
-      case '[':
-        have_bracket++;
-        break;
-
-      case ']':
-        if (have_bracket)
-          return TRUE;
-        break;
-
-      default:
-        break;
-    }
-
-    str++;
-  }
 
   return FALSE;
 }
@@ -319,10 +277,10 @@ char *path_subst_uservar(pool *path_pool, char **path) {
  * be visible.
  */
 unsigned char dir_hide_file(const char *path) {
-#if defined(HAVE_REGEX_H) && defined(HAVE_REGCOMP)
+#ifdef PR_USE_REGEX
   char *file_name = NULL, *dir_name = NULL;
   config_rec *c = NULL;
-  regex_t *regexp = NULL;
+  pr_regex_t *pre = NULL;
   pool *tmp_pool;
   unsigned int ctxt_precedence = 0;
   unsigned char have_user_regex, have_group_regex, have_class_regex,
@@ -363,6 +321,8 @@ unsigned char dir_hide_file(const char *path) {
     FALSE);
 
   while (c) {
+    pr_signals_handle();
+
     if (c->argc >= 4) {
 
       /* check for a specified "user" classifier first... */
@@ -372,7 +332,7 @@ unsigned char dir_hide_file(const char *path) {
           if (*((unsigned int *) c->argv[2]) > ctxt_precedence) {
             ctxt_precedence = *((unsigned int *) c->argv[2]);
 
-            regexp = *((regex_t **) c->argv[0]);
+            pre = *((pr_regex_t **) c->argv[0]);
             negated = *((unsigned char *) c->argv[1]);
 
             have_group_regex = have_class_regex = have_all_regex = FALSE;
@@ -386,7 +346,7 @@ unsigned char dir_hide_file(const char *path) {
           if (*((unsigned int *) c->argv[2]) > ctxt_precedence) {
             ctxt_precedence = *((unsigned int *) c->argv[2]);
 
-            regexp = *((regex_t **) c->argv[0]);
+            pre = *((pr_regex_t **) c->argv[0]);
             negated = *((unsigned char *) c->argv[1]);
 
             have_user_regex = have_class_regex = have_all_regex = FALSE;
@@ -404,7 +364,7 @@ unsigned char dir_hide_file(const char *path) {
           if (*((unsigned int *) c->argv[2]) > ctxt_precedence) {
             ctxt_precedence = *((unsigned int *) c->argv[2]);
 
-            regexp = *((regex_t **) c->argv[0]);
+            pre = *((pr_regex_t **) c->argv[0]);
             negated = *((unsigned char *) c->argv[1]);
 
             have_user_regex = have_group_regex = have_all_regex = FALSE;
@@ -423,7 +383,7 @@ unsigned char dir_hide_file(const char *path) {
       if (*((unsigned int *) c->argv[2]) > ctxt_precedence) {
         ctxt_precedence = *((unsigned int *) c->argv[2]);
 
-        regexp = *((regex_t **) c->argv[0]);
+        pre = *((pr_regex_t **) c->argv[0]);
         negated = *((unsigned char *) c->argv[1]);
 
         have_user_regex = have_group_regex = have_class_regex = FALSE;
@@ -442,7 +402,7 @@ unsigned char dir_hide_file(const char *path) {
       have_user_regex ? "user" : have_group_regex ? "group" :
       have_class_regex ? "class" : "session");
 
-    if (regexp == NULL) {
+    if (pre == NULL) {
       destroy_pool(tmp_pool);
 
       /* HideFiles none for this user/group/class */
@@ -452,7 +412,7 @@ unsigned char dir_hide_file(const char *path) {
       return FALSE;
     }
 
-    if (regexec(regexp, file_name, 0, NULL, 0) != 0) {
+    if (pr_regexp_exec(pre, file_name, 0, NULL, 0, 0, 0) != 0) {
       destroy_pool(tmp_pool);
 
       pr_log_debug(DEBUG9, "file '%s' did not match %sHideFiles pattern",
@@ -479,7 +439,7 @@ unsigned char dir_hide_file(const char *path) {
   }
 
   destroy_pool(tmp_pool);
-#endif /* !HAVE_REGEX_H and !HAVE_REGCOMP */
+#endif /* regex support */
 
   /* Return FALSE by default. */
   return FALSE;	
@@ -769,7 +729,7 @@ static config_rec *recur_match_path(pool *p, xaset_t *s, char *path) {
        */
 
       if (pr_fnmatch(suffixed_path, path, 0) == 0 ||
-          (is_fnmatch(tmp_path) &&
+          (pr_str_is_fnmatch(tmp_path) &&
            pr_fnmatch(tmp_path, path, 0) == 0)) {
         pr_trace_msg("directory", 8,
           "<Directory %s> is a glob match for '%s'", tmp_path, path);
@@ -1004,17 +964,19 @@ static int check_user_access(xaset_t *set, const char *name) {
   config_rec *c = find_config(set, CONF_PARAM, name, FALSE);
 
   while (c) {
-#if defined(HAVE_REGEX_H) && defined(HAVE_REGCOMP)
-    if (*((unsigned char *) c->argv[0]) == PR_EXPR_EVAL_REGEX) {
-      regex_t *preg = (regex_t *) c->argv[1];
+    pr_signals_handle();
 
-      if (regexec(preg, session.user, 0, NULL, 0) == 0) {
+#ifdef PR_USE_REGEX
+    if (*((unsigned char *) c->argv[0]) == PR_EXPR_EVAL_REGEX) {
+      pr_regex_t *pre = (pr_regex_t *) c->argv[1];
+
+      if (pr_regexp_exec(pre, session.user, 0, NULL, 0, 0, 0) == 0) {
         res = TRUE;
         break;
       }
 
     } else
-#endif /* HAVE_REGEX_H and HAVE_REGCOMP */
+#endif /* regex support */
 
     if (*((unsigned char *) c->argv[0]) == PR_EXPR_EVAL_OR) {
       res = pr_expr_eval_user_or((char **) &c->argv[1]);
@@ -1040,11 +1002,12 @@ static int check_group_access(xaset_t *set, const char *name) {
   config_rec *c = find_config(set, CONF_PARAM, name, FALSE);
 
   while (c) {
-#if defined(HAVE_REGEX_H) && defined(HAVE_REGCOMP)
+#ifdef PR_USE_REGEX
     if (*((unsigned char *) c->argv[0]) == PR_EXPR_EVAL_REGEX) {
-      regex_t *preg = (regex_t *) c->argv[1];
+      pr_regex_t *pre = (pr_regex_t *) c->argv[1];
 
-      if (session.group && regexec(preg, session.group, 0, NULL, 0) == 0) {
+      if (session.group &&
+          pr_regexp_exec(pre, session.group, 0, NULL, 0, 0, 0) == 0) {
         res = TRUE;
         break;
 
@@ -1052,15 +1015,15 @@ static int check_group_access(xaset_t *set, const char *name) {
         register int i = 0;
 
         for (i = session.groups->nelts-1; i >= 0; i--)
-          if (regexec(preg, *(((char **) session.groups->elts) + i), 0,
-              NULL, 0) == 0) {
+          if (pr_regexp_exec(pre, *(((char **) session.groups->elts) + i), 0,
+              NULL, 0, 0, 0) == 0) {
             res = TRUE;
             break;
           }
       }
 
     } else
-#endif /* HAVE_REGEX_H and HAVE_REGCOMP */
+#endif /* regex support */
 
     if (*((unsigned char *) c->argv[0]) == PR_EXPR_EVAL_OR) {
       res = pr_expr_eval_group_or((char **) &c->argv[1]);
@@ -1086,18 +1049,20 @@ static int check_class_access(xaset_t *set, const char *name) {
   config_rec *c = find_config(set, CONF_PARAM, name, FALSE);
 
   while (c) {
-#if defined(HAVE_REGEX_H) && defined(HAVE_REGCOMP)
+    pr_signals_handle();
+
+#ifdef PR_USE_REGEX
     if (*((unsigned char *) c->argv[0]) == PR_EXPR_EVAL_REGEX) {
-      regex_t *preg = (regex_t *) c->argv[1];
+      pr_regex_t *pre = (pr_regex_t *) c->argv[1];
 
       if (session.class &&
-          regexec(preg, session.class->cls_name, 0, NULL, 0) == 0) {
+          pr_regexp_exec(pre, session.class->cls_name, 0, NULL, 0, 0, 0) == 0) {
         res = TRUE;
         break;
       }
 
     } else
-#endif /* HAVE_REGEX_H and HAVE_REGCOMP */
+#endif /* regex support */
 
     if (*((unsigned char *) c->argv[0]) == PR_EXPR_EVAL_OR) {
       res = pr_expr_eval_class_or((char **) &c->argv[1]);
@@ -1119,7 +1084,7 @@ static int check_class_access(xaset_t *set, const char *name) {
 }
 
 static int check_filter_access(xaset_t *set, const char *name, cmd_rec *cmd) {
-#if defined(HAVE_REGEX_H) && defined(HAVE_REGCOMP)
+#ifdef PR_USE_REGEX
   int res = 0;
   config_rec *c;
 
@@ -1128,9 +1093,11 @@ static int check_filter_access(xaset_t *set, const char *name, cmd_rec *cmd) {
 
   c = find_config(set, CONF_PARAM, name, FALSE);
   while (c) {
-    regex_t *preg = (regex_t *) c->argv[0];
+    pr_regex_t *pre = (pr_regex_t *) c->argv[0];
 
-    if (regexec(preg, cmd->arg, 0, NULL, 0) == 0) {
+    pr_signals_handle();
+
+    if (pr_regexp_exec(pre, cmd->arg, 0, NULL, 0, 0, 0) == 0) {
       res = TRUE;
       break;
     }
@@ -1141,7 +1108,7 @@ static int check_filter_access(xaset_t *set, const char *name, cmd_rec *cmd) {
   return res;
 #else
   return 0;
-#endif /* HAVE_REGEX_H and HAVE_REGCOMP */
+#endif /* regex support */
 }
 
 /* As of 1.2.0rc3, a '!' character in front of the IP address
@@ -1235,6 +1202,8 @@ static int check_ip_access(xaset_t *set, char *name) {
   config_rec *c = find_config(set, CONF_PARAM, name, FALSE);
 
   while (c) {
+    pr_signals_handle();
+
     /* If the negative check failed (default is success), short-circuit and
      * return FALSE
      */
@@ -1394,7 +1363,7 @@ static int check_limit(config_rec *c, cmd_rec *cmd) {
 
 int login_check_limits(xaset_t *set, int recurse, int and, int *found) {
   int res = and;
-  int rfound;
+  int rfound = 0;
   config_rec *c;
   int argc;
   char **argv;
@@ -1979,14 +1948,16 @@ int dir_check_full(pool *pp, cmd_rec *cmd, const char *group, const char *path,
 
     /* If still == 1, no explicit allow so check lowest priority "ALL" group.
      * Note that certain commands are deliberately excluded from the
-     * ALL group (i.e. EPRT, EPSV, PASV, and PORT).
+     * ALL group (i.e. EPRT, EPSV, PASV, PORT, and OPTS).
      */
     if (res == 1 &&
         strcmp(cmd->argv[0], C_EPRT) != 0 &&
         strcmp(cmd->argv[0], C_EPSV) != 0 &&
         strcmp(cmd->argv[0], C_PASV) != 0 &&
-        strcmp(cmd->argv[0], C_PORT) != 0)
+        strcmp(cmd->argv[0], C_PORT) != 0 &&
+        strncmp(cmd->argv[0], C_OPTS, 4) != 0) {
       res = dir_check_limits(cmd, c, "ALL", op_hidden || regex_hidden);
+    }
   }
 
   if (res &&
@@ -2123,14 +2094,16 @@ int dir_check(pool *pp, cmd_rec *cmd, const char *group, const char *path,
 
     /* If still == 1, no explicit allow so check lowest priority "ALL" group.
      * Note that certain commands are deliberately excluded from the
-     * ALL group (i.e. EPRT, EPSV, PASV, and PORT).
+     * ALL group (i.e. EPRT, EPSV, PASV, PORT, and OPTS).
      */
     if (res == 1 &&
         strcmp(cmd->argv[0], C_EPRT) != 0 &&
         strcmp(cmd->argv[0], C_EPSV) != 0 &&
         strcmp(cmd->argv[0], C_PASV) != 0 &&
-        strcmp(cmd->argv[0], C_PORT) != 0)
+        strcmp(cmd->argv[0], C_PORT) != 0 &&
+        strncmp(cmd->argv[0], C_OPTS, 4) != 0) {
       res = dir_check_limits(cmd, c, "ALL", op_hidden || regex_hidden);
+    }
   }
 
   if (res &&
@@ -2206,8 +2179,9 @@ static config_rec *_find_best_dir(xaset_t *set, char *path, size_t *matchlen) {
 
       len = strlen(c->name);
       while (len > 0 &&
-             (*(c->name+len-1) == '*' || *(c->name+len-1) == '/'))
+             (*(c->name+len-1) == '*' || *(c->name+len-1) == '/')) {
         len--;
+      }
 
       /*
        * Just a partial match on the pathname does not mean that the longer
@@ -2367,18 +2341,122 @@ void pr_dirs_dump(void (*dumpf)(const char *, ...), xaset_t *s, char *indent) {
 }
 #endif /* PR_USE_DEVEL */
 
-static void merge_down(xaset_t *s, int dynamic) {
-  config_rec *c, *dst, *newconf;
-  int argc;
-  void **argv, **sargv;
+/* Compare two different config_recs to see if they are the same.  Note
+ * that "same" here has to be very specific.
+ *
+ * Returns 0 if the two config_recs are the same, and 1 if they differ, and
+ * -1 if there was an error.
+ */
+static int config_cmp(const config_rec *a, const char *a_name,
+    const config_rec *b, const char *b_name) {
+  const char *trace_channel = "config";
 
-  if (!s ||
-      !s->xas_list)
+  if (a == NULL ||
+      b == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  if (a->config_type != b->config_type) {
+    pr_trace_msg(trace_channel, 18,
+      "configs '%s' and '%s' have mismatched config_type (%d != %d)",
+      a_name, b_name, a->config_type, b->config_type);
+    return 1;
+  }
+
+  if (a->flags != b->flags) {
+    pr_trace_msg(trace_channel, 18,
+      "configs '%s' and '%s' have mismatched flags (%ld != %ld)",
+      a_name, b_name, a->flags, b->flags);
+    return 1;
+  }
+
+  if (a->argc != b->argc) {
+    pr_trace_msg(trace_channel, 18,
+      "configs '%s' and '%s' have mismatched argc (%d != %d)",
+      a_name, b_name, a->argc, b->argc);
+    return 1;
+  }
+
+  if (a->argc > 0) {
+    register unsigned int i;
+
+    for (i = 0; i < a->argc; i++) {
+      if (a->argv[i] != b->argv[i]) {
+        pr_trace_msg(trace_channel, 18,
+          "configs '%s' and '%s' have mismatched argv[%u] (%p != %p)",
+          a_name, b_name, i, a->argv[i], b->argv[i]);
+        return 1;
+      }
+    }
+  }
+
+  if (a->config_id != b->config_id) {
+    pr_trace_msg(trace_channel, 18,
+      "configs '%s' and '%s' have mismatched config_id (%d != %d)",
+      a_name, b_name, a->config_id, b->config_id);
+    return 1;
+  }
+
+  /* Save the string comparison for last, to try to save some CPU. */
+  if (strcmp(a->name, b->name) != 0) {
+    pr_trace_msg(trace_channel, 18,
+      "configs '%s' and '%s' have mismatched name ('%s' != '%s')",
+      a_name, b_name, a->name, b->name);
+    return 1;
+  }
+
+  return 0;
+}
+
+static config_rec *copy_config_from(const config_rec *src, config_rec *dst) {
+  config_rec *c;
+  int cargc;
+  void **cargv, **sargv;
+
+  if (src == NULL ||
+      dst == NULL) {
+    return NULL;
+  }
+
+  /* If the destination parent config_rec doesn't already have a subset
+   * container, allocate one.
+   */
+  if (dst->subset == NULL)
+    dst->subset = xaset_create(dst->pool, NULL);
+
+  c = add_config_set(&dst->subset, src->name);
+  c->config_type = src->config_type;
+  c->flags = src->flags;
+  c->config_id = src->config_id;
+
+  c->argc = src->argc;
+  c->argv = pcalloc(c->pool, (src->argc + 1) * sizeof(void *));
+
+  cargc = c->argc;
+  cargv = c->argv;
+  sargv = src->argv;
+
+  while (cargc--) {
+    pr_signals_handle();
+    *cargv++ = *sargv++;
+  }
+
+  *cargv = NULL; 
+  return c;
+}
+
+static void merge_down(xaset_t *s, int dynamic) {
+  config_rec *c, *dst;
+
+  if (s == NULL ||
+      s->xas_list == NULL)
     return;
 
   for (c = (config_rec *) s->xas_list; c; c = c->next) {
     if ((c->flags & CF_MERGEDOWN) ||
-        (c->flags & CF_MERGEDOWN_MULTI))
+        (c->flags & CF_MERGEDOWN_MULTI)) {
+
       for (dst = (config_rec *) s->xas_list; dst; dst = dst->next) {
         if (dst->config_type == CONF_ANON ||
            dst->config_type == CONF_DIR) {
@@ -2406,25 +2484,38 @@ static void merge_down(xaset_t *s, int dynamic) {
             }
           }
 
-          if (!dst->subset)
-            dst->subset = xaset_create(dst->pool, NULL);
+          /* We want to scan the config_recs contained in dst's subset to see
+           * if we can find another config_rec that duplicates the one we want
+           * to merge into dst.
+           */
+          if (dst->subset != NULL) {
+              config_rec *r = NULL;
+            int merge = TRUE;
 
-          newconf = add_config_set(&dst->subset, c->name);
-          newconf->config_type = c->config_type;
-          newconf->flags = c->flags | (dynamic ? CF_DYNAMIC : 0);
-          newconf->argc = c->argc;
-          newconf->argv = pcalloc(newconf->pool, (c->argc+1) * sizeof(void *));
-          argv = newconf->argv;
-          sargv = c->argv;
-          argc = newconf->argc;
+            for (r = (config_rec *) dst->subset->xas_list; r; r = r->next) {
+              pr_signals_handle();
 
-          while (argc--) {
-            *argv++ = *sargv++;
+              if (config_cmp(r, r->name, c, c->name) == 0) {
+                merge = FALSE;
+
+                pr_trace_msg("config", 15,
+                  "found duplicate '%s' record in '%s', skipping merge",
+                  r->name, dst->name);
+                break;
+              }
+            }
+
+            if (merge) {
+              (void) copy_config_from(c, dst);
+            }
+ 
+          } else {
+            /* No existing subset in dst; we can merge this one in. */
+            (void) copy_config_from(c, dst);
           }
-
-          *argv++ = NULL;
         }
       }
+    }
   }
 
   /* Top level merged, recursively merge lower levels */
@@ -2916,7 +3007,7 @@ config_rec *add_config_param(const char *name, int num, ...) {
   return c;
 }
 
-static int config_cmp(const void *a, const void *b) {
+static int config_filename_cmp(const void *a, const void *b) {
   return strcmp(*((char **) a), *((char **) b));
 }
 
@@ -2929,7 +3020,7 @@ int parse_config_path(pool *p, const char *path) {
     return -1;
   }
 
-  have_glob = is_fnmatch(path); 
+  have_glob = pr_str_is_fnmatch(path); 
 
   if (!have_glob && pr_fsio_lstat(path, &st) < 0)
     return -1;
@@ -2945,7 +3036,7 @@ int parse_config_path(pool *p, const char *path) {
     if (have_glob && tmp) {
       *tmp++ = '\0';
 
-      if (is_fnmatch(dup_path)) {
+      if (pr_str_is_fnmatch(dup_path)) {
         pr_log_pri(PR_LOG_ERR, "error: wildcard patterns not allowed in "
           "configuration directory name '%s'", dup_path);
         errno = EINVAL;
@@ -2962,7 +3053,7 @@ int parse_config_path(pool *p, const char *path) {
         return -1;
       }
 
-      if (!is_fnmatch(tmp)) {
+      if (!pr_str_is_fnmatch(tmp)) {
         pr_log_pri(PR_LOG_ERR, "error: wildcard pattern required for file '%s'",
           tmp);
         errno = EINVAL;
@@ -2999,7 +3090,7 @@ int parse_config_path(pool *p, const char *path) {
       register unsigned int i;
 
       qsort((void *) file_list->elts, file_list->nelts, sizeof(char *),
-        config_cmp);
+        config_filename_cmp);
 
       for (i = 0; i < file_list->nelts; i++) {
         char *file = ((char **) file_list->elts)[i];
@@ -3150,7 +3241,7 @@ static void set_tcp_bufsz(void) {
 #endif
 
   p = getprotobyname("tcp");
-  if (!p) {
+  if (p == NULL) {
 #ifndef PR_TUNABLE_RCVBUFSZ
     tcp_rcvbufsz = PR_TUNABLE_DEFAULT_RCVBUFSZ;
 #else
@@ -3204,7 +3295,7 @@ static void set_tcp_bufsz(void) {
   }
 #else
   optlen = -1;
-  tcp_sndbufsz = PR_TUNABLE_RCVBUFSZ;
+  tcp_rcvbufsz = PR_TUNABLE_RCVBUFSZ;
   pr_log_debug(DEBUG5, "using preset TCP receive buffer size of %d bytes",
     tcp_rcvbufsz);
 #endif /* PR_TUNABLE_RCVBUFSZ */
@@ -3463,3 +3554,30 @@ unsigned int pr_config_set_id(const char *name) {
 int pr_config_get_xfer_bufsz(void) {
   return xfer_bufsz;
 }
+
+int pr_config_get_xfer_bufsz2(int direction) {
+  switch (direction) {
+    case PR_NETIO_IO_RD:
+      return tcp_rcvbufsz;
+
+    case PR_NETIO_IO_WR:
+      return tcp_sndbufsz;
+  }
+
+  return xfer_bufsz;
+}
+
+int pr_config_get_server_xfer_bufsz(int direction) {
+  if (main_server != NULL) {
+    switch (direction) {
+      case PR_NETIO_IO_RD:
+        return main_server->tcp_rcvbuf_len;
+
+      case PR_NETIO_IO_WR:
+        return main_server->tcp_sndbuf_len;
+    }
+  }
+
+  return pr_config_get_xfer_bufsz2(direction);
+}
+

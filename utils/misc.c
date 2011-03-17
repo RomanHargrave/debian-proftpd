@@ -25,7 +25,7 @@
 
 /* Utility module linked to utilities to provide functions normally
  * present in full src tree.
- * $Id: misc.c,v 1.8.4.1 2010/03/25 17:37:49 castaglia Exp $
+ * $Id: misc.c,v 1.9 2010/03/25 17:37:08 castaglia Exp $
  */
 
 #include "utils.h"

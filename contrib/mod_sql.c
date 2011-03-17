@@ -2,7 +2,7 @@
  * ProFTPD: mod_sql -- SQL frontend
  * Copyright (c) 1998-1999 Johnie Ingram.
  * Copyright (c) 2001 Andrew Houghton.
- * Copyright (c) 2004-2010 TJ Saunders
+ * Copyright (c) 2004-2011 TJ Saunders
  *  
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@
  * the resulting executable, without including the source code for OpenSSL in
  * the source distribution.
  *
- * $Id: mod_sql.c,v 1.181.2.6 2010/12/17 04:23:41 castaglia Exp $
+ * $Id: mod_sql.c,v 1.204 2011/03/17 03:42:01 castaglia Exp $
  */
 
 #include "conf.h"
@@ -272,10 +272,10 @@ typedef struct {
   unsigned int nelts;
 } cache_t;
 
-cache_t *group_name_cache;
-cache_t *group_gid_cache;
-cache_t *passwd_name_cache;
-cache_t *passwd_uid_cache;
+static cache_t *group_name_cache = NULL;
+static cache_t *group_gid_cache = NULL;
+static cache_t *passwd_name_cache = NULL;
+static cache_t *passwd_uid_cache = NULL;
 
 static cache_t *make_cache(pool *p, val_func hash_val, cmp_func cmp) {
   cache_t *res;
@@ -400,7 +400,8 @@ static int check_response(modret_t *mr) {
     ": check the SQLLogFile for more details");
 
   if (!(pr_sql_opts & SQL_OPT_NO_DISCONNECT_ON_ERROR)) {
-    end_login(1);
+    pr_session_disconnect(&sql_module, PR_SESS_DISCONNECT_BY_APPLICATION,
+      "Database error");
   }
 
   sql_log(DEBUG_FUNC, "SQLOption noDisconnectOnError in effect, not exiting");
@@ -1173,11 +1174,31 @@ static struct passwd *_sql_addpasswd(cmd_rec *cmd, char *username,
     pwd->pw_uid = uid;
     pwd->pw_gid = gid;
    
-    if (shell) 
+    if (shell) {
       pwd->pw_shell = pstrdup(sql_pool, shell);
 
-    if (dir)
+      if (pr_table_add(session.notes, "shell", pwd->pw_shell, 0) < 0) {
+        int xerrno = errno;
+
+        if (xerrno != EEXIST) {
+          pr_trace_msg(trace_channel, 8,
+            "error setting 'shell' session note: %s", strerror(xerrno));
+        }
+      }
+    }
+
+    if (dir) {
       pwd->pw_dir = pstrdup(sql_pool, dir);
+
+      if (pr_table_add(session.notes, "home", pwd->pw_dir, 0) < 0) {
+        int xerrno = errno;
+
+        if (xerrno != EEXIST) {
+          pr_trace_msg(trace_channel, 8,
+            "error setting 'home' session note: %s", strerror(xerrno));
+        }
+      }
+    }
     
     cache_addentry(passwd_name_cache, pwd);
     cache_addentry(passwd_uid_cache, pwd);
@@ -1471,8 +1492,18 @@ static struct group *_sql_addgroup(cmd_rec *cmd, char *groupname, gid_t gid,
   } else {
     grp = pcalloc(sql_pool, sizeof(struct group));
 
-    if (groupname)
+    if (groupname) {
       grp->gr_name = pstrdup(sql_pool, groupname);
+
+      if (pr_table_add(session.notes, "primary-group", grp->gr_name, 0) < 0) {
+        int xerrno = errno;
+
+        if (xerrno != EEXIST) {
+          pr_trace_msg(trace_channel, 8,
+            "error setting 'primary-group' session note: %s", strerror(xerrno));
+        }
+      }
+    }
 
     grp->gr_gid = gid;
 
@@ -1667,7 +1698,9 @@ static struct group *sql_getgroup(cmd_rec *cmd, struct group *g) {
   for (cnt = 0; cnt < numrows; cnt++) {
     members = rows[(cnt * 3) + 2];
     iterator = members;
-    
+   
+    pr_signals_handle();
+ 
     /* If the row is null, continue.. */
     if (members == NULL)
       continue;
@@ -1677,8 +1710,10 @@ static struct group *sql_getgroup(cmd_rec *cmd, struct group *g) {
      */
     for (member = strsep(&iterator, ","); member;
         member = strsep(&iterator, ",")) {
-      if (*member == '\0')
+      if (*member == '\0') {
         continue;
+      }
+
       *((char **) push_array(ah)) = member;
     }      
   }
@@ -1860,8 +1895,10 @@ static int sql_getgroups(cmd_rec *cmd) {
      */
     for (member = strsep(&memberstr, ","); member;
         member = strsep(&memberstr, ",")) {
-      if (*member == '\0')
+      if (*member == '\0') {
         continue;
+      }
+
       *((char **) push_array(members)) = member;
     }
 
@@ -1977,13 +2014,36 @@ MODRET sql_post_retr(cmd_rec *cmd) {
 
 static const char *resolve_long_tag(cmd_rec *cmd, char *tag) {
   const char *long_tag = NULL;
+  size_t taglen;
 
-  if (strcmp(tag, "protocol") == 0) {
-    long_tag = pr_session_get_protocol(0);
+  if (strcmp(tag, "uid") == 0) {
+    char buf[64];
+
+    memset(buf, '\0', sizeof(buf));
+    snprintf(buf, sizeof(buf)-1, "%lu", (unsigned long) session.uid);
+    
+    long_tag = pstrdup(cmd->tmp_pool, buf);
   }
 
   if (long_tag == NULL &&
-      strlen(tag) > 5 &&
+      strcmp(tag, "gid") == 0) {
+    char buf[64];
+
+    memset(buf, '\0', sizeof(buf));
+    snprintf(buf, sizeof(buf)-1, "%lu", (unsigned long) session.gid);
+    
+    long_tag = pstrdup(cmd->tmp_pool, buf);
+  }
+
+  if (long_tag == NULL &&
+      strcmp(tag, "protocol") == 0) {
+    long_tag = pr_session_get_protocol(0);
+  }
+
+  taglen = strlen(tag);
+
+  if (long_tag == NULL &&
+      taglen > 5 &&
       strncmp(tag, "env:", 4) == 0) {
     char *env;
 
@@ -1992,7 +2052,23 @@ static const char *resolve_long_tag(cmd_rec *cmd, char *tag) {
   }
 
   if (long_tag == NULL &&
-      strlen(tag) > 6 &&
+      taglen > 5 &&
+      strncmp(tag, "note:", 5) == 0) {
+    char *key = NULL, *note = NULL;
+
+    key = tag + 5;
+
+    /* Check first in the command.notes table, then in the session.notes. */
+    note = pr_table_get(cmd->notes, key, NULL);
+    if (note == NULL) {
+      note = pr_table_get(session.notes, key, NULL);
+    }
+
+    long_tag = pstrdup(cmd->tmp_pool, note ? note : "");
+  }
+
+  if (long_tag == NULL &&
+      taglen > 6 &&
       strncmp(tag, "time:", 5) == 0) {
     char time_str[128], *fmt;
     time_t now;
@@ -2087,7 +2163,7 @@ static char *resolve_short_tag(cmd_rec *cmd, char tag) {
         sstrncpy(argp, tmp ? tmp : cmd->arg, sizeof(arg));
 
       } else {
-        sstrncpy(argp, "", sizeof(arg));
+        sstrncpy(argp, pr_fs_getvwd(), sizeof(arg));
       }
       break;
 
@@ -2130,6 +2206,22 @@ static char *resolve_short_tag(cmd_rec *cmd, char tag) {
         sstrncpy(argp, "", sizeof(arg));
       }
       break;
+
+    case 'E': {
+      const char *reason_str;
+      char *details = NULL;
+
+      argp = arg;
+
+      reason_str = pr_session_get_disconnect_reason(&details);
+      sstrncpy(argp, reason_str, sizeof(arg));
+      if (details != NULL) {
+        sstrcat(argp, ": ", sizeof(arg));
+        sstrcat(argp, details, sizeof(arg));
+      }
+
+      break;
+    }
 
     case 'f':
       argp = arg;
@@ -2179,11 +2271,16 @@ static char *resolve_short_tag(cmd_rec *cmd, char tag) {
         sstrncpy(argp, session.xfer.path, sizeof(arg));
 
       } else {
-        /* Some commands (i.e. DELE) have associated filenames that are not
-         * stored in the session.xfer structure; these should be expanded
+        /* Some commands (i.e. DELE, MKD, RMD, XMKD, and XRMD) have associated
+         * filenames that are not stored in the session.xfer structure; these
+         * should be expanded
          * properly as well.
          */
-        if (strcmp(cmd->argv[0], C_DELE) == 0) {
+        if (strcmp(cmd->argv[0], C_DELE) == 0 ||
+            strcmp(cmd->argv[0], C_MKD) == 0 ||
+            strcmp(cmd->argv[0], C_RMD) == 0 ||
+            strcmp(cmd->argv[0], C_XMKD) == 0 ||
+            strcmp(cmd->argv[0], C_XRMD) == 0) {
           char *path;
 
           path = dir_best_path(cmd->tmp_pool,
@@ -2196,6 +2293,21 @@ static char *resolve_short_tag(cmd_rec *cmd, char tag) {
       }
       break;
 
+    case 'H':
+      argp = arg;
+      sstrncpy(argp, cmd->server->ServerAddress, sizeof(arg));
+      break;
+
+    case 'h':
+      argp = arg;
+      sstrncpy(argp, pr_netaddr_get_sess_remote_name(), sizeof(arg));
+      break;
+
+    case 'I':
+      argp = arg;
+      snprintf(argp, sizeof(arg), "%" PR_LU, (pr_off_t) session.total_raw_in);
+      break;
+
     case 'J':
       argp = arg;
       if (strcasecmp(cmd->argv[0], C_PASS) == 0 &&
@@ -2205,11 +2317,6 @@ static char *resolve_short_tag(cmd_rec *cmd, char tag) {
       } else {
         sstrncpy(argp, cmd->arg, sizeof(arg));
       }
-      break;
-
-    case 'h':
-      argp = arg;
-      sstrncpy(argp, pr_netaddr_get_sess_remote_name(), sizeof(arg));
       break;
 
     case 'L':
@@ -2234,6 +2341,11 @@ static char *resolve_short_tag(cmd_rec *cmd, char tag) {
     case 'm':
       argp = arg;
       sstrncpy(argp, cmd->argv[0], sizeof(arg));
+      break;
+
+    case 'O':
+      argp = arg;
+      snprintf(argp, sizeof(arg), "%" PR_LU, (pr_off_t) session.total_raw_out);
       break;
 
     case 'P':
@@ -2696,7 +2808,6 @@ MODRET info_master(cmd_rec *cmd) {
   char outs[SQL_MAX_STMT_LEN+1], *outsp;
   char *argp = NULL; 
   char *tmp = NULL, *resp_code = NULL;
-  int display_flags = 0;
   modret_t *mr = NULL;
   sql_data_t *sd = NULL;
 
@@ -2708,7 +2819,7 @@ MODRET info_master(cmd_rec *cmd) {
   
   c = find_config(main_server->conf, CONF_PARAM, name, FALSE);
   while (c) {
-    size_t arglen, outs_remain = sizeof(outs)-1;
+    size_t arglen = 0, outs_remain = sizeof(outs)-1;
 
     sql_log(DEBUG_FUNC, ">>> info_master (%s)", name);
 
@@ -2836,8 +2947,7 @@ MODRET info_master(cmd_rec *cmd) {
        * flushing the added lines out to the client.
        */
       resp_code = c->argv[0];
-
-      pr_display_add_line(cmd->tmp_pool, resp_code, outs);
+      pr_response_add(resp_code, "%s", outs);
     }
 
     sql_log(DEBUG_FUNC, "<<< info_master (%s)", name);
@@ -2850,7 +2960,7 @@ MODRET info_master(cmd_rec *cmd) {
   
   c = find_config(main_server->conf, CONF_PARAM, name, FALSE);
   while (c) {
-    size_t arglen, outs_remain = sizeof(outs)-1;
+    size_t arglen = 0, outs_remain = sizeof(outs)-1;
 
     sql_log(DEBUG_FUNC, ">>> info_master (%s)", name);
 
@@ -2978,26 +3088,13 @@ MODRET info_master(cmd_rec *cmd) {
        * flushing the added lines out to the client.
        */
       resp_code = c->argv[0];
-
-      pr_display_add_line(cmd->tmp_pool, resp_code, outs);
+      pr_response_add(resp_code, "%s", outs);
     }
 
     sql_log(DEBUG_FUNC, "<<< info_master (%s)", name);
 
     c = find_config_next(c, c->next, CONF_PARAM, name, FALSE);
   }
-
-  /* If this is the PASS command, then we're handling a login; we need to
-   * tell the Display API to NOT send the end-of-message marker.  Same
-   * goes for directory-switching commands (CWD, XCWD).
-   */
-  if (strcmp(cmd->argv[0], C_PASS) == 0 ||
-      strcmp(cmd->argv[0], C_CWD) == 0 ||
-      strcmp(cmd->argv[0], C_XCWD) == 0) {
-    display_flags = PR_DISPLAY_FL_NO_EOM;
-  }
-
-  pr_display_flush_lines(cmd->tmp_pool, resp_code, display_flags);
 
   return PR_DECLINED(cmd);
 }
@@ -3020,7 +3117,7 @@ MODRET errinfo_master(cmd_rec *cmd) {
   
   c = find_config(main_server->conf, CONF_PARAM, name, FALSE);
   while (c) {
-    size_t arglen, outs_remain = sizeof(outs)-1;
+    size_t arglen = 0, outs_remain = sizeof(outs)-1;
 
     sql_log(DEBUG_FUNC, ">>> errinfo_master (%s)", name);
 
@@ -3149,8 +3246,7 @@ MODRET errinfo_master(cmd_rec *cmd) {
        * flushing the added lines out to the client.
        */
       resp_code = c->argv[0];
-
-      pr_display_add_line(cmd->tmp_pool, resp_code, outs);
+      pr_response_add(resp_code, "%s", outs);
     }
 
     sql_log(DEBUG_FUNC, "<<< errinfo_master (%s)", name);
@@ -3163,7 +3259,7 @@ MODRET errinfo_master(cmd_rec *cmd) {
   
   c = find_config(main_server->conf, CONF_PARAM, name, FALSE);
   while (c) {
-    size_t arglen, outs_remain = sizeof(outs)-1;
+    size_t arglen = 0, outs_remain = sizeof(outs)-1;
 
     sql_log(DEBUG_FUNC, ">>> errinfo_master (%s)", name);
 
@@ -3178,6 +3274,8 @@ MODRET errinfo_master(cmd_rec *cmd) {
     outsp = outs;
 
     for (tmp = c->argv[1]; *tmp; ) {
+      pr_signals_handle();
+
       if (*tmp == '%') {
         /* is the tag a named_query reference?  If so, process the 
          * named query, otherwise process it as a normal tag.. 
@@ -3235,7 +3333,6 @@ MODRET errinfo_master(cmd_rec *cmd) {
              */
             memset(outs, '\0', sizeof(outs));
             break;
-            continue;
           }
 
         } else {
@@ -3291,16 +3388,13 @@ MODRET errinfo_master(cmd_rec *cmd) {
        * flushing the added lines out to the client.
        */
       resp_code = c->argv[0];
-
-      pr_display_add_line(cmd->tmp_pool, resp_code, outs);
+      pr_response_add(resp_code, "%s", outs);
     }
 
     sql_log(DEBUG_FUNC, "<<< errinfo_master (%s)", name);
 
     c = find_config_next(c, c->next, CONF_PARAM, name, FALSE);
   }
-
-  pr_display_flush_lines(cmd->tmp_pool, resp_code, 0);
 
   return PR_DECLINED(cmd);
 }
@@ -3431,10 +3525,10 @@ MODRET sql_lookup(cmd_rec *cmd) {
 
       ah = make_array(session.pool, (sd->rnum * sd->fnum) , sizeof(char *));
 
-      /* the right way to do this is to preserve the abstraction of the array
-       * header so things don't blow up when it gets freed
+      /* The right way to do this is to preserve the abstraction of the array
+       * header so things don't blow up when it gets freed.
        */
-      for (i = 0; i< (sd->rnum * sd->fnum); i++) {
+      for (i = 0; i < (sd->rnum * sd->fnum); i++) {
 	*((char **) push_array(ah)) = sd->data[i];
       }
 
@@ -3813,8 +3907,10 @@ MODRET cmd_setgrent(cmd_rec *cmd) {
       iterator = grp_mem;
 
       for (member = strsep(&iterator, " ,"); member; member = strsep(&iterator, " ,")) {
-	if (*member == '\0')
+	if (*member == '\0') {
           continue;
+        }
+
 	*((char **) push_array(ah)) = member;
       }
 

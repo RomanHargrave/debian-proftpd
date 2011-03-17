@@ -1,6 +1,6 @@
 /*
  * ProFTPD - mod_sftp channels
- * Copyright (c) 2008-2009 TJ Saunders
+ * Copyright (c) 2008-2011 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: channel.h,v 1.6 2009/08/26 17:23:06 castaglia Exp $
+ * $Id: channel.h,v 1.9 2011/02/12 18:11:49 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -40,7 +40,7 @@
 #define SFTP_SSH2_CHANNEL_MAX_PACKET_SIZE	32768
 
 /* Max channel window size, per RFC4254 Section 5.2 is 2^32-1 bytes. */
-#define SFTP_SSH2_CHANNEL_WINDOW_SIZE		(uint32_t) -1
+#define SFTP_SSH2_CHANNEL_WINDOW_SIZE		4294967295
 
 struct ssh2_channel_databuf;
 
@@ -77,5 +77,15 @@ int sftp_channel_free(void);
 int sftp_channel_handle(struct ssh2_packet *, char);
 int sftp_channel_init(void);
 int sftp_channel_write_data(pool *, uint32_t, char *, uint32_t);
+
+/* Like sftp_channel_write_data(), but sends EXTENDED_DATA messages. */
+int sftp_channel_write_ext_data_stderr(pool *, uint32_t, char *, uint32_t);
+
+/* Return the number of open channels, if any.  If a pointer to a uint32_t
+ * is provided, AND the returned count is greater than zero, then the
+ * pointer will point to a randomly selected remote channel ID for an open
+ * channel.
+ */
+unsigned int sftp_channel_opened(uint32_t *);
 
 #endif

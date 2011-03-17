@@ -1,10 +1,9 @@
 package ProFTPD::Tests::Config::DeleteAbortedStores;
 
 use lib qw(t/lib);
-use base qw(Test::Unit::TestCase ProFTPD::TestSuite::Child);
+use base qw(ProFTPD::TestSuite::Child);
 use strict;
 
-use File::Path qw(mkpath rmtree);
 use File::Spec;
 use IO::Handle;
 
@@ -20,6 +19,7 @@ my $TESTS = {
     order => ++$order,
     test_class => [qw(forking)],
   },
+
 };
 
 sub new {
@@ -28,29 +28,6 @@ sub new {
 
 sub list_tests {
   return testsuite_get_runnable_tests($TESTS);
-}
-
-sub set_up {
-  my $self = shift;
-  $self->{tmpdir} = testsuite_get_tmp_dir();
-
-  # Create temporary scratch dir
-  eval { mkpath($self->{tmpdir}) };
-  if ($@) {
-    my $abs_path = File::Spec->rel2abs($self->{tmpdir});
-    die("Can't create dir $abs_path: $@");
-  }
-}
-
-sub tear_down {
-  my $self = shift;
-
-  # Remove temporary scratch dir
-  if ($self->{tmpdir}) {
-    eval { rmtree($self->{tmpdir}) };
-  }
-
-  undef $self;
 }
 
 sub deleteabortedstores_ok {
@@ -155,7 +132,6 @@ sub deleteabortedstores_ok {
         test_msg("Expected $expected, got $resp_code"));
 
       $expected = "Abort successful";
-      chomp($resp_msg);
       $self->assert($expected eq $resp_msg,
         test_msg("Expected '$expected', got '$resp_msg'"));
 

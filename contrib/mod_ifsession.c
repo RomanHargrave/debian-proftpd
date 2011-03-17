@@ -2,7 +2,7 @@
  * ProFTPD: mod_ifsession -- a module supporting conditional
  *                            per-user/group/class configuration contexts.
  *
- * Copyright (c) 2002-2008 TJ Saunders
+ * Copyright (c) 2002-2011 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,16 +26,16 @@
  * This is mod_ifsession, contrib software for proftpd 1.2 and above.
  * For more information contact TJ Saunders <tj@castaglia.org>.
  *
- * $Id: mod_ifsession.c,v 1.24.4.2 2010/12/01 18:46:08 castaglia Exp $
+ * $Id: mod_ifsession.c,v 1.33 2011/03/03 21:38:54 castaglia Exp $
  */
 
 #include "conf.h"
 
-#define MOD_IFSESSION_VERSION	"mod_ifsession/1.0"
+#define MOD_IFSESSION_VERSION	"mod_ifsession/1.1"
 
 /* Make sure the version of proftpd is as necessary. */
-#if PROFTPD_VERSION_NUMBER < 0x0001021001
-# error "ProFTPD 1.2.10rc1 or later required"
+#if PROFTPD_VERSION_NUMBER < 0x0001030402
+# error "ProFTPD 1.3.4rc2 or later required"
 #endif
 
 #define IFSESS_CLASS_NUMBER	100
@@ -45,6 +45,9 @@
 #define IFSESS_USER_NUMBER	102
 #define	IFSESS_USER_TEXT	"<IfUser>"
 
+module ifsession_module;
+
+static int ifsess_ctx = -1;
 static int ifsess_merged = FALSE;
 
 static const char *trace_channel = "ifsession";
@@ -173,17 +176,17 @@ MODRET start_ifctxt(cmd_rec *cmd) {
 
   if (strcmp(cmd->argv[0], IFSESS_CLASS_TEXT) == 0) {
     name = "_IfClassList";
-    config_type = IFSESS_CLASS_NUMBER;
+    ifsess_ctx = config_type = IFSESS_CLASS_NUMBER;
     eval_type = PR_EXPR_EVAL_OR;
 
   } else if (strcmp(cmd->argv[0], IFSESS_GROUP_TEXT) == 0) {
     name = "_IfGroupList";
-    config_type = IFSESS_GROUP_NUMBER;
+    ifsess_ctx = config_type = IFSESS_GROUP_NUMBER;
     eval_type = PR_EXPR_EVAL_AND;
 
   } else if (strcmp(cmd->argv[0], IFSESS_USER_TEXT) == 0) {
     name = "_IfUserList";
-    config_type = IFSESS_USER_NUMBER;
+    ifsess_ctx = config_type = IFSESS_USER_NUMBER;
     eval_type = PR_EXPR_EVAL_OR;
   }
 
@@ -202,41 +205,41 @@ MODRET start_ifctxt(cmd_rec *cmd) {
       argv = cmd->argv+1;
 
     } else if (strcmp(cmd->argv[1], "regex") == 0) {
-#if defined(HAVE_REGEX_H) && defined(HAVE_REGCOMP)
-      regex_t *preg = NULL;
+#ifdef PR_USE_REGEX
+      pr_regex_t *pre = NULL;
       int res = 0;
 
       if (cmd->argc != 3)
         CONF_ERROR(cmd, "wrong number of parameters");
 
-      preg = pr_regexp_alloc();
+      pre = pr_regexp_alloc(&ifsession_module);
 
-      res = regcomp(preg, cmd->argv[2], REG_EXTENDED|REG_NOSUB);
+      res = pr_regexp_compile(pre, cmd->argv[2], REG_EXTENDED|REG_NOSUB);
       if (res != 0) {
         char errstr[200] = {'\0'};
 
-        regerror(res, preg, errstr, sizeof(errstr));
-        pr_regexp_free(preg);
+        pr_regexp_error(res, pre, errstr, sizeof(errstr));
+        pr_regexp_free(NULL, pre);
 
         CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, ": '", cmd->argv[2], "' failed "
           "regex compilation: ", errstr, NULL));
       }
 
-      c = add_config_param(name, 2, NULL, NULL);
+      c = add_config_param(name, 3, NULL, NULL, NULL);
       c->config_type = config_type;
-      c->argv[0] = pcalloc(c->pool, sizeof(unsigned char));
+      c->argv[0] = pstrdup(c->pool, cmd->arg);
+      c->argv[1] = pcalloc(c->pool, sizeof(unsigned char));
       *((unsigned char *) c->argv[0]) = PR_EXPR_EVAL_REGEX;
-      c->argv[1] = (void *) preg;
+      c->argv[2] = (void *) pre;
 
       return PR_HANDLED(cmd);
 
 #else
       CONF_ERROR(cmd, "The 'regex' parameter cannot be used on this system, "
         "as you do not have POSIX compliant regex support");
-#endif /* HAVE_REGEX_H && HAVE_REGCOMP */
+#endif /* regex support */
 
     } else {
-
       argc = cmd->argc-1;
       argv = cmd->argv;
     }
@@ -251,12 +254,13 @@ MODRET start_ifctxt(cmd_rec *cmd) {
   c = add_config_param(name, 0);
 
   c->config_type = config_type;
-  c->argc = acl->nelts + 1;
-  c->argv = pcalloc(c->pool, (c->argc + 1) * sizeof(char *));
-  c->argv[0] = pcalloc(c->pool, sizeof(unsigned char));
-  *((unsigned char *) c->argv[0]) = eval_type;
+  c->argc = acl->nelts + 2;
+  c->argv = pcalloc(c->pool, (c->argc + 2) * sizeof(char *));
+  c->argv[0] = pstrdup(c->pool, cmd->arg);
+  c->argv[1] = pcalloc(c->pool, sizeof(unsigned char));
+  *((unsigned char *) c->argv[1]) = eval_type;
 
-  argv = (char **) c->argv + 1;
+  argv = (char **) c->argv + 2;
 
   if (acl) {
     while (acl->nelts--) {
@@ -266,12 +270,32 @@ MODRET start_ifctxt(cmd_rec *cmd) {
   }
 
   *argv = NULL;
-
   return PR_HANDLED(cmd);
 }
 
 MODRET end_ifctxt(cmd_rec *cmd) {
   pr_parser_config_ctxt_close(NULL);
+
+  switch (ifsess_ctx) {
+    case IFSESS_CLASS_NUMBER:
+      if (strcasecmp("</IfClass>", cmd->argv[0]) == 0) {
+        ifsess_ctx = -1;
+      }
+      break;
+
+    case IFSESS_GROUP_NUMBER:
+      if (strcasecmp("</IfGroup>", cmd->argv[0]) == 0) {
+        ifsess_ctx = -1;
+      }
+      break;
+
+    case IFSESS_USER_NUMBER:
+      if (strcasecmp("</IfUser>", cmd->argv[0]) == 0) {
+        ifsess_ctx = -1;
+      }
+      break;
+  }
+
   return PR_HANDLED(cmd);
 }
 
@@ -311,41 +335,42 @@ MODRET ifsess_post_pass(cmd_rec *cmd) {
     if (list != NULL) {
       unsigned char mergein = FALSE;
 
-#if defined(HAVE_REGEX_H) && defined(HAVE_REGCOMP)
-      if (*((unsigned char *) list->argv[0]) == PR_EXPR_EVAL_REGEX) {
-        regex_t *preg = (regex_t *) list->argv[1];
+#ifdef PR_USE_REGEX
+      if (*((unsigned char *) list->argv[1]) == PR_EXPR_EVAL_REGEX) {
+        pr_regex_t *pre = list->argv[2];
 
         if (session.group != NULL &&
-            regexec(preg, session.group, 0, NULL, 0) == 0) {
+            pr_regexp_exec(pre, session.group, 0, NULL, 0, 0, 0) == 0) {
           mergein = TRUE;
 
         } else if (session.groups) {
           register int j = 0;
 
-          for (j = session.groups->nelts-1; j >= 0; j--) {
-            if (regexec(preg, *(((char **) session.groups->elts) + j), 0,
-                NULL, 0) == 0) {
+          for (j = session.groups->nelts-1; j >= 0; j--)
+            if (pr_regexp_exec(pre, *(((char **) session.groups->elts) + j), 0,
+                NULL, 0, 0, 0) == 0) {
               mergein = TRUE;
-            }
           }
         }
+
       } else
-#endif /* HAVE_REGEX_H && HAVE_REGCOMP */
+#endif /* regex support */
     
-      if (*((unsigned char *) list->argv[0]) == PR_EXPR_EVAL_OR &&
-          pr_expr_eval_group_or((char **) &list->argv[1]) == TRUE)
+      if (*((unsigned char *) list->argv[1]) == PR_EXPR_EVAL_OR &&
+          pr_expr_eval_group_or((char **) &list->argv[2]) == TRUE) {
         mergein = TRUE;
 
-      else if (*((unsigned char *) list->argv[0]) == PR_EXPR_EVAL_AND &&
-          pr_expr_eval_group_and((char **) &list->argv[1]) == TRUE)
+      } else if (*((unsigned char *) list->argv[1]) == PR_EXPR_EVAL_AND &&
+          pr_expr_eval_group_and((char **) &list->argv[2]) == TRUE) {
         mergein = TRUE;
  
-      if (pr_expr_eval_group_and((char **) &list->argv[0]) == TRUE)
+      } if (pr_expr_eval_group_and((char **) &list->argv[1]) == TRUE) {
         mergein = TRUE;
+      }
 
       if (mergein) {
         pr_log_debug(DEBUG2, MOD_IFSESSION_VERSION
-          ": merging <IfGroup> directives in");
+          ": merging <IfGroup %s> directives in", (char *) list->argv[0]);
         ifsess_dup_set(session.pool, main_server->conf, c->subset);
 
         /* Add this config_rec pointer to the list of pointers to be
@@ -366,8 +391,8 @@ MODRET ifsess_post_pass(cmd_rec *cmd) {
 
       } else {
         pr_log_debug(DEBUG9, MOD_IFSESSION_VERSION
-          ": <IfGroup> not matched, skipping");
-      } 
+          ": <IfGroup %s> not matched, skipping", (char *) list->argv[0]);
+      }
     }
 
     /* Note: it would be more efficient, memory-wise, to destroy the
@@ -399,28 +424,27 @@ MODRET ifsess_post_pass(cmd_rec *cmd) {
     if (list != NULL) {
       unsigned char mergein = FALSE;
 
-#if defined(HAVE_REGEX_H) && defined(HAVE_REGCOMP)
-      if (*((unsigned char *) list->argv[0]) == PR_EXPR_EVAL_REGEX) {
-        regex_t *preg = (regex_t *) list->argv[1];
+#ifdef PR_USE_REGEX
+      if (*((unsigned char *) list->argv[1]) == PR_EXPR_EVAL_REGEX) {
+        pr_regex_t *pre = list->argv[2];
 
-        if (regexec(preg, session.user, 0, NULL, 0) == 0)
+        if (pr_regexp_exec(pre, session.user, 0, NULL, 0, 0, 0) == 0)
           mergein = TRUE;
 
       } else
-#endif /* HAVE_REGEX_H && HAVE_REGCOMP */
+#endif /* regex support */
 
-      if (*((unsigned char *) list->argv[0]) == PR_EXPR_EVAL_OR &&
-          pr_expr_eval_user_or((char **) &list->argv[1]) == TRUE) {
+      if (*((unsigned char *) list->argv[1]) == PR_EXPR_EVAL_OR &&
+          pr_expr_eval_user_or((char **) &list->argv[2]) == TRUE)
         mergein = TRUE;
 
-      } else if (*((unsigned char *) list->argv[0]) == PR_EXPR_EVAL_AND &&
-          pr_expr_eval_user_and((char **) &list->argv[1]) == TRUE) {
+      else if (*((unsigned char *) list->argv[1]) == PR_EXPR_EVAL_AND &&
+          pr_expr_eval_user_and((char **) &list->argv[2]) == TRUE)
         mergein = TRUE;
-      }
 
       if (mergein) {
         pr_log_debug(DEBUG2, MOD_IFSESSION_VERSION
-          ": merging <IfUser> directives in");
+          ": merging <IfUser %s> directives in", (char *) list->argv[0]);
         ifsess_dup_set(session.pool, main_server->conf, c->subset);
 
         /* Add this config_rec pointer to the list of pointers to be
@@ -441,7 +465,7 @@ MODRET ifsess_post_pass(cmd_rec *cmd) {
 
       } else {
         pr_log_debug(DEBUG9, MOD_IFSESSION_VERSION
-          ": <IfUser> not matched, skipping");
+          ": <IfUser %s> not matched, skipping", (char *) list->argv[0]);
       }
     }
 
@@ -459,17 +483,74 @@ MODRET ifsess_post_pass(cmd_rec *cmd) {
   if (ifsess_merged) {
     /* Try to honor any <Limit LOGIN> sections that may have been merged in. */
     if (!login_check_limits(TOPLEVEL_CONF, FALSE, TRUE, &found)) {
+      pr_log_debug(DEBUG3, MOD_IFSESSION_VERSION
+        ": %s %s: Limit access denies login",
+        session.anon_config ? "ANON" : C_USER, session.user);
+
       pr_log_auth(PR_LOG_NOTICE, "%s %s: Limit access denies login.",
         session.anon_config ? "ANON" : C_USER, session.user);
-      end_login(0);
+      pr_session_disconnect(&ifsession_module, PR_SESS_DISCONNECT_CONFIG_ACL,
+        "Denied by <Limit LOGIN>");
     }
   }
 
   return PR_DECLINED(cmd);
 }
 
+/* Event handlers
+ */
+
+#ifdef PR_SHARED_MODULE
+static void ifsess_mod_unload_ev(const void *event_data, void *user_data) {
+  if (strcmp("mod_ifsession.c", (const char *) event_data) == 0) {
+    pr_event_unregister(&ifsession_module, NULL, NULL);
+  }
+}
+#endif /* PR_SHARED_MODULE */
+
+static void ifsess_postparse_ev(const void *event_data, void *user_data) {
+  /* Make sure that all mod_ifsession sections have been properly closed. */
+
+  if (ifsess_ctx == -1) {
+    /* All sections properly closed; nothing to do. */
+    return;
+  }
+
+  switch (ifsess_ctx) {
+    case IFSESS_CLASS_NUMBER:
+      pr_log_pri(PR_LOG_ERR,
+        "error: unclosed <IfClass> context in config file");
+      break;
+
+    case IFSESS_GROUP_NUMBER:
+      pr_log_pri(PR_LOG_ERR,
+        "error: unclosed <IfGroup> context in config file");
+      break;
+
+    case IFSESS_USER_NUMBER:
+      pr_log_pri(PR_LOG_ERR,
+        "error: unclosed <IfUser> context in config file");
+      break;
+  }
+
+  pr_session_disconnect(&ifsession_module, PR_SESS_DISCONNECT_BAD_CONFIG, NULL);
+  return;
+}
+
 /* Initialization routines
  */
+
+static int ifsess_init(void) {
+#ifdef PR_SHARED_MODULE
+  pr_event_register(&ifsession_module, "core.module-unload",
+    ifsess_mod_unload_ev, NULL);
+#endif /* PR_SHARED_MODULE */
+
+  pr_event_register(&ifsession_module, "core.postparse",
+    ifsess_postparse_ev, NULL);
+
+  return 0;
+}
 
 static int ifsess_sess_init(void) {
   register unsigned int i = 0;
@@ -489,29 +570,30 @@ static int ifsess_sess_init(void) {
     if (list != NULL) {
       unsigned char mergein = FALSE;
 
-#if defined(HAVE_REGEX_H) && defined(HAVE_REGCOMP)
-      if (*((unsigned char *) list->argv[0]) == PR_EXPR_EVAL_REGEX) {
-        regex_t *preg = (regex_t *) list->argv[1];
+#ifdef PR_USE_REGEX
+      if (*((unsigned char *) list->argv[1]) == PR_EXPR_EVAL_REGEX) {
+        pr_regex_t *pre = list->argv[2];
 
-        if (session.class && regexec(preg, session.class->cls_name, 0, NULL,
-            0) == 0)
+        if (session.class &&
+            pr_regexp_exec(pre, session.class->cls_name, 0, NULL, 0,
+              0, 0) == 0) {
           mergein = TRUE;
+        }
 
       } else
-#endif /* HAVE_REGEX_H && HAVE_REGCOMP */
+#endif /* regex support */
 
-      if (*((unsigned char *) list->argv[0]) == PR_EXPR_EVAL_OR &&
-          pr_expr_eval_class_or((char **) &list->argv[1]) == TRUE) {
+      if (*((unsigned char *) list->argv[1]) == PR_EXPR_EVAL_OR &&
+          pr_expr_eval_class_or((char **) &list->argv[2]) == TRUE)
         mergein = TRUE;
 
-      } else if (*((unsigned char *) list->argv[0]) == PR_EXPR_EVAL_AND &&
-          pr_expr_eval_class_and((char **) &list->argv[1]) == TRUE) {
+      else if (*((unsigned char *) list->argv[1]) == PR_EXPR_EVAL_AND &&
+          pr_expr_eval_class_and((char **) &list->argv[2]) == TRUE)
         mergein = TRUE;
-      }
 
       if (mergein) {
         pr_log_debug(DEBUG2, MOD_IFSESSION_VERSION
-          ": merging <IfClass> directives in");
+          ": merging <IfClass %s> directives in", (char *) list->argv[0]);
         ifsess_dup_set(session.pool, main_server->conf, c->subset);
 
         /* Add this config_rec pointer to the list of pointers to be
@@ -530,7 +612,7 @@ static int ifsess_sess_init(void) {
 
       } else {
         pr_log_debug(DEBUG9, MOD_IFSESSION_VERSION
-          ": <IfClass> not matched, skipping");
+          ": <IfClass %s> not matched, skipping", (char *) list->argv[0]);
       }
     }
 
@@ -584,7 +666,7 @@ module ifsession_module = {
   NULL,
 
   /* Module initialization function */
-  NULL,
+  ifsess_init,
 
   /* Session initialization function */
   ifsess_sess_init,

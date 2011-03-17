@@ -1,0 +1,6 @@
+api-tests
+Makefile
+*.log
+*.o
+*~
+.libs

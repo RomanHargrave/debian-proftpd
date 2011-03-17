@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2010 The ProFTPD Project team
+ * Copyright (c) 2001-2011 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* Flexible logging module for proftpd
- * $Id: mod_log.c,v 1.103.2.1 2010/11/04 18:52:40 castaglia Exp $
+ * $Id: mod_log.c,v 1.116 2011/03/17 03:42:01 castaglia Exp $
  */
 
 #include "conf.h"
@@ -99,6 +99,13 @@ struct logfile_struc {
 #define META_PROTOCOL		27
 #define META_VERSION		28
 #define META_RENAME_FROM	29
+#define META_FILE_MODIFIED	30
+#define META_UID		31
+#define META_GID		32
+#define META_RAW_BYTES_IN	33
+#define META_RAW_BYTES_OUT	34
+#define META_EOS_REASON		35
+#define META_VHOST_IP		36
 
 /* For tracking the size of deleted files. */
 static off_t log_dele_filesz = 0;
@@ -116,14 +123,18 @@ static xaset_t			*log_set = NULL;
    %c			- Class
    %D			- full directory path
    %d			- directory (for client)
+   %E			- End-of-session reason
    %{FOOBAR}e		- Contents of environment variable FOOBAR
    %F			- Transfer path (filename for client)
    %f			- Filename
+   %H                   - Local IP address of server handling session
    %h			- Remote client DNS name
+   %I                   - Total number of "raw" bytes read in from network
    %J                   - Request (command) arguments (file.txt, etc)
-   %L                   - Local server IP address
+   %L                   - Local IP address contacted by client
    %l			- Remote logname (from identd)
    %m			- Request (command) method (RETR, etc)
+   %O                   - Total number of "raw" bytes written out to network
    %P			- Process ID of child serving request
    %p			- Port of server serving request
    %r			- Full request (command)
@@ -137,7 +148,11 @@ static xaset_t			*log_set = NULL;
    %V                   - DNS name of server serving request
    %v			- ServerName of server serving request
    %w                   - RNFR path ("whence" a rename comes, i.e. the source)
+   %{file-modified}     - Indicates whether a file is being modified
+                          (i.e. already exists) or not.
    %{protocol}          - Current protocol (e.g. "ftp", "sftp", etc)
+   %{uid}               - UID of logged-in user
+   %{gid}               - Primary GID of logged-in user
    %{version}           - ProFTPD version
 */
 
@@ -196,10 +211,29 @@ static void logformat(char *nickname, char *fmts) {
       arg = NULL;
       tmp++;
       for (;;) {
+        pr_signals_handle();
+ 
+        if (strncmp(tmp, "{file-modified}", 15) == 0) {
+          add_meta(&outs, META_FILE_MODIFIED, 0);
+          tmp += 15;
+          continue;
+        }
+
+        if (strncmp(tmp, "{gid}", 5) == 0) {
+          add_meta(&outs, META_GID, 0);
+          tmp += 5;
+          continue;
+        }
 
         if (strncmp(tmp, "{protocol}", 10) == 0) {
           add_meta(&outs, META_PROTOCOL, 0);
           tmp += 10;
+          continue;
+        }
+
+        if (strncmp(tmp, "{uid}", 5) == 0) {
+          add_meta(&outs, META_UID, 0);
+          tmp += 5;
           continue;
         }
 
@@ -238,6 +272,10 @@ static void logformat(char *nickname, char *fmts) {
             add_meta(&outs, META_DIR_NAME, 0);
             break;
 
+          case 'E':
+            add_meta(&outs, META_EOS_REASON, 0);
+            break;
+
           case 'e':
             if (arg) {
               add_meta(&outs, META_ENV_VAR, 0);
@@ -253,8 +291,16 @@ static void logformat(char *nickname, char *fmts) {
             add_meta(&outs, META_XFER_PATH, 0);
             break;
 
+          case 'H':
+            add_meta(&outs, META_VHOST_IP, 0);
+            break;
+
           case 'h':
             add_meta(&outs, META_REMOTE_HOST, 0);
+            break;
+
+          case 'I':
+            add_meta(&outs, META_RAW_BYTES_IN, 0);
             break;
 
           case 'J':
@@ -271,6 +317,10 @@ static void logformat(char *nickname, char *fmts) {
 
           case 'm':
             add_meta(&outs, META_METHOD, 0);
+            break;
+
+          case 'O':
+            add_meta(&outs, META_RAW_BYTES_OUT, 0);
             break;
 
           case 'p':
@@ -413,6 +463,9 @@ static int parse_classes(char *s) {
                strcasecmp(s, "SECURE") == 0) {
       classes |= CL_SEC;
 
+    } else if (strcasecmp(s, "EXIT") == 0) {
+      classes |= CL_EXIT;
+
     } else {
       pr_log_pri(PR_LOG_NOTICE, "ExtendedLog class '%s' is not defined", s);
       return -1;
@@ -466,7 +519,7 @@ MODRET set_extendedlog(cmd_rec *cmd) {
     res = parse_classes(cmd->argv[2]);
     if (res < 0) {
       CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "invalid log class in '",
-        cmd->argv[2], NULL));    
+        cmd->argv[2], "'", NULL));    
     }
 
     c->argv[1] = palloc(c->pool, sizeof(int));
@@ -652,7 +705,7 @@ static char *get_next_meta(pool *p, cmd_rec *cmd, unsigned char **f) {
         sstrncpy(argp, tmp ? tmp : path, sizeof(arg));
 
       } else {
-        sstrncpy(argp, "", sizeof(arg));
+        sstrncpy(argp, pr_fs_getvwd(), sizeof(arg));
       }
 
       m++;
@@ -698,6 +751,23 @@ static char *get_next_meta(pool *p, cmd_rec *cmd, unsigned char **f) {
       m++;
       break;
 
+    case META_EOS_REASON: {
+      const char *reason_str;
+      char *details = NULL;
+
+      argp = arg;
+
+      reason_str = pr_session_get_disconnect_reason(&details);
+      sstrncpy(argp, reason_str, sizeof(arg));
+      if (details != NULL) {
+        sstrcat(argp, ": ", sizeof(arg));
+        sstrcat(argp, details, sizeof(arg));
+      }
+
+      m++;
+      break;
+    }
+
     case META_FILENAME:
       argp = arg;
 
@@ -731,13 +801,14 @@ static char *get_next_meta(pool *p, cmd_rec *cmd, unsigned char **f) {
             strcmp(cmd->argv[0], C_MKD) == 0 ||
             strcmp(cmd->argv[0], C_RMD) == 0 ||
             strcmp(cmd->argv[0], C_XMKD) == 0 ||
-            strcmp(cmd->argv[0], C_XRMD) == 0)
+            strcmp(cmd->argv[0], C_XRMD) == 0) {
           sstrncpy(arg, dir_abs_path(p, pr_fs_decode_path(p, cmd->arg), TRUE),
             sizeof(arg));
 
-        else
+        } else {
           /* All other situations get a "-".  */
           sstrncpy(argp, "-", sizeof(arg));
+        }
       }
 
       m++;
@@ -758,19 +829,24 @@ static char *get_next_meta(pool *p, cmd_rec *cmd, unsigned char **f) {
         sstrncpy(argp, session.xfer.path, sizeof(arg));
 
       } else {
-        /* Some commands (i.e. DELE) have associated filenames that are not
-         * stored in the session.xfer structure; these should be expanded
-         * properly as well.
+        /* Some commands (i.e. DELE, MKD, XMKD, RMD, XRMD) have associated
+         * filenames that are not stored in the session.xfer structure; these
+         * should be expanded properly as well.
          */
-        if (strcmp(cmd->argv[0], C_DELE) == 0) {
+        if (strcmp(cmd->argv[0], C_DELE) == 0 ||
+            strcmp(cmd->argv[0], C_MKD) == 0 ||
+            strcmp(cmd->argv[0], C_XMKD) == 0 ||
+            strcmp(cmd->argv[0], C_RMD) == 0 ||
+            strcmp(cmd->argv[0], C_XRMD) == 0) {
           char *path;
 
           path = dir_best_path(cmd->tmp_pool,
             pr_fs_decode_path(cmd->tmp_pool, cmd->arg));
           sstrncpy(arg, path, sizeof(arg));
 
-        } else
+        } else {
           sstrncpy(argp, "-", sizeof(arg));
+        }
       }
 
       m++;
@@ -812,8 +888,12 @@ static char *get_next_meta(pool *p, cmd_rec *cmd, unsigned char **f) {
       argp = arg;
       if (strcmp(cmd->argv[0], C_RNTO) == 0) {
         rnfr_path = pr_table_get(session.notes, "mod_core.rnfr-path", NULL);
-        if (rnfr_path == NULL)
+        if (rnfr_path != NULL) {
+          rnfr_path = dir_abs_path(p, pr_fs_decode_path(p, rnfr_path), TRUE);
+
+        } else {
           rnfr_path = "-";
+        }
       }
 
       sstrncpy(argp, rnfr_path, sizeof(arg));
@@ -930,7 +1010,7 @@ static char *get_next_meta(pool *p, cmd_rec *cmd, unsigned char **f) {
             session.xfer.start_time.tv_usec != 0) {
           struct timeval end_time;
 
-          gettimeofday(&end_time,NULL);
+          gettimeofday(&end_time, NULL);
           end_time.tv_sec -= session.xfer.start_time.tv_sec;
 
           if (end_time.tv_usec >= session.xfer.start_time.tv_usec)
@@ -1009,7 +1089,7 @@ static char *get_next_meta(pool *p, cmd_rec *cmd, unsigned char **f) {
 
       argp = arg;
 
-      login_user = pr_table_get(session.notes, "mod_auth.orig-user", FALSE);
+      login_user = pr_table_get(session.notes, "mod_auth.orig-user", NULL);
       if (login_user) {
         sstrncpy(argp, login_user, sizeof(arg));
 
@@ -1069,9 +1149,56 @@ static char *get_next_meta(pool *p, cmd_rec *cmd, unsigned char **f) {
       m++;
       break;
 
+    case META_UID:
+      argp = arg;
+      snprintf(argp, sizeof(arg), "%lu", (unsigned long) session.uid);
+      m++;
+      break;
+
+    case META_GID:
+      argp = arg;
+      snprintf(argp, sizeof(arg), "%lu", (unsigned long) session.gid);
+      m++;
+      break;
+
     case META_VERSION:
       argp = arg;
       sstrncpy(argp, PROFTPD_VERSION_TEXT, sizeof(arg));
+      m++;
+      break;
+
+    case META_FILE_MODIFIED: {
+      char *modified;
+
+      argp = arg;
+
+      modified = pr_table_get(cmd->notes, "mod_xfer.file-modified", NULL);
+      if (modified) {
+        sstrncpy(argp, modified, sizeof(arg));
+
+      } else {
+        sstrncpy(argp, "false", sizeof(arg));
+      }
+
+      m++;
+      break;
+    }
+
+    case META_RAW_BYTES_IN:
+      argp = arg;
+      snprintf(argp, sizeof(arg), "%" PR_LU, (pr_off_t) session.total_raw_in);
+      m++;
+      break;
+
+    case META_RAW_BYTES_OUT:
+      argp = arg;
+      snprintf(argp, sizeof(arg), "%" PR_LU, (pr_off_t) session.total_raw_out);
+      m++;
+      break;
+
+    case META_VHOST_IP:
+      argp = arg;
+      sstrncpy(argp, cmd->server->ServerAddress, sizeof(arg));
       m++;
       break;
 
@@ -1142,7 +1269,17 @@ MODRET log_any(cmd_rec *cmd) {
   /* If not in anon mode, only handle logs for main servers */
   for (lf = logs; lf; lf = lf->next) {
     if (lf->lf_fd != -1 &&
-        (cmd->class & lf->lf_classes)) {
+
+        /* If the logging class of this command is one of the classes
+         * configured for this ExtendedLog...
+         */ 
+        ((cmd->class & lf->lf_classes) ||
+
+         /* ...or if the logging class of this command is unknown (defaults to
+          * zero), and this ExtendedLog is configured to log ALL commands, then
+          * log it.
+          */
+         (cmd->class == 0 && lf->lf_classes == CL_ALL))) {
 
       if (!session.anon_config &&
           lf->lf_conf &&
@@ -1154,6 +1291,15 @@ MODRET log_any(cmd_rec *cmd) {
   }
 
   return PR_DECLINED(cmd);
+}
+
+static void log_exit_ev(const void *event_data, void *user_data) {
+  cmd_rec *cmd;
+
+  cmd = pr_cmd_alloc(session.pool, 1, "EXIT");
+  cmd->class |= CL_EXIT;
+
+  (void) log_any(cmd);
 }
 
 static void log_restart_ev(const void *event_data, void *user_data) {
@@ -1362,8 +1508,8 @@ static int log_sess_init(void) {
   logfile_t *lf = NULL;
 
   /* Open the ServerLog, if present. */
-  if ((serverlog_name = get_param_ptr(main_server->conf, "ServerLog",
-      FALSE)) != NULL) {
+  serverlog_name = get_param_ptr(main_server->conf, "ServerLog", FALSE);
+  if (serverlog_name != NULL) {
     PRIVS_ROOT
     log_closesyslog();
     log_opensyslog(serverlog_name);
@@ -1374,7 +1520,6 @@ static int log_sess_init(void) {
   find_extendedlogs();
 
   for (lf = logs; lf; lf = lf->next) {
-
     if (lf->lf_fd == -1) {
 
       /* Is this ExtendedLog to be written to a file, or to syslog? */
@@ -1416,6 +1561,9 @@ static int log_sess_init(void) {
       }
     }
   }
+
+  /* Register an exit handler for the session. */
+  pr_event_register(&log_module, "core.exit", log_exit_ev, NULL);
 
   return 0;
 }

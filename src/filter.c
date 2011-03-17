@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2009 The ProFTPD Project team
+ * Copyright (c) 2009-2011 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@
  * distribute the resulting executable, without including the source code for
  * OpenSSL in the source distribution.
  *
- * $Id: filter.c,v 1.1 2009/02/22 00:28:07 castaglia Exp $
+ * $Id: filter.c,v 1.4 2011/03/03 21:38:54 castaglia Exp $
  */
 
 #include "conf.h"
@@ -29,15 +29,15 @@
 static const char *trace_channel = "filter";
 
 int pr_filter_allow_path(xaset_t *set, const char *path) {
-#if defined(HAVE_REGEX_H) && defined(HAVE_REGCOMP)
-  regex_t *preg;
+#ifdef PR_USE_REGEX
+  pr_regex_t *pre;
   int res;
 
   /* Check any relevant PathAllowFilter first. */
 
-  preg = get_param_ptr(set, "PathAllowFilter", FALSE);
-  if (preg) {
-    res = regexec(preg, path, 0, NULL, 0);
+  pre = get_param_ptr(set, "PathAllowFilter", FALSE);
+  if (pre) {
+    res = pr_regexp_exec(pre, path, 0, NULL, 0, 0, 0);
     if (res != 0) {
       return PR_FILTER_ERR_FAILS_ALLOW_FILTER;
     }
@@ -47,10 +47,9 @@ int pr_filter_allow_path(xaset_t *set, const char *path) {
 
   /* Next check any applicable PathDenyFilter. */
 
-  preg = get_param_ptr(CURRENT_CONF, "PathDenyFilter", FALSE);
- 
-  if (preg) {
-    res = regexec(preg, path, 0, NULL, 0);
+  pre = get_param_ptr(CURRENT_CONF, "PathDenyFilter", FALSE);
+  if (pre) {
+    res = pr_regexp_exec(pre, path, 0, NULL, 0, 0, 0);
     if (res == 0) {
       return PR_FILTER_ERR_FAILS_DENY_FILTER;
     } 
@@ -62,4 +61,26 @@ int pr_filter_allow_path(xaset_t *set, const char *path) {
 #else
   return 0;
 #endif
+}
+
+int pr_filter_parse_flags(pool *p, const char *flags_str) {
+  if (p == NULL ||
+      flags_str == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  if (flags_str[0] != '[' ||
+      flags_str[strlen(flags_str)-1] != ']') {
+    errno = EINVAL;
+    return -1;
+  }
+
+  /* Right now, we only support "[NC]", for "no case", i.e. REG_ICASE. */
+  if (strcmp(flags_str, "[NC]") == 0 ||
+      strcmp(flags_str, "[nocase]") == 0) {
+    return REG_ICASE;
+  }
+
+  return 0;
 }

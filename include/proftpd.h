@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2008 The ProFTPD Project team
+ * Copyright (c) 2001-2011 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* General options
- * $Id: proftpd.h,v 1.60 2009/09/02 17:58:53 castaglia Exp $
+ * $Id: proftpd.h,v 1.68 2011/02/28 02:29:04 castaglia Exp $
  */
 
 #ifndef PR_PROFTPD_H
@@ -63,6 +63,7 @@ typedef int (*callback_t)(CALLBACK_FRAME);
 struct conn_struc;
 struct cmd_struc;
 struct config_struc;
+struct modret_struc;
 
 typedef struct {
   pool *pool;
@@ -123,6 +124,8 @@ typedef struct {
   char *proc_prefix;			/* The "prefix" of our process name */
 
   int wtmp_log;				/* Are we logging to wtmp? */
+  int multiline_rfc2228;		/* Are we using RFC2228-style multiline responses ? */
+
   struct conn_struc *c;			/* Control connection */
   struct conn_struc *d;			/* Data connection */
 
@@ -176,6 +179,24 @@ typedef struct {
    */
   unsigned int total_files_xfer;
 
+  /* Total number of "raw" protocol bytes read in from the network for
+   * the session.
+   */
+  off_t total_raw_in;
+
+  /* Total number of "raw" protocol bytes written out to the network for
+   * the session.
+   */
+  off_t total_raw_out;
+
+  /* Reason code for end of session/disconnection; in reality, the values
+   * come from the pr_disconnect_reason_e enum in session.h.
+   */
+  int disconnect_reason;
+
+  /* Module which disconnected/ended the session */
+  struct module_struc *disconnect_module;
+
 } session_t;
 
 /* Daemon identity values, defined in main.c */
@@ -192,7 +213,6 @@ extern array_header *daemon_gids;
 extern session_t	session;
 extern char AddressCollisionCheck;
 extern char ServerType;
-extern char MultilineRFC2228;
 
 /* Session/State flags */
 
@@ -244,9 +264,29 @@ extern char MultilineRFC2228;
 #define PR_TIMER_STALLED	4
 #define PR_TIMER_SESSION	5
 
-/* Misc Prototypes */
+/* Developer code */
 
-void end_login(int);
+#ifdef PR_DEVEL_TIMING
+# define PR_DEVEL_CLOCK(code) \
+  { \
+    int local_errno; \
+    struct timeval local_before, local_after, local_since; \
+    timerclear(&local_before); \
+    timerclear(&local_after); \
+    timerclear(&local_since); \
+    (void) gettimeofday(&local_before, NULL); \
+    (code); \
+    local_errno = errno; \
+    (void) gettimeofday(&local_after, NULL); \
+    timersub(&local_after, &local_before, &local_since); \
+    (void) pr_trace_msg("timing", 9, "code at %s:%d took %lu sec, %lu usec", __FILE__, __LINE__, (unsigned long) local_since.tv_sec, (unsigned long) local_since.tv_usec); \
+    errno = local_errno; \
+  }
+#else
+# define PR_DEVEL_CLOCK(code)   (code)
+#endif /* PR_DEVEL_TIMING */
+
+/* Misc Prototypes */
 void pr_signals_handle(void);
 void session_exit(int, void *, int, void *);
 void set_daemon_rlimits(void);
