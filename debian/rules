@@ -102,7 +102,6 @@ myclean:
 	rm -rf debian/$(PACKAGE) debian/$(NAME)-doc
 	rm -rf debian/files* debian/*.gz core
 	rm -f $$(find * -name "*.orig") modules/mod_ratio.c
-	rm -f contrib/dist/rpm/proftpd.spec
 	rm -rf $$(find $(CURDIR) -name .libs)
 	rm -f $$(find $(CURDIR) -name config.log )
 	rm -f $$(find $(CURDIR) -name config.status )

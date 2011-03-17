@@ -44,6 +44,7 @@ proftpd-dfsg (1.3.4~rc1+20110317-1) unstable; urgency=low
         debian/patches/odbc
   * Patch use_hypen_in_manpage.patch: dropped extension.
   * Now debian/control is also a phony target.
+  * Now clean target does not remove upstream files to be more nice against gbp.
 
  -- Francesco Paolo Lovergine <frankie@debian.org>  Thu, 17 Mar 2011 11:05:31 +0100
 
