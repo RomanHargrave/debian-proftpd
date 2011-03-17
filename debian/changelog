@@ -45,8 +45,10 @@ proftpd-dfsg (1.3.4~rc1+20110317-1) unstable; urgency=low
   * Patch use_hypen_in_manpage.patch: dropped extension.
   * Now debian/control is also a phony target.
   * Now clean target does not remove upstream files to be more nice against gbp.
+  * Fixed a typo in debian/proftpd-substvars.in and regenerated the template. 
+  * Fixed a typo in proftpd-dev.README.Debian
 
- -- Francesco Paolo Lovergine <frankie@debian.org>  Thu, 17 Mar 2011 11:05:31 +0100
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Thu, 17 Mar 2011 13:09:12 +0100
 
 proftpd-dfsg (1.3.3d-4) unstable; urgency=high
 
