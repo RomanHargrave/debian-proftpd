@@ -172,5 +172,5 @@ checkroot:
 	dh_testdir
 	dh_testroot
 
-.PHONY: binary binary-arch binary-indep clean checkroot myclean install configure debian/proftpd-substvars
+.PHONY: binary binary-arch binary-indep clean checkroot myclean install configure debian/proftpd-substvars debian/control
 

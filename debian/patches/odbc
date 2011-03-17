@@ -5,12 +5,12 @@ Bug-Debian: http://bugs.debian.org/366397
 
 Index: proftpd-dfsg/contrib/mod_sql_odbc.c
 ===================================================================
---- proftpd-dfsg.orig/contrib/mod_sql_odbc.c	2011-02-07 17:47:07.000000000 +0100
-+++ proftpd-dfsg/contrib/mod_sql_odbc.c	2011-02-08 13:37:54.000000000 +0100
+--- proftpd-dfsg.orig/contrib/mod_sql_odbc.c	2011-03-17 10:44:56.000000000 +0100
++++ proftpd-dfsg/contrib/mod_sql_odbc.c	2011-03-17 10:48:28.000000000 +0100
 @@ -22,6 +22,7 @@
   * the source code for OpenSSL in the source distribution.
   *
-  * $Id: mod_sql_odbc.c,v 1.11 2009/10/02 21:22:56 castaglia Exp $
+  * $Id: mod_sql_odbc.c,v 1.12 2011/02/27 21:36:04 castaglia Exp $
 + * $Libraries: -lodbc $
   */
  
