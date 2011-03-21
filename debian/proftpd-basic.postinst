@@ -27,7 +27,7 @@ installftp()
 {
 	if ! grep -q "^ftp:" /etc/passwd
 	then
-	    adduser --system ftp || true
+	    adduser --system ftp --home /srv/ftp || true
             if [ -f /usr/share/proftpd/templates/welcome.msg -a -d ~ftp ] ; then
                 cp -p -v /usr/share/proftpd/templates/welcome.msg ~ftp/welcome.msg.proftpd-new || true
                 do_update ~ftp/welcome.msg || true
