@@ -47,6 +47,9 @@ proftpd-dfsg (1.3.4~rc1+20110317-1) unstable; urgency=low
   * Now clean target does not remove upstream files to be more nice against gbp.
   * Fixed a typo in debian/proftpd-substvars.in and regenerated the template. 
   * Fixed a typo in proftpd-dev.README.Debian
+  * Moved ftp user home to /srv/ftp as used by other ftp servers.
+  * Now ftp home and user are removed on purge (old or new one).
+  * Removing the whole log directory on purge.
 
  -- Francesco Paolo Lovergine <frankie@debian.org>  Thu, 17 Mar 2011 13:09:12 +0100
 

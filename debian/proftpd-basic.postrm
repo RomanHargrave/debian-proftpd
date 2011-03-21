@@ -10,8 +10,10 @@ fi
 if [ "$1" = "purge" ]
 then
     rm -rf /etc/proftpd 
-    update-rc.d proftpd remove >/dev/null || exit $?
+    rm -rf /var/log/proftpd
     userdel --remove --force proftpd || true
+    userdel --remove --force ftp || true
+    update-rc.d proftpd remove >/dev/null || exit $?
 fi
 
 #DEBHELPER#
