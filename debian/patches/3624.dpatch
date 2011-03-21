@@ -1,0 +1,42 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## 3624.dpatch by Francesco Paolo Lovergine <frankie@debian.org>
+##
+## All lines beginning with `## DP:' are a description of the patch.
+## DP: No description.
+
+@DPATCH@
+diff -urNad '--exclude=CVS' '--exclude=.svn' '--exclude=.git' '--exclude=.arch' '--exclude=.hg' '--exclude=_darcs' '--exclude=.bzr' git~/contrib/mod_tls.c git/contrib/mod_tls.c
+--- git~/contrib/mod_tls.c	2011-03-21 23:04:22.000000000 +0100
++++ git/contrib/mod_tls.c	2011-03-21 23:08:46.000000000 +0100
+@@ -1772,12 +1772,30 @@
+ 
+   /* Stash the SSL object in the pointers of the correct NetIO streams. */
+   if (conn == session.c) {
++    pr_buffer_t *strm_buf;
++
+     ctrl_ssl = ssl;
+     tls_ctrl_rd_nstrm->strm_data = tls_ctrl_wr_nstrm->strm_data = (void *) ssl;
+ 
+-  } else if (conn == session.d)
++    /* Clear any data from the NetIO stream buffers which may have been read
++     * in before the SSL/TLS handshake occurred (Bug#3624).
++     */
++    strm_buf = tls_ctrl_rd_nstrm->strm_buf;
++    strm_buf->current = NULL;
++    strm_buf->remaining = strm_buf->buflen;
++
++  } else if (conn == session.d) {
++    pr_buffer_t *strm_buf;
++
+     tls_data_rd_nstrm->strm_data = tls_data_wr_nstrm->strm_data = (void *) ssl;
+ 
++    /* Clear any data from the NetIO stream buffers which may have been read
++     * in before the SSL/TLS handshake occurred (Bug#3624).
++     */
++    strm_buf = tls_data_rd_nstrm->strm_buf;
++    strm_buf->current = NULL;
++    strm_buf->remaining = strm_buf->buflen;
++  }
+   /* TLS handshake on the control channel... */
+   if (!on_data) {
+     tls_log("%s connection accepted, using cipher %s (%d bits)",
