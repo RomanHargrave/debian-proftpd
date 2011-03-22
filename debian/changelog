@@ -1,4 +1,4 @@
-proftpd-dfsg (1.3.3d-7) unstable; urgency=low
+proftpd-dfsg (1.3.3d-7) unstable; urgency=high
 
   * [SECURITY] new patch debian/patches/3624: this patch fixes the issue by
     causing mod_tls to clear the buffers of any data received from the client, 
