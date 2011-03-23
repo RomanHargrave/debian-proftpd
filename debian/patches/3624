@@ -1,7 +1,7 @@
-Index: git/contrib/mod_tls.c
+Index: proftpd-dfsg/contrib/mod_tls.c
 ===================================================================
---- git.orig/contrib/mod_tls.c	2011-03-21 22:48:26.000000000 +0100
-+++ git/contrib/mod_tls.c	2011-03-21 22:52:10.000000000 +0100
+--- proftpd-dfsg.orig/contrib/mod_tls.c	2011-03-23 10:49:05.000000000 +0100
++++ proftpd-dfsg/contrib/mod_tls.c	2011-03-23 10:49:24.000000000 +0100
 @@ -61,7 +61,7 @@
  # include <sys/mman.h>
  #endif
@@ -11,7 +11,7 @@ Index: git/contrib/mod_tls.c
  
  /* Make sure the version of proftpd is as necessary. */
  #if PROFTPD_VERSION_NUMBER < 0x0001021001 
-@@ -2758,11 +2758,29 @@
+@@ -2758,11 +2758,33 @@
  
    /* Stash the SSL object in the pointers of the correct NetIO streams. */
    if (conn == session.c) {
@@ -24,8 +24,10 @@ Index: git/contrib/mod_tls.c
 +     * in before the SSL/TLS handshake occurred (Bug#3624).
 +     */
 +    strm_buf = tls_ctrl_rd_nstrm->strm_buf;
-+    strm_buf->current = NULL;
-+    strm_buf->remaining = strm_buf->buflen;
++    if (strm_buf != NULL) {
++      strm_buf->current = NULL;
++      strm_buf->remaining = strm_buf->buflen;
++    }
 +
    } else if (conn == session.d) {
 +    pr_buffer_t *strm_buf;
@@ -36,8 +38,10 @@ Index: git/contrib/mod_tls.c
 +     * in before the SSL/TLS handshake occurred (Bug#3624).
 +     */
 +    strm_buf = tls_data_rd_nstrm->strm_buf;
-+    strm_buf->current = NULL;
-+    strm_buf->remaining = strm_buf->buflen;
++    if (strm_buf != NULL) {
++      strm_buf->current = NULL;
++      strm_buf->remaining = strm_buf->buflen;
++    }
    }
  
  #if OPENSSL_VERSION_NUMBER == 0x009080cfL
