@@ -1,0 +1,44 @@
+Index: proftpd-dfsg/contrib/mod_tls.c
+===================================================================
+--- proftpd-dfsg.orig/contrib/mod_tls.c	2011-03-23 09:56:16.000000000 +0100
++++ proftpd-dfsg/contrib/mod_tls.c	2011-03-23 10:46:50.000000000 +0100
+@@ -3004,9 +3004,20 @@
+ 
+   /* Stash the SSL object in the pointers of the correct NetIO streams. */
+   if (conn == session.c) {
++    pr_buffer_t *strm_buf;
++
+     ctrl_ssl = ssl;
+     tls_ctrl_rd_nstrm->strm_data = tls_ctrl_wr_nstrm->strm_data = (void *) ssl;
+ 
++    /* Clear any data from the NetIO stream buffers which may have been read
++     * in before the SSL/TLS handshake occurred (Bug#3624).
++     */
++    strm_buf = tls_ctrl_rd_nstrm->strm_buf;
++    if (strm_buf != NULL) {
++      strm_buf->current = NULL;
++      strm_buf->remaining = strm_buf->buflen;
++    }
++
+ #if OPENSSL_VERSION_NUMBER >= 0x009080dfL
+     if (SSL_get_secure_renegotiation_support(ssl) == 1) {
+       /* If the peer indicates that it can support secure renegotiations,
+@@ -3018,7 +3029,18 @@
+ #endif /* OpenSSL 0.9.8m and later */
+ 
+   } else if (conn == session.d) {
++    pr_buffer_t *strm_buf;
++
+     tls_data_rd_nstrm->strm_data = tls_data_wr_nstrm->strm_data = (void *) ssl;
++
++    /* Clear any data from the NetIO stream buffers which may have been read
++     * in before the SSL/TLS handshake occurred (Bug#3624).
++     */
++    strm_buf = tls_data_rd_nstrm->strm_buf;
++    if (strm_buf != NULL) {
++      strm_buf->current = NULL;
++      strm_buf->remaining = strm_buf->buflen;
++    }
+   }
+ 
+ #if OPENSSL_VERSION_NUMBER == 0x009080cfL
