@@ -53,8 +53,10 @@ proftpd-dfsg (1.3.4~rc1+20110317-1) unstable; urgency=low
   * [SECURITY,PATCH] 3624 This patch fixes the issue by causing mod_tls 
     to clear the buffers of any data received from the client, once the SSL/TLS 
     handshake has succeeded.
+  * Now lastlog logging is enabled at building time to allow UseLastlog on/off 
+    use in configuration. Thanks TerminX.
 
- -- Francesco Paolo Lovergine <frankie@debian.org>  Wed, 23 Mar 2011 09:56:33 +0100
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Wed, 23 Mar 2011 13:04:35 +0100
 
 proftpd-dfsg (1.3.3d-4) unstable; urgency=high
 
