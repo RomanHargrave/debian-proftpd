@@ -23,7 +23,7 @@
  */
 
 /* TransferRate throttling
- * $Id: throttle.c,v 1.8 2011/01/12 06:54:49 castaglia Exp $
+ * $Id: throttle.c,v 1.10 2011/03/23 16:22:31 castaglia Exp $
  */
 
 #include "conf.h"
@@ -136,7 +136,7 @@ void pr_throttle_init(cmd_rec *cmd) {
     }
 
     if (c->argc > 4) {
-      if (strcmp(c->argv[4], "user") == 0) {
+      if (strncmp(c->argv[4], "user", 5) == 0) {
 
         if (pr_expr_eval_user_or((char **) &c->argv[5]) == TRUE &&
             *((unsigned int *) c->argv[3]) > precedence) {
@@ -151,7 +151,7 @@ void pr_throttle_init(cmd_rec *cmd) {
           have_group_rate = have_class_rate = FALSE;
         }
 
-      } else if (strcmp(c->argv[4], "group") == 0) {
+      } else if (strncmp(c->argv[4], "group", 6) == 0) {
 
         if (pr_expr_eval_group_and((char **) &c->argv[5]) == TRUE &&
             *((unsigned int *) c->argv[3]) > precedence) {
@@ -166,7 +166,7 @@ void pr_throttle_init(cmd_rec *cmd) {
           have_user_rate = have_class_rate = FALSE;
         }
 
-      } else if (strcmp(c->argv[4], "class") == 0) {
+      } else if (strncmp(c->argv[4], "class", 6) == 0) {
 
         if (pr_expr_eval_class_or((char **) &c->argv[5]) == TRUE &&
           *((unsigned int *) c->argv[3]) > precedence) {
@@ -297,13 +297,18 @@ void pr_throttle_pause(off_t xferlen, int xfer_ending) {
     xfer_rate_sigmask(TRUE);
 
     if (select(0, NULL, NULL, NULL, &tv) < 0) {
+      int xerrno = errno;
+
       if (XFER_ABORTED) {
         pr_log_pri(PR_LOG_NOTICE, "throttling interrupted, transfer aborted");
         return;
       }
 
-      pr_log_pri(PR_LOG_WARNING, "warning: unable to throttle bandwidth: %s",
-        strerror(errno));
+      /* At this point, we've probably been interrupted by one of the few
+       * signals not masked off, e.g. SIGTERM.
+       */
+      pr_log_debug(DEBUG0, "unable to throttle bandwidth: %s",
+        strerror(xerrno));
     }
 
     xfer_rate_sigmask(FALSE);

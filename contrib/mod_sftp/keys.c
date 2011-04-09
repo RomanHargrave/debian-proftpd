@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: keys.c,v 1.12 2011/02/28 06:54:47 castaglia Exp $
+ * $Id: keys.c,v 1.14 2011/03/31 22:17:15 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -747,7 +747,7 @@ static EVP_PKEY *get_pkey_from_data(pool *p, char *pkey_data,
 
   pkey_type = sftp_msg_read_string(p, &pkey_data, &pkey_datalen);
 
-  if (strcmp(pkey_type, "ssh-rsa") == 0) {
+  if (strncmp(pkey_type, "ssh-rsa", 8) == 0) {
     RSA *rsa;
 
     pkey = EVP_PKEY_new();
@@ -776,7 +776,7 @@ static EVP_PKEY *get_pkey_from_data(pool *p, char *pkey_data,
       return NULL;
     }
 
-  } else if (strcmp(pkey_type, "ssh-dss") == 0) {
+  } else if (strncmp(pkey_type, "ssh-dss", 8) == 0) {
     DSA *dsa;
 
     pkey = EVP_PKEY_new();
@@ -1295,6 +1295,14 @@ static const char *rsa_sign_data(pool *p, const unsigned char *data,
   return ptr;
 }
 
+/* RFC 4253, Section 6.6, is quite specific about the length of a DSA
+ * ("ssh-dss") signature blob.  It is comprised of two integers R and S,
+ * each 160 bits (20 bytes), so that the total signature blob is 40 bytes
+ * long.
+ */
+#define SFTP_DSA_INTEGER_LEN			20
+#define SFTP_DSA_SIGNATURE_LEN			(SFTP_DSA_INTEGER_LEN * 2)
+
 static const char *dsa_sign_data(pool *p, const unsigned char *data,
     size_t datalen, size_t *siglen) {
   DSA *dsa;
@@ -1304,7 +1312,8 @@ static const char *dsa_sign_data(pool *p, const unsigned char *data,
   unsigned char dgst[EVP_MAX_MD_SIZE], sig_data[SFTP_MAX_SIG_SZ];
   char *buf, *ptr;
   size_t bufsz;
-  uint32_t buflen, dgstlen = 0, sig_datalen = 0;
+  uint32_t buflen, dgstlen = 0;
+  unsigned int rlen = 0, slen = 0;
 
   dsa = EVP_PKEY_get1_DSA(sftp_dsa_hostkey);
   if (dsa == NULL) {
@@ -1329,9 +1338,32 @@ static const char *dsa_sign_data(pool *p, const unsigned char *data,
   /* Got the signature, no need for the digest memory. */
   pr_memscrub(dgst, dgstlen);
 
+  rlen = BN_num_bytes(sig->r);
+  slen = BN_num_bytes(sig->s);
+
+  /* Make sure the values of R and S are big enough. */
+  if (rlen > SFTP_DSA_INTEGER_LEN ||
+      slen > SFTP_DSA_INTEGER_LEN) {
+    (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+      "bad DSA signature size (%u, %u)", rlen, slen);
+    DSA_SIG_free(sig);
+    DSA_free(dsa);
+    return NULL;
+  }
+
   memset(sig_data, 0, sizeof(sig_data));
-  sig_datalen += BN_bn2bin(sig->r, sig_data);
-  sig_datalen += BN_bn2bin(sig->s, sig_data + BN_num_bytes(sig->r));
+
+  /* These may look strange, but the pointer arithmetic is necessary to
+   * ensure the correct placement of the R and S values in the signature,
+   * per RFC 4253 Section 6.6 requirements.
+   */
+  BN_bn2bin(sig->r,
+    sig_data + SFTP_DSA_SIGNATURE_LEN - SFTP_DSA_INTEGER_LEN - rlen);
+  BN_bn2bin(sig->s, sig_data + SFTP_DSA_SIGNATURE_LEN - slen);
+
+  /* Done with the signature. */
+  DSA_SIG_free(sig);
+  DSA_free(dsa);
 
   /* XXX Is this buffer large enough?  Too large? */
   buflen = bufsz = SFTP_MAX_SIG_SZ;
@@ -1339,11 +1371,8 @@ static const char *dsa_sign_data(pool *p, const unsigned char *data,
 
   /* Now build up the signature, SSH2-style */
   sftp_msg_write_string(&buf, &buflen, "ssh-dss");
-  sftp_msg_write_data(&buf, &buflen, (char *) sig_data, sig_datalen, TRUE);
-
-  /* Done with the signature. */
-  DSA_SIG_free(sig);
-  DSA_free(dsa);
+  sftp_msg_write_data(&buf, &buflen, (char *) sig_data, SFTP_DSA_SIGNATURE_LEN,
+    TRUE);
 
   /* At this point, buflen is the amount remaining in the allocated buffer.
    * So the total length of the signed data is the buffer size, minus those
@@ -1430,7 +1459,7 @@ int sftp_keys_verify_signed_data(pool *p, const char *pubkey_algo,
     return -1;
   }
 
-  if (strcmp(pubkey_algo, "ssh-dss") == 0) {
+  if (strncmp(pubkey_algo, "ssh-dss", 8) == 0) {
     if (sftp_interop_supports_feature(SFTP_SSH2_FEAT_HAVE_PUBKEY_ALGO_IN_DSA_SIG)) {
       sig_type = sftp_msg_read_string(p, &signature, &signaturelen);
 
@@ -1453,7 +1482,7 @@ int sftp_keys_verify_signed_data(pool *p, const char *pubkey_algo,
   EVP_DigestUpdate(&ctx, sig_data, sig_datalen);
   EVP_DigestFinal(&ctx, digest, &digestlen);
 
-  if (strcmp(sig_type, "ssh-rsa") == 0) {
+  if (strncmp(sig_type, "ssh-rsa", 8) == 0) {
     RSA *rsa;
     int ok;
 
@@ -1475,7 +1504,7 @@ int sftp_keys_verify_signed_data(pool *p, const char *pubkey_algo,
 
     RSA_free(rsa);
 
-  } else if (strcmp(sig_type, "ssh-dss") == 0) {
+  } else if (strncmp(sig_type, "ssh-dss", 8) == 0) {
     DSA *dsa;
     DSA_SIG *dsa_sig;
     int ok;

@@ -26,7 +26,7 @@
  * This is mod_delay, contrib software for proftpd 1.2.10 and above.
  * For more information contact TJ Saunders <tj@castaglia.org>.
  *
- * $Id: mod_delay.c,v 1.48 2011/02/15 21:29:27 castaglia Exp $
+ * $Id: mod_delay.c,v 1.55 2011/03/22 18:44:16 castaglia Exp $
  */
 
 #include "conf.h"
@@ -672,9 +672,9 @@ static int delay_table_init(void) {
 }
 
 static int delay_table_load(int lock_table) {
+  struct flock lock;
 
   if (lock_table) {
-    struct flock lock;
     lock.l_type = F_WRLCK;
     lock.l_whence = 0;
     lock.l_start = 0;
@@ -686,9 +686,9 @@ static int delay_table_load(int lock_table) {
       if (errno == EINTR) {
         pr_signals_handle();
         continue;
+      }
 
-     } else
-       return -1;
+      return -1;
     }
   }
 
@@ -700,7 +700,28 @@ static int delay_table_load(int lock_table) {
       MAP_SHARED, delay_tab.dt_fd, 0);
 
     if (delay_tab.dt_data == MAP_FAILED) {
+      int xerrno = errno;
+
       delay_tab.dt_data = NULL;
+
+      if (lock_table) {
+        /* Make sure we release the lock before returning. */
+        lock.l_type = F_UNLCK;
+        lock.l_whence = 0;
+        lock.l_start = 0;
+        lock.l_len = 0;
+
+        pr_trace_msg(trace_channel, 8, "unlocking DelayTable '%s'",
+          delay_tab.dt_path);
+        while (fcntl(delay_tab.dt_fd, F_SETLKW, &lock) < 0) {
+          if (errno == EINTR) {
+            pr_signals_handle();
+            continue;
+          }
+        }
+      }
+
+      errno = xerrno; 
       return -1;
     }
   }
@@ -903,11 +924,11 @@ static int delay_handle_info(pr_ctrls_t *ctrl, int reqargc,
     xerrno = errno;
 
     pr_ctrls_add_response(ctrl,
-      "unable to load DelayTable '%s' into memory: %s",
-      delay_tab.dt_path, strerror(xerrno));
+      "unable to load DelayTable '%s' (fd %d) into memory: %s",
+      delay_tab.dt_path, delay_tab.dt_fd, strerror(xerrno));
     pr_trace_msg(trace_channel, 1,
-      "unable to load DelayTable '%s' into memory: %s",
-      delay_tab.dt_path, strerror(xerrno));
+      "unable to load DelayTable '%s' (fd %d) into memory: %s",
+      delay_tab.dt_path, delay_tab.dt_fd, strerror(xerrno));
 
     pr_fsio_close(fh);
     delay_tab.dt_fd = -1;
@@ -1193,10 +1214,18 @@ MODRET delay_post_pass(cmd_rec *cmd) {
   unsigned int rownum;
   long interval, median;
   const char *proto;
+  unsigned char *authenticated;
 
   if (!delay_engine)
     return PR_DECLINED(cmd);
 
+  /* Has the client already authenticated? */
+  authenticated = get_param_ptr(cmd->server->conf, "authenticated", FALSE);
+  if (authenticated != NULL &&
+      *authenticated == TRUE) {
+    return PR_DECLINED(cmd);
+  }
+ 
   /* We use sid-1, since the sid is a server number, and the locking
    * routines want a row index.  However, PASS rows are always after
    * USER rows, so we need to add 1 to the row number, leaving us
@@ -1209,19 +1238,19 @@ MODRET delay_post_pass(cmd_rec *cmd) {
     int xerrno = errno;
 
     pr_log_pri(PR_LOG_WARNING, MOD_DELAY_VERSION
-      ": unable to load DelayTable '%s' into memory: %s",
-      delay_tab.dt_path, strerror(xerrno));
+      ": unable to load DelayTable '%s' (fd %d) into memory: %s",
+      delay_tab.dt_path, delay_tab.dt_fd, strerror(xerrno));
     pr_trace_msg(trace_channel, 1,
-      "unable to load DelayTable '%s' into memory: %s",
-      delay_tab.dt_path, strerror(xerrno));
+      "unable to load DelayTable '%s' (fd %d) into memory: %s",
+      delay_tab.dt_path, delay_tab.dt_fd, strerror(xerrno));
 
     errno = xerrno;
     return PR_DECLINED(cmd);
   }
 
-  delay_table_wlock(rownum);
-
   gettimeofday(&tv, NULL);
+
+  delay_table_wlock(rownum);
 
   interval = (tv.tv_sec - delay_tv.tv_sec) * 1000000 +
     (tv.tv_usec - delay_tv.tv_usec);
@@ -1238,7 +1267,7 @@ MODRET delay_post_pass(cmd_rec *cmd) {
    * poisoning the cache.
    */
   if (delay_npass < (DELAY_NVALUES / DELAY_SESS_NVALUES)) {
-    pr_trace_msg("delay", 8, "adding %ld usecs to PASS row", interval);
+    pr_trace_msg(trace_channel, 8, "adding %ld usecs to PASS row", interval);
     delay_table_add_interval(rownum, proto, interval);
     delay_npass++;
 
@@ -1298,10 +1327,18 @@ MODRET delay_post_user(cmd_rec *cmd) {
   unsigned int rownum;
   long interval, median;
   const char *proto;
+  unsigned char *authenticated;
 
   if (!delay_engine)
     return PR_DECLINED(cmd);
 
+  /* Has the client already authenticated? */
+  authenticated = get_param_ptr(cmd->server->conf, "authenticated", FALSE);
+  if (authenticated != NULL &&
+      *authenticated == TRUE) {
+    return PR_DECLINED(cmd);
+  }
+ 
   /* We use sid-1, since the sid is a server number, and the locking
    * routines want a row index.
    */
@@ -1312,18 +1349,19 @@ MODRET delay_post_user(cmd_rec *cmd) {
     int xerrno = errno;
 
     pr_log_pri(PR_LOG_WARNING, MOD_DELAY_VERSION
-      ": unable to load DelayTable '%s' into memory: %s",
-      delay_tab.dt_path, strerror(xerrno));
-    pr_trace_msg("delay", 1, "unable to load DelayTable '%s' into memory: %s",
-      delay_tab.dt_path, strerror(xerrno));
+      ": unable to load DelayTable '%s' (fd %d) into memory: %s",
+      delay_tab.dt_path, delay_tab.dt_fd, strerror(xerrno));
+    pr_trace_msg(trace_channel, 1,
+      "unable to load DelayTable '%s' (fd %d) into memory: %s",
+      delay_tab.dt_path, delay_tab.dt_fd, strerror(xerrno));
 
     errno = xerrno;
     return PR_DECLINED(cmd);
   }
 
-  delay_table_wlock(rownum);
-
   gettimeofday(&tv, NULL);
+
+  delay_table_wlock(rownum);
 
   interval = (tv.tv_sec - delay_tv.tv_sec) * 1000000 +
     (tv.tv_usec - delay_tv.tv_usec);
@@ -1340,7 +1378,7 @@ MODRET delay_post_user(cmd_rec *cmd) {
    * poisoning the cache.
    */
   if (delay_nuser < (DELAY_NVALUES / DELAY_SESS_NVALUES)) {
-    pr_trace_msg("delay", 8, "adding %ld usecs to USER row", interval);
+    pr_trace_msg(trace_channel, 8, "adding %ld usecs to USER row", interval);
     delay_table_add_interval(rownum, proto, interval);
     delay_nuser++;
 
@@ -1422,11 +1460,22 @@ static void delay_postparse_ev(const void *event_data, void *user_data) {
 }
 
 static void delay_restart_ev(const void *event_data, void *user_data) {
+#if defined(PR_USE_CTRLS)
+    register unsigned int i;
+#endif /* PR_USE_CTRLS */
+
   if (delay_pool)
     destroy_pool(delay_pool);
 
   delay_pool = make_sub_pool(permanent_pool);
   pr_pool_tag(delay_pool, MOD_DELAY_VERSION);
+
+#if defined(PR_USE_CTRLS)
+  for (i = 0; delay_acttab[i].act_action; i++) {
+    delay_acttab[i].act_acl = pcalloc(delay_pool, sizeof(ctrls_acl_t));
+    pr_ctrls_init_acl(delay_acttab[i].act_acl);
+  }
+#endif /* PR_USE_CTRLS */
 
   return;
 }
@@ -1451,7 +1500,7 @@ static void delay_shutdown_ev(const void *event_data, void *user_data) {
   }
   PRIVS_RELINQUISH
 
-  if (!fh) {
+  if (fh == NULL) {
     pr_log_pri(PR_LOG_WARNING, MOD_DELAY_VERSION
       ": unable to open DelayTable '%s': %s", delay_tab.dt_path,
       strerror(xerrno));
@@ -1466,12 +1515,14 @@ static void delay_shutdown_ev(const void *event_data, void *user_data) {
     xerrno = errno;
     pr_fsio_close(fh);
 
-    errno = xerrno;
     pr_log_pri(PR_LOG_WARNING, MOD_DELAY_VERSION
-      ": unable to load DelayTable '%s' into memory: %s",
-      delay_tab.dt_path, strerror(errno));
-    pr_trace_msg("delay", 1, "unable to load DelayTable '%s' into memory: %s",
-      delay_tab.dt_path, strerror(errno));
+      ": unable to load DelayTable '%s' (fd %d) into memory: %s",
+      delay_tab.dt_path, delay_tab.dt_fd, strerror(xerrno));
+    pr_trace_msg(trace_channel, 1,
+      "unable to load DelayTable '%s' (fd %d) into memory: %s",
+      delay_tab.dt_path, delay_tab.dt_fd, strerror(xerrno));
+    
+    errno = xerrno;
     return;
   }
 
@@ -1508,13 +1559,13 @@ static int delay_init(void) {
   delay_tab.dt_path = PR_RUN_DIR "/proftpd.delay";
   delay_tab.dt_data = NULL;
 
-  pr_event_register(&delay_module, "core.exit", delay_shutdown_ev, NULL);
 #if defined(PR_SHARED_MODULE)
   pr_event_register(&delay_module, "core.module-unload", delay_mod_unload_ev,
     NULL);
 #endif
   pr_event_register(&delay_module, "core.postparse", delay_postparse_ev, NULL);
   pr_event_register(&delay_module, "core.restart", delay_restart_ev, NULL);
+  pr_event_register(&delay_module, "core.shutdown", delay_shutdown_ev, NULL);
 
   delay_pool = make_sub_pool(permanent_pool);
   pr_pool_tag(delay_pool, MOD_DELAY_VERSION);
@@ -1543,8 +1594,6 @@ static int delay_sess_init(void) {
   config_rec *c;
   int xerrno = errno;
 
-  pr_event_unregister(&delay_module, "core.exit", delay_shutdown_ev);
-
   if (!delay_engine)
     return 0;
 
@@ -1561,7 +1610,7 @@ static int delay_sess_init(void) {
   delay_nuser = 0;
   delay_npass = 0;
 
-  pr_trace_msg("delay", 6, "opening DelayTable '%s'", delay_tab.dt_path);
+  pr_trace_msg(trace_channel, 6, "opening DelayTable '%s'", delay_tab.dt_path);
 
   PRIVS_ROOT
   fh = pr_fsio_open(delay_tab.dt_path, O_RDWR);
@@ -1574,7 +1623,7 @@ static int delay_sess_init(void) {
     pr_log_pri(PR_LOG_WARNING, MOD_DELAY_VERSION
       ": unable to open DelayTable '%s': %s", delay_tab.dt_path,
       strerror(xerrno));
-    pr_trace_msg("delay", 1, "unable to open DelayTable '%s': %s",
+    pr_trace_msg(trace_channel, 1, "unable to open DelayTable '%s': %s",
       delay_tab.dt_path, strerror(xerrno));
     delay_engine = FALSE;
     return 0;

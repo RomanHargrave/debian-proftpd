@@ -24,7 +24,7 @@
  * This is mod_rewrite, contrib software for proftpd 1.2 and above.
  * For more information contact TJ Saunders <tj@castaglia.org>.
  *
- * $Id: mod_rewrite.c,v 1.57 2011/03/12 23:49:55 castaglia Exp $
+ * $Id: mod_rewrite.c,v 1.60 2011/03/24 04:42:42 castaglia Exp $
  */
 
 #include "conf.h"
@@ -33,8 +33,8 @@
 #define MOD_REWRITE_VERSION "mod_rewrite/0.9"
 
 /* Make sure the version of proftpd is as necessary. */
-#if PROFTPD_VERSION_NUMBER < 0x0001030101
-# error "ProFTPD 1.3.1rc1 or later required"
+#if PROFTPD_VERSION_NUMBER < 0x0001030402
+# error "ProFTPD 1.3.4rc2 or later required"
 #endif
 
 #ifdef PR_USE_REGEX
@@ -338,7 +338,7 @@ static char *rewrite_argsep(char **arg) {
 }
 
 static char *rewrite_get_cmd_name(cmd_rec *cmd) {
-  if (strcmp(cmd->argv[0], C_SITE) != 0) {
+  if (pr_cmd_cmp(cmd, PR_CMD_SITE_ID) != 0) {
     return cmd->argv[0];
 
   } else {
@@ -756,7 +756,7 @@ static unsigned char rewrite_regexec(const char *string, pr_regex_t *pre,
 }
 
 static void rewrite_replace_cmd_arg(cmd_rec *cmd, char *new_arg) {
-  if (strcmp(cmd->argv[0], C_SITE) != 0) {
+  if (pr_cmd_cmp(cmd, PR_CMD_SITE_ID) != 0) {
     cmd->arg = new_arg;
 
   } else {
@@ -841,8 +841,8 @@ static char *rewrite_subst_backrefs(cmd_rec *cmd, char *pattern,
   /* We do NOT stash the backrefs in the cmd->notes table for sensitive
    * data, e.g. PASS or ADAT commands.
    */
-  if (strcmp(cmd->argv[0], C_PASS) == 0 ||
-      strcmp(cmd->argv[0], C_ADAT) == 0) {
+  if (pr_cmd_cmp(cmd, PR_CMD_PASS_ID) == 0 ||
+      pr_cmd_cmp(cmd, PR_CMD_ADAT_ID) == 0) {
     use_notes = FALSE;
   }
 
@@ -2325,7 +2325,7 @@ MODRET rewrite_fixup(cmd_rec *cmd) {
   /* If this is a SITE command, handle things a little differently, so that
    * the rest of the rewrite machinery works properly.
    */
-  if (strcmp(cmd->argv[0], C_SITE) != 0) {
+  if (pr_cmd_cmp(cmd, PR_CMD_SITE_ID) != 0) {
     cmd_name = cmd->argv[0];
     cmd_arg = cmd->arg;
 
@@ -2479,8 +2479,8 @@ MODRET rewrite_fixup(cmd_rec *cmd) {
         /* Note: The "SYMLINK" test is for handling the SFTP SYMLINK request
          * e.g from mod_sftp.  There is no SYMLINK FTP command.
          */
-        if (strcmp(cmd->argv[0], C_SITE) == 0 ||
-            strcmp(cmd->argv[0], "SYMLINK") == 0) {
+        if (pr_cmd_cmp(cmd, PR_CMD_SITE_ID) == 0 ||
+            pr_cmd_strcmp(cmd, "SYMLINK") == 0) {
           flags |= PR_STR_FL_PRESERVE_WHITESPACE;
 
           if (strcasecmp(cmd->argv[1], "CHGRP") == 0 ||
