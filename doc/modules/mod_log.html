@@ -1,4 +1,4 @@
-<!-- $Id: mod_log.html,v 1.5 2011/03/17 03:43:25 castaglia Exp $ -->
+<!-- $Id: mod_log.html,v 1.8 2011/03/29 17:40:53 castaglia Exp $ -->
 <!-- $Source: /cvsroot/proftp/proftpd/doc/modules/mod_log.html,v $ -->
 
 <html>
@@ -62,7 +62,7 @@ warned.</i>
 <p>
 The <code>ExtendedLog</code> directive allows customizable logfiles to be
 generated, either globally or per <code>&lt;VirtualHost&gt;</code>.  The
-<em>path</em> argument must contain an absolute pathname to a logfile which
+<em>path</em> argument should contain an absolute pathname to a logfile which
 will be appended to when <code>proftpd</code> starts; the pathname should
 <b>not</b> be to a file in a nonexistent directory, to a world-writable
 directory, or be a symbolic link (unless
@@ -74,6 +74,16 @@ specified, <code>proftpd</code> logs all commands by default.
 <b>Note</b> that passwords are hidden.  If used, the <em>cmd-classes</em>
 parameter is a comma-delimited (with <b>no whitespace</b>) list of which
 commands to log.
+
+<p>
+In <code>proftpd-1.2.8rc1</code> and later, the <em>path</em> argument can
+be of the form &quot;syslog:<i>level</i>&quot;.  The &quot;syslog:&quot; prefix
+configures <code>mod_log</code> to write the <code>ExtendedLog</code> data
+to syslog rather than to a file.  The <i>level</i> configures the syslog
+level at which to log the data.  For example:
+<pre>
+  ExtendedLog syslog:info ALL default
+</pre>
 
 <p>
 This table shows the supported command classes:
@@ -143,6 +153,11 @@ This table shows the supported command classes:
     <td>RFC2228-related security FTP commands: <code>AUTH</code>,
       <code>CCC</code>, <code>PBSZ</code>, <code>PROT</code></td>
   </tr>
+
+  <tr>
+    <td><code>EXIT</code></td>
+    <td>Logs the configured <code>LogFormat</code> at session exit</td>
+  </tr>
 </table>
 
 <p>
@@ -159,7 +174,8 @@ For example, to log all read and write operations to
 
 <p>
 See also: <a href="#AllowLogSymlinks"><code>AllowLogSymlinks</code></a>,
-<a href="#LogFormat"><code>LogFormat</code></a>, <a href="mod_core.html#TransferLog"><code>TransferLog</code></a>
+<a href="#LogFormat"><code>LogFormat</code></a>,
+<a href="mod_core.html#TransferLog"><code>TransferLog</code></a>
 
 <p>
 <hr>
@@ -261,7 +277,7 @@ indicated when logging.
 
   <tr>
     <td>&nbsp;<code>%H</code>&nbsp;</td>
-    <td>Local IP address of vhost/server hosting the session</td>
+    <td>Local IP address of vhost/server hosting/handling the session</td>
   </tr>
 
   <tr>
@@ -377,7 +393,8 @@ indicated when logging.
 </table>
 
 <p>
-See also: <a href="#ExtendedLog"><code>ExtendedLog</code></a>, <a href="mod_core.html#TransferLog"><code>TransferLog</code></a>
+See also: <a href="#ExtendedLog"><code>ExtendedLog</code></a>,
+<a href="mod_core.html#TransferLog"><code>TransferLog</code></a>
 
 <p>
 <hr>
@@ -432,7 +449,7 @@ The <code>mod_log</code> module is compiled by default.
 <hr><br>
 
 Author: <i>$Author: castaglia $</i><br>
-Last Updated: <i>$Date: 2011/03/17 03:43:25 $</i><br>
+Last Updated: <i>$Date: 2011/03/29 17:40:53 $</i><br>
 
 <br><hr>
 

@@ -27,7 +27,7 @@
 /*
  * Configuration structure, server, command and associated prototypes.
  *
- * $Id: dirtree.h,v 1.78 2011/02/26 02:31:36 castaglia Exp $
+ * $Id: dirtree.h,v 1.80 2011/03/26 00:43:27 castaglia Exp $
  */
 
 #ifndef PR_DIRTREE_H
@@ -113,6 +113,8 @@ typedef struct cmd_struc {
   int  class;			/* The command class */
   int  stash_index;		/* hack to speed up symbol hashing in modules.c */
   pr_table_t *notes;		/* Private data for passing/retaining between handlers */
+
+  int cmd_id;			/* Index into commands list, for faster comparisons */
 } cmd_rec;
 
 struct config_struc {
@@ -152,6 +154,7 @@ struct config_struc {
 #define CF_DYNAMIC		(1 << 2) /* Dynamically added entry */
 #define CF_DEFER		(1 << 3) /* Defer hashing until authentication */
 #define CF_SILENT		(1 << 4) /* Do not print a config dump when merging */
+#define CF_MULTI		(1 << 5) /* Allow multiple instances, but do not merge down */
 
 /* Operation codes for dir_* funcs */
 #define OP_HIDE			1	/* Op for hiding dirs/files */

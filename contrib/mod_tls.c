@@ -60,7 +60,7 @@
 # include <sys/mman.h>
 #endif
 
-#define MOD_TLS_VERSION		"mod_tls/2.4.1"
+#define MOD_TLS_VERSION		"mod_tls/2.4.2"
 
 /* Make sure the version of proftpd is as necessary. */
 #if PROFTPD_VERSION_NUMBER < 0x0001030402 
@@ -507,6 +507,8 @@ static ctrls_acttab_t tls_acttab[];
 #endif /* PR_USE_CTRLS */
 
 static int tls_need_init_handshake = TRUE;
+
+static const char *trace_channel = "tls";
 
 static void tls_diags_cb(const SSL *ssl, int where, int ret) {
   const char *str = "(unknown)";
@@ -1363,6 +1365,12 @@ static int tls_exec_passphrase_provider(server_rec *s, char *buf, int buflen,
 
     PRIVS_ROOT
 
+    pr_trace_msg(trace_channel, 17,
+      "executing '%s' with uid %lu (euid %lu), gid %lu (egid %lu)",
+      tls_passphrase_provider,
+      (unsigned long) getuid(), (unsigned long) geteuid(),
+      (unsigned long) getgid(), (unsigned long) getegid());
+
     pr_log_debug(DEBUG6, MOD_TLS_VERSION
       ": executing '%s' with uid %lu (euid %lu), gid %lu (egid %lu)",
       tls_passphrase_provider,
@@ -1410,8 +1418,9 @@ static int tls_exec_passphrase_provider(server_rec *s, char *buf, int buflen,
           status = -1;
           break;
 
-        } else
+        } else {
           pr_signals_handle();
+        }
       }
 
       /* Check the time elapsed since we started. */
@@ -1464,10 +1473,19 @@ static int tls_exec_passphrase_provider(server_rec *s, char *buf, int buflen,
                 res--;
               buf[res] = '\0';
 
-          } else if (res < 0){
+              pr_trace_msg(trace_channel, 18,
+                "read passphrase from '%s'", tls_passphrase_provider);
+
+          } else if (res < 0) {
+            int xerrno = errno;
+
+            pr_trace_msg(trace_channel, 3,
+              "error reading stdout from '%s': %s",
+              tls_passphrase_provider, strerror(xerrno));
+
             pr_log_debug(DEBUG2, MOD_TLS_VERSION
               ": error reading stdout from '%s': %s",
-              tls_passphrase_provider, strerror(errno));
+              tls_passphrase_provider, strerror(xerrno));
           }
         }
 
@@ -3004,6 +3022,8 @@ static int tls_accept(conn_t *conn, unsigned char on_data) {
 
   /* Stash the SSL object in the pointers of the correct NetIO streams. */
   if (conn == session.c) {
+    pr_buffer_t *strm_buf;
+
     ctrl_ssl = ssl;
     tls_ctrl_rd_nstrm->strm_data = tls_ctrl_wr_nstrm->strm_data = (void *) ssl;
 
@@ -3017,8 +3037,28 @@ static int tls_accept(conn_t *conn, unsigned char on_data) {
     }
 #endif /* OpenSSL 0.9.8m and later */
 
+    /* Clear any data from the NetIO stream buffers which may have been read
+     * in before the SSL/TLS handshake occurred (Bug#3624).
+     */
+    strm_buf = tls_ctrl_rd_nstrm->strm_buf;
+    if (strm_buf != NULL) {
+      strm_buf->current = NULL;
+      strm_buf->remaining = strm_buf->buflen;
+    }
+
   } else if (conn == session.d) {
+    pr_buffer_t *strm_buf;
+
     tls_data_rd_nstrm->strm_data = tls_data_wr_nstrm->strm_data = (void *) ssl;
+
+    /* Clear any data from the NetIO stream buffers which may have been read
+     * in before the SSL/TLS handshake occurred (Bug#3624).
+     */
+    strm_buf = tls_data_rd_nstrm->strm_buf;
+    if (strm_buf != NULL) {
+      strm_buf->current = NULL;
+      strm_buf->remaining = strm_buf->buflen;
+    }
   }
 
 #if OPENSSL_VERSION_NUMBER == 0x009080cfL
@@ -6019,10 +6059,10 @@ MODRET tls_any(cmd_rec *cmd) {
     return PR_DECLINED(cmd);
 
   /* Some commands need not be hindered. */
-  if (strcmp(cmd->argv[0], C_SYST) == 0 ||
-      strcmp(cmd->argv[0], C_AUTH) == 0 ||
-      strcmp(cmd->argv[0], C_FEAT) == 0 ||
-      strcmp(cmd->argv[0], C_QUIT) == 0) {
+  if (pr_cmd_cmp(cmd, PR_CMD_SYST_ID) == 0 ||
+      pr_cmd_cmp(cmd, PR_CMD_AUTH_ID) == 0 ||
+      pr_cmd_cmp(cmd, PR_CMD_FEAT_ID) == 0 ||
+      pr_cmd_cmp(cmd, PR_CMD_QUIT_ID) == 0) {
     return PR_DECLINED(cmd);
   }
 
@@ -6030,9 +6070,9 @@ MODRET tls_any(cmd_rec *cmd) {
       !(tls_flags & TLS_SESS_ON_CTRL)) {
 
     if (!(tls_opts & TLS_OPT_ALLOW_PER_USER)) {
-      if (strcmp(cmd->argv[0], C_USER) == 0 ||
-          strcmp(cmd->argv[0], C_PASS) == 0 ||
-          strcmp(cmd->argv[0], C_ACCT) == 0) {
+      if (pr_cmd_cmp(cmd, PR_CMD_USER_ID) == 0 ||
+          pr_cmd_cmp(cmd, PR_CMD_PASS_ID) == 0 ||
+          pr_cmd_cmp(cmd, PR_CMD_ACCT_ID) == 0) {
         tls_log("SSL/TLS required but absent for authentication, "
           "denying %s command", cmd->argv[0]);
         pr_response_add_err(R_550,
@@ -6073,13 +6113,13 @@ MODRET tls_any(cmd_rec *cmd) {
      */
 
     if (!(tls_flags & TLS_SESS_NEED_DATA_PROT)) {
-      if (strcmp(cmd->argv[0], C_APPE) == 0 ||
-          strcmp(cmd->argv[0], C_LIST) == 0 ||
-          strcmp(cmd->argv[0], C_MLSD) == 0 ||
-          strcmp(cmd->argv[0], C_NLST) == 0 ||
-          strcmp(cmd->argv[0], C_RETR) == 0 ||
-          strcmp(cmd->argv[0], C_STOR) == 0 ||
-          strcmp(cmd->argv[0], C_STOU) == 0) {
+      if (pr_cmd_cmp(cmd, PR_CMD_APPE_ID) == 0 ||
+          pr_cmd_cmp(cmd, PR_CMD_LIST_ID) == 0 ||
+          pr_cmd_cmp(cmd, PR_CMD_MLSD_ID) == 0 ||
+          pr_cmd_cmp(cmd, PR_CMD_NLST_ID) == 0 ||
+          pr_cmd_cmp(cmd, PR_CMD_RETR_ID) == 0 ||
+          pr_cmd_cmp(cmd, PR_CMD_STOR_ID) == 0 ||
+          pr_cmd_cmp(cmd, PR_CMD_STOU_ID) == 0) {
         tls_log("SSL/TLS required but absent on data channel, "
           "denying %s command", cmd->argv[0]);
         pr_response_add_err(R_550, _("SSL/TLS required on the data channel"));
@@ -6098,13 +6138,13 @@ MODRET tls_any(cmd_rec *cmd) {
      * do the lookup based on the target location.
      */
 
-    if (strcmp(cmd->argv[0], C_APPE) == 0 ||
-        strcmp(cmd->argv[0], C_LIST) == 0 ||
-        strcmp(cmd->argv[0], C_MLSD) == 0 ||
-        strcmp(cmd->argv[0], C_NLST) == 0 ||
-        strcmp(cmd->argv[0], C_RETR) == 0 ||
-        strcmp(cmd->argv[0], C_STOR) == 0 ||
-        strcmp(cmd->argv[0], C_STOU) == 0) {
+    if (pr_cmd_cmp(cmd, PR_CMD_APPE_ID) == 0 ||
+        pr_cmd_cmp(cmd, PR_CMD_LIST_ID) == 0 ||
+        pr_cmd_cmp(cmd, PR_CMD_MLSD_ID) == 0 ||
+        pr_cmd_cmp(cmd, PR_CMD_NLST_ID) == 0 ||
+        pr_cmd_cmp(cmd, PR_CMD_RETR_ID) == 0 ||
+        pr_cmd_cmp(cmd, PR_CMD_STOR_ID) == 0 ||
+        pr_cmd_cmp(cmd, PR_CMD_STOU_ID) == 0) {
       config_rec *c;
 
       c = find_config(CURRENT_CONF, CONF_PARAM, "TLSRequired", FALSE);
@@ -7667,12 +7707,12 @@ static int tls_init(void) {
 
   pr_log_debug(DEBUG2, MOD_TLS_VERSION ": using " OPENSSL_VERSION_TEXT);
 
-  pr_event_register(&tls_module, "core.exit", tls_shutdown_ev, NULL);
 #if defined(PR_SHARED_MODULE)
   pr_event_register(&tls_module, "core.module-unload", tls_mod_unload_ev, NULL);
 #endif /* PR_SHARED_MODULE */
   pr_event_register(&tls_module, "core.postparse", tls_postparse_ev, NULL);
   pr_event_register(&tls_module, "core.restart", tls_restart_ev, NULL);
+  pr_event_register(&tls_module, "core.shutdown", tls_shutdown_ev, NULL);
 
   SSL_load_error_strings();
   SSL_library_init();
@@ -7710,12 +7750,6 @@ static int tls_sess_init(void) {
   unsigned char *tmp = NULL;
   unsigned long *opts = NULL;
   config_rec *c = NULL;
-
-  /* Unregister the listener for the 'core.exit' event that was registered
-   * for the daemon process; we inherited it due to the fork, but we don't
-   * want that listener being invoked when we exit.
-   */
-  pr_event_unregister(&tls_module, "core.exit", tls_shutdown_ev);
 
   /* First, check to see whether mod_tls is even enabled. */
   tmp = get_param_ptr(main_server->conf, "TLSEngine", FALSE);

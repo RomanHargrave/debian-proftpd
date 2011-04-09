@@ -26,7 +26,7 @@
  * This is mod_ifsession, contrib software for proftpd 1.2 and above.
  * For more information contact TJ Saunders <tj@castaglia.org>.
  *
- * $Id: mod_ifsession.c,v 1.33 2011/03/03 21:38:54 castaglia Exp $
+ * $Id: mod_ifsession.c,v 1.36 2011/03/26 00:43:27 castaglia Exp $
  */
 
 #include "conf.h"
@@ -113,9 +113,10 @@ static void ifsess_dup_param(pool *dst_pool, xaset_t **dst, config_rec *c,
        * directive then effectively replaces any directive there.
        */
       if (c->config_type == CONF_PARAM &&
-          !(c->flags & CF_MERGEDOWN_MULTI)) {
+          !(c->flags & CF_MERGEDOWN_MULTI) &&
+          !(c->flags & CF_MULTI)) {
           pr_trace_msg(trace_channel, 15, "removing '%s' config because "
-            "c->flags does not contain MERGEDOWN_MULTI", c->name);
+            "c->flags does not contain MULTI or MERGEDOWN_MULTI", c->name);
         ifsess_remove_param(dup_c->subset, c->name);
       }
 
@@ -194,17 +195,17 @@ MODRET start_ifctxt(cmd_rec *cmd) {
    * regular expression?
    */
   if (cmd->argc-1 > 1) {
-    if (strcmp(cmd->argv[1], "AND") == 0) {
+    if (strncmp(cmd->argv[1], "AND", 4) == 0) {
       eval_type = PR_EXPR_EVAL_AND;
       argc = cmd->argc-2;
       argv = cmd->argv+1;
 
-    } else if (strcmp(cmd->argv[1], "OR") == 0) {
+    } else if (strncmp(cmd->argv[1], "OR", 3) == 0) {
       eval_type = PR_EXPR_EVAL_OR;
       argc = cmd->argc-2;
       argv = cmd->argv+1;
 
-    } else if (strcmp(cmd->argv[1], "regex") == 0) {
+    } else if (strncmp(cmd->argv[1], "regex", 6) == 0) {
 #ifdef PR_USE_REGEX
       pr_regex_t *pre = NULL;
       int res = 0;
@@ -225,11 +226,13 @@ MODRET start_ifctxt(cmd_rec *cmd) {
           "regex compilation: ", errstr, NULL));
       }
 
+      eval_type = PR_EXPR_EVAL_REGEX;
+
       c = add_config_param(name, 3, NULL, NULL, NULL);
       c->config_type = config_type;
       c->argv[0] = pstrdup(c->pool, cmd->arg);
       c->argv[1] = pcalloc(c->pool, sizeof(unsigned char));
-      *((unsigned char *) c->argv[0]) = PR_EXPR_EVAL_REGEX;
+      *((unsigned char *) c->argv[1]) = eval_type;
       c->argv[2] = (void *) pre;
 
       return PR_HANDLED(cmd);
@@ -339,17 +342,33 @@ MODRET ifsess_post_pass(cmd_rec *cmd) {
       if (*((unsigned char *) list->argv[1]) == PR_EXPR_EVAL_REGEX) {
         pr_regex_t *pre = list->argv[2];
 
-        if (session.group != NULL &&
-            pr_regexp_exec(pre, session.group, 0, NULL, 0, 0, 0) == 0) {
-          mergein = TRUE;
+        if (session.group != NULL) {
+          pr_log_debug(DEBUG8, MOD_IFSESSION_VERSION
+            ": evaluating regexp pattern '%s' against subject '%s'",
+            pr_regexp_get_pattern(pre), session.group);
 
-        } else if (session.groups) {
+          if (pr_regexp_exec(pre, session.group, 0, NULL, 0, 0, 0) == 0) {
+            mergein = TRUE;
+          }
+        }
+
+        if (mergein == FALSE &&
+            session.groups != NULL) {
           register int j = 0;
 
-          for (j = session.groups->nelts-1; j >= 0; j--)
-            if (pr_regexp_exec(pre, *(((char **) session.groups->elts) + j), 0,
-                NULL, 0, 0, 0) == 0) {
+          for (j = session.groups->nelts-1; j >= 0; j--) {
+            char *suppl_group;
+
+            suppl_group = *(((char **) session.groups->elts) + j);
+
+            pr_log_debug(DEBUG8, MOD_IFSESSION_VERSION
+              ": evaluating regexp pattern '%s' against subject '%s'",
+              pr_regexp_get_pattern(pre), suppl_group);
+
+            if (pr_regexp_exec(pre, suppl_group, 0, NULL, 0, 0, 0) == 0) {
               mergein = TRUE;
+              break;
+            }
           }
         }
 
@@ -362,9 +381,6 @@ MODRET ifsess_post_pass(cmd_rec *cmd) {
 
       } else if (*((unsigned char *) list->argv[1]) == PR_EXPR_EVAL_AND &&
           pr_expr_eval_group_and((char **) &list->argv[2]) == TRUE) {
-        mergein = TRUE;
- 
-      } if (pr_expr_eval_group_and((char **) &list->argv[1]) == TRUE) {
         mergein = TRUE;
       }
 
@@ -428,19 +444,25 @@ MODRET ifsess_post_pass(cmd_rec *cmd) {
       if (*((unsigned char *) list->argv[1]) == PR_EXPR_EVAL_REGEX) {
         pr_regex_t *pre = list->argv[2];
 
-        if (pr_regexp_exec(pre, session.user, 0, NULL, 0, 0, 0) == 0)
+        pr_log_debug(DEBUG8, MOD_IFSESSION_VERSION
+          ": evaluating regexp pattern '%s' against subject '%s'",
+          pr_regexp_get_pattern(pre), session.user);
+
+        if (pr_regexp_exec(pre, session.user, 0, NULL, 0, 0, 0) == 0) {
           mergein = TRUE;
+        }
 
       } else
 #endif /* regex support */
 
       if (*((unsigned char *) list->argv[1]) == PR_EXPR_EVAL_OR &&
-          pr_expr_eval_user_or((char **) &list->argv[2]) == TRUE)
+          pr_expr_eval_user_or((char **) &list->argv[2]) == TRUE) {
         mergein = TRUE;
 
-      else if (*((unsigned char *) list->argv[1]) == PR_EXPR_EVAL_AND &&
-          pr_expr_eval_user_and((char **) &list->argv[2]) == TRUE)
+      } else if (*((unsigned char *) list->argv[1]) == PR_EXPR_EVAL_AND &&
+          pr_expr_eval_user_and((char **) &list->argv[2]) == TRUE) {
         mergein = TRUE;
+      }
 
       if (mergein) {
         pr_log_debug(DEBUG2, MOD_IFSESSION_VERSION
@@ -574,22 +596,28 @@ static int ifsess_sess_init(void) {
       if (*((unsigned char *) list->argv[1]) == PR_EXPR_EVAL_REGEX) {
         pr_regex_t *pre = list->argv[2];
 
-        if (session.class &&
-            pr_regexp_exec(pre, session.class->cls_name, 0, NULL, 0,
-              0, 0) == 0) {
-          mergein = TRUE;
+        if (session.class) {
+          pr_log_debug(DEBUG8, MOD_IFSESSION_VERSION
+            ": evaluating regexp pattern '%s' against subject '%s'",
+            pr_regexp_get_pattern(pre), session.class->cls_name);
+
+          if (pr_regexp_exec(pre, session.class->cls_name, 0, NULL, 0, 0,
+              0) == 0) {
+            mergein = TRUE;
+          }
         }
 
       } else
 #endif /* regex support */
 
       if (*((unsigned char *) list->argv[1]) == PR_EXPR_EVAL_OR &&
-          pr_expr_eval_class_or((char **) &list->argv[2]) == TRUE)
+          pr_expr_eval_class_or((char **) &list->argv[2]) == TRUE) {
         mergein = TRUE;
 
-      else if (*((unsigned char *) list->argv[1]) == PR_EXPR_EVAL_AND &&
-          pr_expr_eval_class_and((char **) &list->argv[2]) == TRUE)
+      } else if (*((unsigned char *) list->argv[1]) == PR_EXPR_EVAL_AND &&
+          pr_expr_eval_class_and((char **) &list->argv[2]) == TRUE) {
         mergein = TRUE;
+      }
 
       if (mergein) {
         pr_log_debug(DEBUG2, MOD_IFSESSION_VERSION

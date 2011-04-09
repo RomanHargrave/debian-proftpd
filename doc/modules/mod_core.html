@@ -1,4 +1,4 @@
-<!-- $Id: mod_core.html,v 1.6 2011/03/16 18:49:22 castaglia Exp $ -->
+<!-- $Id: mod_core.html,v 1.11 2011/03/30 21:51:30 castaglia Exp $ -->
 <!-- $Source: /cvsroot/proftp/proftpd/doc/modules/mod_core.html,v $ -->
 
 <html>
@@ -21,10 +21,15 @@ The <code>mod_core</code> module handles most of the core FTP commands.
 <ul>
   <li><a href="#Include">Include</a>
   <li><a href="#MaxCommandRate">MaxCommandRate</a>
+  <li><a href="#PathAllowFilter">PathAllowFilter</a>
+  <li><a href="#PathDenyFilter">PathDenyFilter</a>
   <li><a href="#ProcessTitles">ProcessTitles</a>
   <li><a href="#Protocols">Protocols</a>
+  <li><a href="#TCPBacklog">TCPBacklog</a>
   <li><a href="#Trace">Trace</a>
   <li><a href="#TraceLog">TraceLog</a>
+  <li><a href="#TraceOptions">TraceOptions</a>
+  <li><a href="#TransferLog">TransferLog</a>
 </ul>
 
 <hr>
@@ -83,6 +88,93 @@ sets a maximum command rate of 200 commands per sec. Or:
   MaxCommandRate 500 2
 </pre>
 sets a maximum command rate of 500 commands every 2 secs.
+
+<p>
+<hr>
+<h2><a name="PathAllowFilter">PathAllowFilter</a></h2>
+<strong>Syntax:</strong> PathAllowFilter <em>pattern [flags]</em><br>
+<strong>Default:</strong> None<br>
+<strong>Context:</strong> server config, <code>&lt;VirtualHost&gt;</code>, <code>&lt;Global&gt;, <code>&lt;Anonymous&gt;</code>, <code>&lt;Directory&gt;</code>, .ftpaccess<br>
+<strong>Module:</strong> mod_core<br>
+<strong>Compatibility:</strong> 1.1.7 and later
+
+<p>
+The <code>PathAllowFilter</code> directive allows the configuration of a
+regular expression <em>pattern</em> that <b>must be matched</b> for all newly
+uploaded (stored) files.  The regular expression is applied against the entire
+pathname specified by the client, so care must be taken when creating a proper
+regex.  Paths that fail the regex match result in a "Forbidden filename" error
+being returned to the client.  If the regular expression <em>pattern</em> 
+parameter contains whitespace, it must be enclosed in quotes.
+
+<p>
+For example:
+<pre>
+  # Only allow a-z 0-9 . - _ in file names
+  PathAllowFilter ^[a-z0-9._-]+$
+
+  # As above but with upper case characters as well
+  PathAllowFilter ^[A-Za-z0-9._-]+$
+</pre>
+
+<p>
+The optional <em>flags</em> paramete, if present, modifies how the given
+<em>pattern</em> will be evaludated.  The supported flags are:
+<ul>
+  <li><b>nocase|NC</b> (<b>n</b>o <b>c</b>ase)<br>
+      This makes the <em>pattern</em> case-insensitive, <i>i.e.</i> there is
+      no difference between 'A-Z' and 'a-z' when <em>pattern</em> is matched
+      against the path
+  </li>
+</ul>
+
+<p>
+The <a href="../howto/Filters.html">Filters</a> howto covers filtering in
+greater detail.
+
+<p>
+See also: <a href="#PathDenyFilter"><code>PathDenyFilter</code</a>
+
+<p>
+<hr>
+<h2><a name="PathDenyFilter">PathDenyFilter</a></h2>
+<strong>Syntax:</strong> PathDenyFilter <em>pattern [flags]</em><br>
+<strong>Default:</strong> None<br>
+<strong>Context:</strong> server config, <code>&lt;VirtualHost&gt;</code>, <code>&lt;Global&gt;, <code>&lt;Anonymous&gt;</code>, <code>&lt;Directory&gt;</code>, .ftpaccess<br>
+<strong>Module:</strong> mod_core<br>
+<strong>Compatibility:</strong> 1.1.7 and later
+
+<p>
+Similar to the <a href="#PathAllowFilter"><code>PathAllowFilter</code></a>
+directive, <code>PathDenyFilter</code> specifies a regular expression
+<em>pattern</em> which <b>must not match</b> any uploaded pathnames.  If the
+regex does match, a "Forbidden filename" error is returned to the client.
+This can be especially useful for forbidding .ftpaccess or .htaccess files.
+
+<p>
+For example:
+<pre>
+  # We don't want .ftpaccess or .htaccess files to be uploaded
+  PathDenyFilter "(\\.ftpaccess|\\.htaccess)$"
+</pre>
+
+<p>
+The optional <em>flags</em> paramete, if present, modifies how the given
+<em>pattern</em> will be evaludated.  The supported flags are:
+<ul>
+  <li><b>nocase|NC</b> (<b>n</b>o <b>c</b>ase)<br>
+      This makes the <em>pattern</em> case-insensitive, <i>i.e.</i> there is
+      no difference between 'A-Z' and 'a-z' when <em>pattern</em> is matched
+      against the path
+  </li>
+</ul>
+
+<p>
+The <a href="../howto/Filters.html">Filters</a> howto covers filtering in
+greater detail.
+
+<p>
+See also: <a href="#PathAllowFilter"><code>PathAllowFilter</code</a>
 
 <p>
 <hr>
@@ -162,6 +254,57 @@ The currently known/supported protocols include:
 
 <p>
 <hr>
+<h2><a name="TCPBacklog">TCPBacklog</a></h2>
+<strong>Syntax:</strong> TCPBacklog <em>backlog-size</em><br>
+<strong>Default:</strong> 5<br>
+<strong>Context:</strong> server config<br>
+<strong>Module:</strong> mod_core<br>
+<strong>Compatibility:</strong> 0.99.0 and later
+
+<p>
+The <code>TCPBacklog</code> directive controls the TCP connection queue
+size for listening sockets; this directive only applies to <code>proftpd</code>
+when it is configured with "<code>ServerType standalone</code>".  It has
+<b>no effect</b> if "<code>ServerType inetd</code>" is configured.
+
+<p>
+When a TCP connection is established by the TCP/IP stack within the kernel,
+there is a short period of time between the actual establishment of the
+TCP connection and when that connection is accepted for use by the listening
+daemon via the <code>accept(2)</code> system call.  The duration of this period
+of time can vary quite a bit, and can depend upon several factors (<i>e.g.</i>
+hardware, system load, <i>etc</i>).  Any TCP connection which hasn't been
+accepted by the listening daemon is placed in a "backlog" or queue of pending
+connections.  The <code>TCPBacklog</code> directive controls how the size
+of this queue of pending connections.
+
+<p>
+If this queue of pending connections becomes full, new TCP connections
+<b>cannot</b> be estaslished.  Under heavy load, this can result in occasional
+(or even frequent) errors seen by clients, such as "Connection refused",
+even though the daemon is clearly running.
+
+<p>
+The larger the <em>backlog-size</em>, the more TCP connections can be
+established to the daemon.  This also means more kernel memory and other kernel
+resources.
+
+<p>
+The issue is complicated further by the fact that different operating
+systems handle the <em>backlog-size</em> value differently.  The pending
+connection queue is a critical kernel-level structure, and is sensitive
+to <a href="http://en.wikipedia.org/wiki/Syn_flood">TCP syn floods</a>.
+Each operating system, then, has different ways of handling incoming and
+pending connections, to attempt to guard against such attacks.  For Linux
+systems, read the <code>tcp(7)</code> man page and specifically about
+<code>tcp_abort_on_overflow</code>, </code>tcp_max_syn_backlog</code>,
+and <code>tcp_syncookies</code>.  On FreeBSD, read the
+<code>syncookies(4)</code> man page.  And read
+<a href="http://www.sean.de/Solaris/soltune.html#backlog">here</a> for
+additional tuning considerations on Solaris.
+
+<p>
+<hr>
 <h2><a name="Trace">Trace</a></h2>
 <strong>Syntax:</strong> Trace <em>channel1:level1 ...</em><br>
 <strong>Default:</strong> None<br>
@@ -210,9 +353,6 @@ See the <a href="../howto/Tracing.html">Tracing</a> howto for more information.
 <strong>Compatibility:</strong> 1.3.1rc1 and later
 
 <p>
-The <code>TraceLog</code> directive...
-
-<p>
 The <code>TraceLog</code> directive is used to specify a log file for trace
 logging messages.  The <em>path</em> parameter given must be the full path to
 the file to use for logging.
@@ -227,6 +367,59 @@ See the <a href="../howto/Tracing.html">Tracing</a> howto for more information.
 
 <p>
 <hr>
+<h2><a name="TraceOptions">TraceOptions</a></h2>
+<strong>Syntax:</strong> TraceOptions <em>opt1 ... optN</em><br>
+<strong>Default:</strong> None<br>
+<strong>Context:</strong> &quot;server config&quot;, &lt;VirtualHost&gt;, &lt;Global&gt;<br>
+<strong>Module:</strong> mod_core<br>
+<strong>Compatibility:</strong> 1.3.4rc2 and later
+
+<p>
+The <code>TraceOptions</code> directive can be used to change the format
+of the <a href="#TraceLog"><code>TraceLog</code></a> messages, <i>e.g.</i>
+adding/remove certain fields of data.
+
+<p>
+The options supported by the <code>TraceOptions</code> directive are:
+<ul>
+  <li>ConnIPs
+  <li>TimestampMillis
+</ul>
+These options are all <em>disabled</em> by default.
+
+<p>
+To enable an option, preface the option name with a '+' (plus) character;
+to disable the option, use a '-' (minus) character prefix.  For example:
+<pre>
+  # Log timestamps inncluding millisecs, but do not include the connection
+  # IP address/port information
+  TraceOptions +TimestampMillis -ConnIPs
+</pre>
+
+<p>
+<hr>
+<h2><a name="TransferLog">TransferLog</a></h2>
+<strong>Syntax:</strong> TransferLog <em>path</em>|"none"<br>
+<strong>Default:</strong> None<br>
+<strong>Context:</strong> &quot;server config&quot;, &lt;VirtualHost&gt;, &lt;Global&gt;, &lt;Anonymous&gt;<br>
+<strong>Module:</strong> mod_core<br>
+<strong>Compatibility:</strong> 1.1.4 and later
+
+<p>
+The <code>TransferLog</code> directive configures the full <em>path</em> to the
+"wu-ftpd style" file transfer log; see the <code>xferlog(5)</code> man page
+for a description of this log file format.  Separate log files can be created
+for each <code>&lt;Anonymous&gt;</code> and/or <code>&lt;VirtualHost&gt;</code>.
+Additionally, the special keyword "none" (available in proftpd-1.1.7 and later)
+can be used, which disables wu-ftpd style transfer logging for the context in
+which the directive is used.
+
+<p>
+See also: <a href="mod_log.html#ExtendedLog"><code>ExtendedLog</code></a>,
+<a href="mod_log.html#LogFormat"><code>LogFormat</code></a>
+
+<p>
+<hr>
 <h2><a name="Installation">Installation</a></h2>
 The <code>mod_core</code>module is <b>always</b> installed.
 
@@ -234,7 +427,7 @@ The <code>mod_core</code>module is <b>always</b> installed.
 <hr><br>
 
 Author: <i>$Author: castaglia $</i><br>
-Last Updated: <i>$Date: 2011/03/16 18:49:22 $</i><br>
+Last Updated: <i>$Date: 2011/03/30 21:51:30 $</i><br>
 
 <br><hr>
 
