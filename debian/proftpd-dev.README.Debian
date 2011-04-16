@@ -12,12 +12,12 @@ The resulting module mod_foo.so is strictly binary-dependent on the specific
 version of proftpd you used to build it by prxs. If you prefer creating
 a deb source package Debian proftpd-dev package provides 
 
-    /usr/share/proftpd/proftpd.substvars
+    /usr/share/proftpd/proftpd-substvars
 
 which can be used to introduce a dependency on ${proftpd:Depends} in 
 your debian/control for foo binary package. You have to add its contents 
 to a debian/<foo>.substvars or debian/substvars with a command like
 
-    cat /usr/share/proftpd/proftpd.substvars >>debian/<foo>.substvars
+    cat /usr/share/proftpd/proftpd-substvars >>debian/substvars
 
 just before calling dh_gencontrol or dpkg-gencontrol.
