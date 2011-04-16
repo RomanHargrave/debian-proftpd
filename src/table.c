@@ -23,7 +23,7 @@
  */
 
 /* Table API implementation
- * $Id: table.c,v 1.18 2011/01/04 19:41:58 castaglia Exp $
+ * $Id: table.c,v 1.22 2011/03/30 18:40:30 castaglia Exp $
  */
 
 #include "conf.h"
@@ -72,7 +72,31 @@ static const char *trace_channel = "table";
 
 static int key_cmp(const void *key1, size_t keysz1, const void *key2,
     size_t keysz2) {
-  return strcmp((const char *) key1, (const char *) key2);
+  const char *k1, *k2;
+
+  if (keysz1 != keysz2) {
+    return keysz1 < keysz2 ? -1 : 1;
+  }
+
+  k1 = key1;
+  k2 = key2;
+
+  if (keysz1 >= 1) {
+    /* Basic check of the first character in each key, trying to reduce
+     * the chances of calling strncmp(3) if not needed.
+     */
+
+    if (k1[0] != k2[0]) {
+      return k1[0] < k2[0] ? -1 : 1;
+    }
+
+    /* Special case (unlikely, but possible). */
+    if (keysz1 == 1) {
+      return 0;
+    }
+  }
+
+  return strncmp((const char *) key1, (const char *) key2, keysz1);
 }
 
 /* Use Perl's hashing algorithm by default. */
@@ -83,7 +107,6 @@ static unsigned int key_hash(const void *key, size_t keysz) {
   while (sz--) {
     const char *k = key;
     unsigned int c = *k;
-    k++;
 
     if (!handling_signal) {
       /* Always handle signals in potentially long-running while loops. */
@@ -343,7 +366,8 @@ int pr_table_kadd(pr_table_t *tab, const void *key_data, size_t key_datasz,
        * is identical.  If so, we have multiple values for the same key.
        */
 
-      if (tab->keycmp(ei->key->key_data, 0, key_data, 0) == 0) {
+      if (tab->keycmp(ei->key->key_data, ei->key->key_datasz,
+          key_data, key_datasz) == 0) {
 
         /* Check if this table allows multivalues. */
         if (!(tab->flags & PR_TABLE_FL_MULTI_VALUE)) {
@@ -1083,7 +1107,8 @@ void pr_table_dump(void (*dumpf)(const char *fmt, ...), pr_table_t *tab) {
         pr_signals_handle();
       }
 
-      dumpf("[chain %u#%u] '%s' => '%s' (%u)", i, j++, ent->key->key_data,
+      dumpf("[hash %u (%u chains) chain %u#%u] '%s' => '%s' (%u)",
+        ent->key->hash, tab->nchains, i, j++, ent->key->key_data,
         ent->value_data, ent->value_datasz);
       ent = ent->next;
     }

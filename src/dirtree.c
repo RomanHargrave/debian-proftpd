@@ -25,7 +25,7 @@
  */
 
 /* Read configuration file(s), and manage server/configuration structures.
- * $Id: dirtree.c,v 1.251 2011/03/03 21:38:54 castaglia Exp $
+ * $Id: dirtree.c,v 1.258 2011/03/25 16:51:26 castaglia Exp $
  */
 
 #include "conf.h"
@@ -110,9 +110,12 @@ static int allow_dyn_config(const char *path) {
 
 /* Return true if dir is ".", "./", "../", or "..". */
 int is_dotdir(const char *dir) {
-  if (strcmp(dir, ".") == 0 || strcmp(dir, "./") == 0 ||
-      strcmp(dir, "..") == 0 || strcmp(dir, "../") == 0)
+  if (strncmp(dir, ".", 2) == 0 ||
+      strncmp(dir, "./", 2) == 0 ||
+      strncmp(dir, "..", 3) == 0 ||
+      strncmp(dir, "../", 3) == 0) {
     return TRUE;
+  }
 
   return FALSE;
 }
@@ -326,7 +329,7 @@ unsigned char dir_hide_file(const char *path) {
     if (c->argc >= 4) {
 
       /* check for a specified "user" classifier first... */
-      if (strcmp(c->argv[3], "user") == 0) {
+      if (strncmp(c->argv[3], "user", 5) == 0) {
         if (pr_expr_eval_user_or((char **) &c->argv[4]) == TRUE) {
 
           if (*((unsigned int *) c->argv[2]) > ctxt_precedence) {
@@ -341,7 +344,7 @@ unsigned char dir_hide_file(const char *path) {
         }
 
       /* ...then for a "group" classifier... */
-      } else if (strcmp(c->argv[3], "group") == 0) {
+      } else if (strncmp(c->argv[3], "group", 6) == 0) {
         if (pr_expr_eval_group_and((char **) &c->argv[4]) == TRUE) {
           if (*((unsigned int *) c->argv[2]) > ctxt_precedence) {
             ctxt_precedence = *((unsigned int *) c->argv[2]);
@@ -359,7 +362,7 @@ unsigned char dir_hide_file(const char *path) {
        * core code at some point.  When that happens, then this code will
        * need to be updated to process class-expressions.
        */
-      } else if (strcmp(c->argv[3], "class") == 0) {
+      } else if (strncmp(c->argv[3], "class", 6) == 0) {
         if (pr_expr_eval_class_or((char **) &c->argv[4]) == TRUE) {
           if (*((unsigned int *) c->argv[2]) > ctxt_precedence) {
             ctxt_precedence = *((unsigned int *) c->argv[2]);
@@ -1377,7 +1380,7 @@ int login_check_limits(xaset_t *set, int recurse, int and, int *found) {
   for (c = (config_rec *) set->xas_list; c; c = c->next) {
     if (c->config_type == CONF_LIMIT) {
       for (argc = c->argc, argv = (char **) c->argv; argc; argc--, argv++) {
-        if (strcasecmp("LOGIN", *argv) == 0) {
+        if (strncasecmp(*argv, "LOGIN", 6) == 0) {
           break;
         }
       }
@@ -1803,7 +1806,7 @@ void build_dyn_config(pool *p, const char *_path, struct stat *stp,
        * we know that we are dealing with the "/path" case.
        */
       if (ptr == curr_dir_path) {
-        if (strcmp(curr_dir_path, "/") == 0) {
+        if (strncmp(curr_dir_path, "/", 2) == 0) {
           /* We've reached the top; stop scanning. */
           curr_dir_path = NULL;
 
@@ -1885,11 +1888,16 @@ int dir_check_full(pool *pp, cmd_rec *cmd, const char *group, const char *path,
   if (!c && session.anon_config)
     c = session.anon_config;
 
+  /* Make sure this cmd_rec has a cmd_id. */
+  if (cmd->cmd_id == 0) {
+    cmd->cmd_id = pr_cmd_get_id(cmd->argv[0]);
+  }
+
   if (!_kludge_disable_umask) {
     /* Check for a directory Umask. */
     if (S_ISDIR(st.st_mode) ||
-        strcmp(cmd->argv[0], C_MKD) == 0 ||
-        strcmp(cmd->argv[0], C_XMKD) == 0) {
+        pr_cmd_cmp(cmd, PR_CMD_MKD_ID) == 0 ||
+        pr_cmd_cmp(cmd, PR_CMD_XMKD_ID) == 0) {
       mode_t *dir_umask = get_param_ptr(CURRENT_CONF, "DirUmask", FALSE);
       _umask = dir_umask ? *dir_umask : (mode_t) -1;
     }
@@ -1951,10 +1959,10 @@ int dir_check_full(pool *pp, cmd_rec *cmd, const char *group, const char *path,
      * ALL group (i.e. EPRT, EPSV, PASV, PORT, and OPTS).
      */
     if (res == 1 &&
-        strcmp(cmd->argv[0], C_EPRT) != 0 &&
-        strcmp(cmd->argv[0], C_EPSV) != 0 &&
-        strcmp(cmd->argv[0], C_PASV) != 0 &&
-        strcmp(cmd->argv[0], C_PORT) != 0 &&
+        pr_cmd_cmp(cmd, PR_CMD_EPRT_ID) != 0 &&
+        pr_cmd_cmp(cmd, PR_CMD_EPSV_ID) != 0 &&
+        pr_cmd_cmp(cmd, PR_CMD_PASV_ID) != 0 &&
+        pr_cmd_cmp(cmd, PR_CMD_PORT_ID) != 0 &&
         strncmp(cmd->argv[0], C_OPTS, 4) != 0) {
       res = dir_check_limits(cmd, c, "ALL", op_hidden || regex_hidden);
     }
@@ -2033,11 +2041,16 @@ int dir_check(pool *pp, cmd_rec *cmd, const char *group, const char *path,
   if (!c && session.anon_config)
     c = session.anon_config;
 
+  /* Make sure this cmd_rec has a cmd_id. */
+  if (cmd->cmd_id == 0) {
+    cmd->cmd_id = pr_cmd_get_id(cmd->argv[0]);
+  }
+
   if (!_kludge_disable_umask) {
     /* Check for a directory Umask. */
     if (S_ISDIR(st.st_mode) ||
-        strcmp(cmd->argv[0], C_MKD) == 0 ||
-        strcmp(cmd->argv[0], C_XMKD) == 0) {
+        pr_cmd_cmp(cmd, PR_CMD_MKD_ID) == 0 ||
+        pr_cmd_cmp(cmd, PR_CMD_XMKD_ID) == 0) {
       mode_t *dir_umask = get_param_ptr(CURRENT_CONF, "DirUmask", FALSE);
       _umask = dir_umask ? *dir_umask : (mode_t) -1;
     }
@@ -2097,10 +2110,10 @@ int dir_check(pool *pp, cmd_rec *cmd, const char *group, const char *path,
      * ALL group (i.e. EPRT, EPSV, PASV, PORT, and OPTS).
      */
     if (res == 1 &&
-        strcmp(cmd->argv[0], C_EPRT) != 0 &&
-        strcmp(cmd->argv[0], C_EPSV) != 0 &&
-        strcmp(cmd->argv[0], C_PASV) != 0 &&
-        strcmp(cmd->argv[0], C_PORT) != 0 &&
+        pr_cmd_cmp(cmd, PR_CMD_EPRT_ID) != 0 &&
+        pr_cmd_cmp(cmd, PR_CMD_EPSV_ID) != 0 &&
+        pr_cmd_cmp(cmd, PR_CMD_PASV_ID) != 0 &&
+        pr_cmd_cmp(cmd, PR_CMD_PORT_ID) != 0 &&
         strncmp(cmd->argv[0], C_OPTS, 4) != 0) {
       res = dir_check_limits(cmd, c, "ALL", op_hidden || regex_hidden);
     }
@@ -2250,12 +2263,12 @@ static void reorder_dirs(xaset_t *set, int flags) {
        */
       if (c->parent &&
           c->parent->config_type == CONF_ANON &&
-          strcmp(c->name, "*") == 0) {
+          strncmp(c->name, "*", 2) == 0) {
 
         if (c->subset)
           reparent_all(c->parent, c->subset);
 
-        xaset_remove(c->parent->subset, (xasetmember_t*) c);
+        xaset_remove(c->parent->subset, (xasetmember_t *) c);
 
       } else {
         newparent = _find_best_dir(set, c->name, &tmp);
@@ -2341,6 +2354,58 @@ void pr_dirs_dump(void (*dumpf)(const char *, ...), xaset_t *s, char *indent) {
 }
 #endif /* PR_USE_DEVEL */
 
+static const char *config_type_str(int config_type) {
+  const char *type = "(unknown)";
+
+  switch (config_type) {
+    case CONF_ROOT:
+      type = "CONF_ROOT";
+      break;
+
+    case CONF_DIR:
+      type = "CONF_DIR";
+      break;
+
+    case CONF_ANON:
+      type = "CONF_ANON";
+      break;
+
+    case CONF_LIMIT:
+      type = "CONF_LIMIT";
+      break;
+
+    case CONF_VIRTUAL:
+      type = "CONF_VIRTUAL";
+      break;
+
+    case CONF_DYNDIR:
+      type = "CONF_DYNDIR";
+      break;
+
+    case CONF_GLOBAL:
+      type = "CONF_GLOBAL";
+      break;
+
+    case CONF_CLASS:
+      type = "CONF_CLASS";
+      break;
+
+    case CONF_NAMED:
+      type = "CONF_NAMED";
+      break;
+
+    case CONF_USERDATA:
+      type = "CONF_USERDATA";
+      break;
+
+    case CONF_PARAM:
+      type = "CONF_PARAM";
+      break;
+  };
+
+  return type;
+}
+
 /* Compare two different config_recs to see if they are the same.  Note
  * that "same" here has to be very specific.
  *
@@ -2359,8 +2424,9 @@ static int config_cmp(const config_rec *a, const char *a_name,
 
   if (a->config_type != b->config_type) {
     pr_trace_msg(trace_channel, 18,
-      "configs '%s' and '%s' have mismatched config_type (%d != %d)",
-      a_name, b_name, a->config_type, b->config_type);
+      "configs '%s' and '%s' have mismatched config_type (%s != %s)",
+      a_name, b_name, config_type_str(a->config_type),
+      config_type_str(b->config_type));
     return 1;
   }
 
@@ -2649,7 +2715,7 @@ static void fixup_globals(xaset_t *list) {
       cnext = c->next;
 
       if (c->config_type == CONF_GLOBAL &&
-          strcmp(c->name, "<Global>") == 0) {
+          strncmp(c->name, "<Global>", 9) == 0) {
         /* Copy the contents of the block to all other servers
          * (including this one), then pull the block "out of play".
          */
@@ -3076,8 +3142,8 @@ int parse_config_path(pool *p, const char *path) {
     file_list = make_array(p, 0, sizeof(char *));
 
     while ((dent = pr_fsio_readdir(dirh)) != NULL) {
-      if (strcmp(dent->d_name, ".") != 0 &&
-          strcmp(dent->d_name, "..") != 0 &&
+      if (strncmp(dent->d_name, ".", 2) != 0 &&
+          strncmp(dent->d_name, "..", 3) != 0 &&
           (!have_glob ||
            pr_fnmatch(tmp, dent->d_name, PR_FNM_PERIOD) == 0))
         *((char **) push_array(file_list)) = pdircat(p, dup_path,

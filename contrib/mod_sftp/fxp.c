@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: fxp.c,v 1.123 2011/03/15 18:51:39 castaglia Exp $
+ * $Id: fxp.c,v 1.126 2011/03/19 20:26:51 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -4545,13 +4545,16 @@ static int fxp_handle_close(struct fxp_packet *fxp) {
 
     if (fxh->fh_flags & O_APPEND) {
       cmd2 = fxp_cmd_alloc(fxp->pool, C_APPE, pstrdup(fxp->pool, real_path));
+      cmd2->cmd_id = pr_cmd_get_id(C_APPE);
 
     } else if ((fxh->fh_flags & O_WRONLY) ||
                (fxh->fh_flags & O_RDWR)) {
       cmd2 = fxp_cmd_alloc(fxp->pool, C_STOR, pstrdup(fxp->pool, real_path));
+      cmd2->cmd_id = pr_cmd_get_id(C_STOR);
 
     } else if (fxh->fh_flags == O_RDONLY) {
       cmd2 = fxp_cmd_alloc(fxp->pool, C_RETR, pstrdup(fxp->pool, real_path));
+      cmd2->cmd_id = pr_cmd_get_id(C_RETR);
     }
 
     fxh->fh = NULL;
@@ -4560,8 +4563,8 @@ static int fxp_handle_close(struct fxp_packet *fxp) {
       int post_phase = POST_CMD, log_phase = LOG_CMD;
 
       if (fxh->fh_existed &&
-          (strcmp(cmd2->argv[0], C_STOR) == 0 ||
-           strcmp(cmd2->argv[0], C_APPE) == 0)) {
+          (pr_cmd_cmp(cmd2, PR_CMD_STOR_ID) == 0 ||
+           pr_cmd_cmp(cmd2, PR_CMD_APPE_ID) == 0)) {
 
         /* Clear any existing key in the notes. */
         (void) pr_table_remove(cmd->notes, "mod_xfer.file-modified", NULL);
@@ -4675,7 +4678,7 @@ static int fxp_handle_extended(struct fxp_packet *fxp) {
    * client is telling us its vendor information; it is not requesting that
    * we send our vendor information.
    */
-  if (strcmp(ext_request_name, "vendor-id") == 0) {
+  if (strncmp(ext_request_name, "vendor-id", 10) == 0) {
     res = fxp_handle_ext_vendor_id(fxp);
     pr_cmd_dispatch_phase(cmd, res == 0 ? LOG_CMD : LOG_CMD_ERR, 0);
 
@@ -4683,7 +4686,7 @@ static int fxp_handle_extended(struct fxp_packet *fxp) {
   }
 
   if ((fxp_ext_flags & SFTP_FXP_EXT_VERSION_SELECT) &&
-      strcmp(ext_request_name, "version-select") == 0) {
+      strncmp(ext_request_name, "version-select", 15) == 0) {
     char *version_str;
 
     version_str = sftp_msg_read_string(fxp->pool, &fxp->payload,
@@ -4696,7 +4699,7 @@ static int fxp_handle_extended(struct fxp_packet *fxp) {
   }
 
   if ((fxp_ext_flags & SFTP_FXP_EXT_CHECK_FILE) &&
-      strcmp(ext_request_name, "check-file-name") == 0) {
+      strncmp(ext_request_name, "check-file-name", 16) == 0) {
     char *path, *digest_list;
     off_t offset, len;
     uint32_t blocksz;
@@ -4716,7 +4719,7 @@ static int fxp_handle_extended(struct fxp_packet *fxp) {
   }
 
   if ((fxp_ext_flags & SFTP_FXP_EXT_CHECK_FILE) &&
-      strcmp(ext_request_name, "check-file-handle") == 0) {
+      strncmp(ext_request_name, "check-file-handle", 18) == 0) {
     char *handle, *path, *digest_list;
     off_t offset, len;
     uint32_t blocksz;
@@ -4785,7 +4788,7 @@ static int fxp_handle_extended(struct fxp_packet *fxp) {
   }
 
   if ((fxp_ext_flags & SFTP_FXP_EXT_COPY_FILE) &&
-      strcmp(ext_request_name, "copy-file") == 0) {
+      strncmp(ext_request_name, "copy-file", 10) == 0) {
     char *src, *dst;
     int overwrite;
 
@@ -4800,7 +4803,7 @@ static int fxp_handle_extended(struct fxp_packet *fxp) {
   }
 
   if ((fxp_ext_flags & SFTP_FXP_EXT_POSIX_RENAME) &&
-      strcmp(ext_request_name, "posix-rename@openssh.com") == 0) {
+      strncmp(ext_request_name, "posix-rename@openssh.com", 17) == 0) {
     char *src, *dst;
 
     src = sftp_msg_read_string(fxp->pool, &fxp->payload, &fxp->payload_sz);
@@ -4819,7 +4822,7 @@ static int fxp_handle_extended(struct fxp_packet *fxp) {
 
 #ifdef HAVE_SYS_STATVFS_H
   if ((fxp_ext_flags & SFTP_FXP_EXT_SPACE_AVAIL) &&
-      strcmp(ext_request_name, "space-available") == 0) {
+      strncmp(ext_request_name, "space-available", 16) == 0) {
     char *path;
 
     path = sftp_msg_read_string(fxp->pool, &fxp->payload, &fxp->payload_sz);
@@ -4831,7 +4834,7 @@ static int fxp_handle_extended(struct fxp_packet *fxp) {
   }
 
   if ((fxp_ext_flags & SFTP_FXP_EXT_STATVFS) &&
-      strcmp(ext_request_name, "statvfs@openssh.com") == 0) {
+      strncmp(ext_request_name, "statvfs@openssh.com", 12) == 0) {
     const char *path;
 
     path = sftp_msg_read_string(fxp->pool, &fxp->payload, &fxp->payload_sz);
@@ -4843,7 +4846,7 @@ static int fxp_handle_extended(struct fxp_packet *fxp) {
   }
 
   if ((fxp_ext_flags & SFTP_FXP_EXT_STATVFS) &&
-      strcmp(ext_request_name, "fstatvfs@openssh.com") == 0) {
+      strncmp(ext_request_name, "fstatvfs@openssh.com", 13) == 0) {
     const char *handle, *path;
     struct fxp_handle *fxh;
 
@@ -5174,14 +5177,14 @@ static int fxp_handle_fstat(struct fxp_packet *fxp) {
   fake_user = get_param_ptr(get_dir_ctxt(fxp->pool, fxh->fh->fh_path),
     "DirFakeUser", FALSE);
   if (fake_user != NULL &&
-      strcmp(fake_user, "~") == 0) {
+      strncmp(fake_user, "~", 2) == 0) {
     fake_user = session.user;
   }
 
   fake_group = get_param_ptr(get_dir_ctxt(fxp->pool, fxh->fh->fh_path),
     "DirFakeGroup", FALSE);
   if (fake_group != NULL &&
-      strcmp(fake_group, "~") == 0) {
+      strncmp(fake_group, "~", 2) == 0) {
     fake_group = session.group;
   }
 
@@ -5820,14 +5823,14 @@ static int fxp_handle_lstat(struct fxp_packet *fxp) {
   fake_user = get_param_ptr(get_dir_ctxt(fxp->pool, path), "DirFakeUser",
     FALSE);
   if (fake_user != NULL &&
-      strcmp(fake_user, "~") == 0) {
+      strncmp(fake_user, "~", 2) == 0) {
     fake_user = session.user;
   }
 
   fake_group = get_param_ptr(get_dir_ctxt(fxp->pool, path), "DirFakeGroup",
     FALSE);
   if (fake_group != NULL &&
-      strcmp(fake_group, "~") == 0) {
+      strncmp(fake_group, "~", 2) == 0) {
     fake_group = session.group;
   }
 
@@ -6260,11 +6263,13 @@ static int fxp_handle_open(struct fxp_packet *fxp) {
   if (open_flags & O_APPEND) {
     cmd->class = CL_WRITE;
     cmd2 = fxp_cmd_alloc(fxp->pool, C_APPE, path);
+    cmd2->cmd_id = pr_cmd_get_id(C_APPE);
     session.curr_cmd = C_APPE;
 
   } else if ((open_flags & O_WRONLY) ||
              (open_flags & O_RDWR)) {
     cmd2 = fxp_cmd_alloc(fxp->pool, C_STOR, path);
+    cmd2->cmd_id = pr_cmd_get_id(C_STOR);
 
     if (open_flags & O_WRONLY) {
       cmd->class = CL_WRITE;
@@ -6278,6 +6283,7 @@ static int fxp_handle_open(struct fxp_packet *fxp) {
   } else if (open_flags == O_RDONLY) {
     cmd->class = CL_READ;
     cmd2 = fxp_cmd_alloc(fxp->pool, C_RETR, path);
+    cmd2->cmd_id = pr_cmd_get_id(C_RETR);
     session.curr_cmd = C_RETR;
   }
 
@@ -6346,8 +6352,8 @@ static int fxp_handle_open(struct fxp_packet *fxp) {
     file_existed = exists(hiddenstore_path ? hiddenstore_path : path);
 
     if (file_existed &&
-        (strcmp(cmd2->argv[0], C_STOR) == 0 ||
-         strcmp(cmd2->argv[0], C_APPE) == 0)) {
+        (pr_cmd_cmp(cmd2, PR_CMD_STOR_ID) == 0 ||
+         pr_cmd_cmp(cmd2, PR_CMD_APPE_ID) == 0)) {
 
       /* Clear any existing key in the notes. */
       (void) pr_table_remove(cmd->notes, "mod_xfer.file-modified", NULL);
@@ -7237,14 +7243,14 @@ static int fxp_handle_readdir(struct fxp_packet *fxp) {
   fake_user = get_param_ptr(get_dir_ctxt(fxp->pool, (char *) fxh->dir),
     "DirFakeUser", FALSE);
   if (fake_user != NULL &&
-      strcmp(fake_user, "~") == 0) {
+      strncmp(fake_user, "~", 2) == 0) {
     fake_user = session.user;
   }
 
   fake_group = get_param_ptr(get_dir_ctxt(fxp->pool, (char *) fxh->dir),
     "DirFakeGroup", FALSE);
   if (fake_group != NULL &&
-      strcmp(fake_group, "~") == 0) {
+      strncmp(fake_group, "~", 2) == 0) {
     fake_group = session.group;
   }
 
@@ -7475,14 +7481,14 @@ static int fxp_handle_readlink(struct fxp_packet *fxp) {
     fake_user = get_param_ptr(get_dir_ctxt(fxp->pool, path), "DirFakeUser",
       FALSE);
     if (fake_user != NULL &&
-        strcmp(fake_user, "~") == 0) {
+        strncmp(fake_user, "~", 2) == 0) {
       fake_user = session.user;
     }
 
     fake_group = get_param_ptr(get_dir_ctxt(fxp->pool, path), "DirFakeGroup",
       FALSE);
     if (fake_group != NULL &&
-        strcmp(fake_group, "~") == 0) {
+        strncmp(fake_group, "~", 2) == 0) {
       fake_group = session.group;
     }
 
@@ -7581,7 +7587,7 @@ static int fxp_handle_realpath(struct fxp_packet *fxp) {
   /* The path may have been changed by any PRE_CMD handlers. */
   path = cmd->arg;
 
-  if (strcmp(path, ".") == 0) {
+  if (strncmp(path, ".", 2) == 0) {
     /* The client is asking about the current working directory.  Easy. */
     path = (char *) pr_fs_getvwd();
 
@@ -7682,14 +7688,14 @@ static int fxp_handle_realpath(struct fxp_packet *fxp) {
       fake_user = get_param_ptr(get_dir_ctxt(fxp->pool, path), "DirFakeUser",
         FALSE);
       if (fake_user != NULL &&
-          strcmp(fake_user, "~") == 0) {
+          strncmp(fake_user, "~", 2) == 0) {
         fake_user = session.user;
       }
 
       fake_group = get_param_ptr(get_dir_ctxt(fxp->pool, path), "DirFakeGroup",
         FALSE);
       if (fake_group != NULL &&
-          strcmp(fake_group, "~") == 0) {
+          strncmp(fake_group, "~", 2) == 0) {
         fake_group = session.group;
       }
 
@@ -8470,9 +8476,13 @@ static int fxp_handle_rmdir(struct fxp_packet *fxp) {
     }
 #endif
 
+    errno = xerrno;
+
   } else {
     /* No error. */
+    errno = 0;
     status_code = SSH2_FX_OK;
+    reason = fxp_strerror(status_code);
   }
 
   pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s' "
@@ -8765,14 +8775,14 @@ static int fxp_handle_stat(struct fxp_packet *fxp) {
   fake_user = get_param_ptr(get_dir_ctxt(fxp->pool, path), "DirFakeUser",
     FALSE);
   if (fake_user != NULL &&
-      strcmp(fake_user, "~") == 0) {
+      strncmp(fake_user, "~", 2) == 0) {
     fake_user = session.user;
   }
 
   fake_group = get_param_ptr(get_dir_ctxt(fxp->pool, path), "DirFakeGroup",
     FALSE);
   if (fake_group != NULL &&
-      strcmp(fake_group, "~") == 0) {
+      strncmp(fake_group, "~", 2) == 0) {
     fake_group = session.group;
   }
 
@@ -9771,7 +9781,7 @@ int sftp_fxp_set_displaylogin(const char *path) {
   /* Support "DisplayLogin none", in case we need to disable support for
    * DisplayLogin files inherited from <Global> configurations.
    */
-  if (strcasecmp(path, "none") == 0) {
+  if (strncasecmp(path, "none", 5) == 0) {
     return 0;
   }
 

@@ -1,4 +1,4 @@
-proftpd-dfsg (1.3.4~rc1+20110317-1) unstable; urgency=low
+proftpd-dfsg (1.3.4~rc2-1) unstable; urgency=low
 
   [ Mahyuddin Susanto <udienz@ubuntu.com> ]
 
@@ -37,7 +37,7 @@ proftpd-dfsg (1.3.4~rc1+20110317-1) unstable; urgency=low
   [ Francesco Paolo Lovergine ]
 
   * Annotated CVE IDs in debian/changelog for recent vulnerabilities fixed.
-  * New upstream snapshot from 1.3.4 pre-release series.
+  * New upstream release candidate for 1.3.4 series.
   * Patch removed: 
         debian/patches/prxs (merged upstream)
   * Patch updated:
@@ -45,8 +45,15 @@ proftpd-dfsg (1.3.4~rc1+20110317-1) unstable; urgency=low
   * Patch use_hypen_in_manpage.patch: dropped extension.
   * Now debian/control is also a phony target.
   * Now clean target does not remove upstream files to be more nice against gbp.
+  * Fixed a typo in debian/proftpd-substvars.in and regenerated the template. 
+  * Fixed a typo in proftpd-dev.README.Debian
+  * Moved ftp user home to /srv/ftp as used by other ftp servers.
+  * Now ftp home and user are removed on purge (old or new one).
+  * Removing the whole log directory on purge.
+  * Now lastlog logging is enabled at building time to allow UseLastlog on/off 
+    use in configuration. Thanks TerminX.
 
- -- Francesco Paolo Lovergine <frankie@debian.org>  Thu, 17 Mar 2011 11:05:31 +0100
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Wed, 23 Mar 2011 13:04:35 +0100
 
 proftpd-dfsg (1.3.3d-4) unstable; urgency=high
 

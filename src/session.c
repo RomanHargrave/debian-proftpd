@@ -21,7 +21,7 @@
  * distribute the resulting executable, without including the source code for
  * OpenSSL in the source distribution.
  *
- * $Id: session.c,v 1.10 2011/03/16 22:04:38 castaglia Exp $
+ * $Id: session.c,v 1.13 2011/03/21 03:20:51 castaglia Exp $
  */
 
 #include "conf.h"
@@ -99,7 +99,8 @@ void pr_session_disconnect(module *m, int reason_code,
   session.disconnect_reason = reason_code;
   session.disconnect_module = m;
 
-  if (details != NULL) {
+  if (details != NULL &&
+      session.notes != NULL) {
     /* Stash any extra details in the session.notes table */
     if (pr_table_add_dup(session.notes, "core.disconnect-details",
         (char *) details, 0) < 0) {
@@ -223,14 +224,14 @@ const char *pr_session_get_protocol(int flags) {
   }
 
   /* Otherwise, we need to return either "FTP" or "SSH2", for consistency. */
-  if (strcmp(sess_proto, "ftp") == 0 ||
-      strcmp(sess_proto, "ftps") == 0) {
+  if (strncmp(sess_proto, "ftp", 4) == 0 ||
+      strncmp(sess_proto, "ftps", 5) == 0) {
     return "FTP";
   
-  } else if (strcmp(sess_proto, "ssh2") == 0 ||
-             strcmp(sess_proto, "sftp") == 0 ||
-             strcmp(sess_proto, "scp") == 0 ||
-             strcmp(sess_proto, "publickey") == 0) {
+  } else if (strncmp(sess_proto, "ssh2", 5) == 0 ||
+             strncmp(sess_proto, "sftp", 5) == 0 ||
+             strncmp(sess_proto, "scp", 4) == 0 ||
+             strncmp(sess_proto, "publickey", 10) == 0) {
     return "SSH2";
   }
 
@@ -311,18 +312,18 @@ const char *pr_session_get_ttyname(pool *p) {
 
   sess_proto = pr_table_get(session.notes, "protocol", NULL);
   if (sess_proto) {
-    if (strcmp(sess_proto, "ftp") == 0 ||
-        strcmp(sess_proto, "ftps") == 0) {
+    if (strncmp(sess_proto, "ftp", 4) == 0 ||
+        strncmp(sess_proto, "ftps", 5) == 0) {
 #if (defined(BSD) && (BSD >= 199103))
       tty_proto = "ftp";
 #else
       tty_proto = "ftpd";
 #endif
 
-    } else if (strcmp(sess_proto, "ssh2") == 0 ||
-               strcmp(sess_proto, "sftp") == 0 ||
-               strcmp(sess_proto, "scp") == 0 ||
-               strcmp(sess_proto, "publickey") == 0) {
+    } else if (strncmp(sess_proto, "ssh2", 5) == 0 ||
+               strncmp(sess_proto, "sftp", 5) == 0 ||
+               strncmp(sess_proto, "scp", 4) == 0 ||
+               strncmp(sess_proto, "publickey", 10) == 0) {
 
       /* Just use the plain "ssh" string for the tty name for these cases. */
       tty_proto = "ssh";

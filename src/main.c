@@ -25,7 +25,7 @@
  */
 
 /* House initialization and main program loop
- * $Id: main.c,v 1.420 2011/03/15 05:27:45 castaglia Exp $
+ * $Id: main.c,v 1.425 2011/03/26 00:17:05 castaglia Exp $
  */
 
 #include "conf.h"
@@ -363,11 +363,27 @@ static int _dispatch(cmd_rec *cmd, int cmd_type, int validate, char *match) {
         success = 1;
 
       } else if (MODRET_ISERROR(mr)) {
+        success = -1;
+
         if (cmd_type == POST_CMD ||
             cmd_type == LOG_CMD ||
             cmd_type == LOG_CMD_ERR) {
-          if (MODRET_ERRMSG(mr))
+          if (MODRET_ERRMSG(mr)) {
             pr_log_pri(PR_LOG_NOTICE, "%s", MODRET_ERRMSG(mr));
+          }
+
+          /* Even though we normally want to return a negative value
+           * for success (indicating lack of success), for
+           * LOG_CMD/LOG_CMD_ERR handlers, we always want to handle
+           * errors as a success value of zero (meaning "keep looking").
+           *
+           * This will allow the cmd_rec to continue to be dispatched to
+           * the other interested handlers (Bug#3633).
+           */
+          if (cmd_type == LOG_CMD || 
+              cmd_type == LOG_CMD_ERR) {
+            success = 0;
+          }
 
         } else if (send_error) {
           if (MODRET_ERRNUM(mr) &&
@@ -378,8 +394,6 @@ static int _dispatch(cmd_rec *cmd, int cmd_type, int validate, char *match) {
             pr_response_send_raw("%s", MODRET_ERRMSG(mr));
           }
         }
-
-        success = -1;
       }
 
       if (session.user &&
@@ -594,8 +608,13 @@ int pr_cmd_dispatch_phase(cmd_rec *cmd, int phase, int flags) {
   for (cp = cmd->argv[0]; *cp; cp++)
     *cp = toupper(*cp);
 
-  if (!cmd->class)
+  if (cmd->class == 0) {
     cmd->class = get_command_class(cmd->argv[0]);
+  }
+
+  if (cmd->cmd_id == 0) {
+    cmd->cmd_id = pr_cmd_get_id(cmd->argv[0]);
+  }
 
   if (phase == 0) {
         
@@ -861,9 +880,13 @@ static void core_restart_cb(void *d1, void *d2, void *d3, void *d4) {
   if (is_master && mpid) {
     int maxfd;
     fd_set childfds;
+    struct timeval restart_start, restart_finish;
+    long restart_elapsed = 0;
 
     pr_log_pri(PR_LOG_NOTICE, "received SIGHUP -- master server reparsing "
       "configuration file");
+
+    gettimeofday(&restart_start, NULL);
 
     /* Make sure none of our children haven't completed start up */
     FD_ZERO(&childfds);
@@ -957,6 +980,12 @@ static void core_restart_cb(void *d1, void *d2, void *d3, void *d4) {
      */
     init_bindings();
 
+    gettimeofday(&restart_finish, NULL);
+
+    restart_elapsed = ((restart_finish.tv_sec - restart_start.tv_sec) * 1000L) +
+      ((restart_finish.tv_usec - restart_start.tv_usec) / 1000L);
+    pr_trace_msg("config", 12, "restart took %ld millisecs", restart_elapsed);
+      
   } else {
 
     /* Child process -- cannot restart, log error */
@@ -1985,7 +2014,7 @@ static void finish_terminate(void) {
     }
   }
 
-  pr_session_end(0);
+  pr_session_disconnect(NULL, PR_SESS_DISCONNECT_SIGNAL, "Killed by signal");
 }
 
 #ifdef PR_DEVEL_STACK_TRACE
@@ -2117,7 +2146,8 @@ void set_daemon_rlimits(void) {
 #ifdef RLIMIT_CPU
   while (c) {
     /* Does this limit apply to the daemon? */
-    if (c->argv[1] == NULL || !strcmp(c->argv[1], "daemon")) {
+    if (c->argv[1] == NULL ||
+        strncmp(c->argv[1], "daemon", 7) == 0) {
       struct rlimit *cpu_rlimit = (struct rlimit *) c->argv[0];
 
       PRIVS_ROOT
@@ -2143,7 +2173,8 @@ void set_daemon_rlimits(void) {
 #if defined(RLIMIT_DATA) || defined(RLIMIT_AS) || defined(RLIMIT_VMEM)
   while (c) {
     /* Does this limit apply to the daemon? */
-    if (c->argv[1] == NULL || !strcmp(c->argv[1], "daemon")) {
+    if (c->argv[1] == NULL ||
+        strncmp(c->argv[1], "daemon", 7) == 0) {
       struct rlimit *memory_rlimit = (struct rlimit *) c->argv[0];
 
       PRIVS_ROOT
@@ -2189,7 +2220,8 @@ void set_daemon_rlimits(void) {
 #if defined(RLIMIT_NOFILE) || defined(RLIMIT_OFILE)
   while (c) {
     /* Does this limit apply to the daemon? */
-    if (c->argv[1] == NULL || !strcmp(c->argv[1], "daemon")) {
+    if (c->argv[1] == NULL ||
+        strncmp(c->argv[1], "daemon", 7) == 0) {
       struct rlimit *nofile_rlimit = (struct rlimit *) c->argv[0];
 
       PRIVS_ROOT
@@ -2231,7 +2263,8 @@ void set_session_rlimits(void) {
 #ifdef RLIMIT_CPU
   while (c) {
     /* Does this limit apply to the session? */
-    if (c->argv[1] == NULL || !strcmp(c->argv[1], "session")) {
+    if (c->argv[1] == NULL ||
+        strncmp(c->argv[1], "session", 8) == 0) {
       struct rlimit *cpu_rlimit = (struct rlimit *) c->argv[0];
 
       PRIVS_ROOT
@@ -2257,7 +2290,8 @@ void set_session_rlimits(void) {
 #if defined(RLIMIT_DATA) || defined(RLIMIT_AS) || defined(RLIMIT_VMEM)
   while (c) {
     /* Does this limit apply to the session? */
-    if (c->argv[1] == NULL || !strcmp(c->argv[1], "session")) {
+    if (c->argv[1] == NULL ||
+        strncmp(c->argv[1], "session", 8) == 0) {
       struct rlimit *memory_rlimit = (struct rlimit *) c->argv[0];
 
       PRIVS_ROOT
@@ -2303,7 +2337,8 @@ void set_session_rlimits(void) {
 #if defined(RLIMIT_NOFILE) || defined(RLIMIT_OFILE)
   while (c) {
     /* Does this limit apply to the session? */
-    if (c->argv[1] == NULL || !strcmp(c->argv[1], "session")) {
+    if (c->argv[1] == NULL ||
+        strncmp(c->argv[1], "session", 8) == 0) {
       struct rlimit *nofile_rlimit = (struct rlimit *) c->argv[0];
 
       PRIVS_ROOT
