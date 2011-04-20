@@ -8,6 +8,5 @@ mod_wrap_noparanoid
 ftpstats
 mod_cap
 odbc
-mod_vroot
 silent
 use_hypen_in_manpage
