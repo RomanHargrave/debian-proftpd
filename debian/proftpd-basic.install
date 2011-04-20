@@ -30,5 +30,4 @@ usr/lib/proftpd/mod_wrap2_file.so
 usr/lib/proftpd/mod_wrap2_sql.so
 usr/lib/proftpd/mod_wrap.so
 usr/lib/proftpd/mod_unique_id.so
-usr/lib/proftpd/mod_vroot.so
 usr/share/locale/*
