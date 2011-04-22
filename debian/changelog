@@ -1,3 +1,11 @@
+proftpd-dfsg (1.3.4~rc2-3) unstable; urgency=low
+
+  * Added new contributed modules building and loading: mod_copy, mod_deflate, 
+    mod_ifversion, mod_tls_memcache
+  * Removed mod_vroot loading in modules.conf.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Fri, 22 Apr 2011 16:58:35 +0200
+
 proftpd-dfsg (1.3.4~rc2-2) unstable; urgency=low
 
   * Removed mod_vroot patches, because it will be provided by the separate
