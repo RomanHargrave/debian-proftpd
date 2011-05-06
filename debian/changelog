@@ -3,6 +3,8 @@ proftpd-dfsg (1.3.4~rc2-4) unstable; urgency=low
   * Now debian/rules manages correctly debug. noopt and nostrip options
     in DEB_BUILD_OPTIONS against proftpd building script.
     (closes: #624267)
+  * Added NoSessionReuseRequired as suggested TLSOptions: it does allow some
+    clients to work correctly with data connection.
 
  -- Francesco Paolo Lovergine <frankie@debian.org>  Fri, 29 Apr 2011 23:51:25 +0200
 
