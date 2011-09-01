@@ -5,8 +5,16 @@ proftpd-dfsg (1.3.4~rc2-4) unstable; urgency=low
     (closes: #624267)
   * Added NoSessionReuseRequired as suggested TLSOptions: it does allow some
     clients to work correctly with data connection.
+  * Added a suitable entry in NEWS file to warn about mod_ldap directives
+    upstream changes.
+    (closes: #628944)
+  * Changed ldap.conf template to reflect new basic directives.
+  * Changed reference URL for the Timing Attack in proftpd.conf template.
+    (closes: #630427)
+  * Now proftpd-basic.postrm removes also the logrotate script on purge.
+    (closes: #626742)
 
- -- Francesco Paolo Lovergine <frankie@debian.org>  Fri, 29 Apr 2011 23:51:25 +0200
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Thu, 01 Sep 2011 15:30:22 +0200
 
 proftpd-dfsg (1.3.4~rc2-3) unstable; urgency=low
 

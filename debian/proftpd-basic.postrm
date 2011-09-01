@@ -11,6 +11,7 @@ if [ "$1" = "purge" ]
 then
     rm -rf /etc/proftpd 
     rm -rf /var/log/proftpd
+    rm -f /etc/logrotate.d/proftpd-basic
     userdel --remove --force proftpd || true
     userdel --remove --force ftp || true
     update-rc.d proftpd remove >/dev/null || exit $?
