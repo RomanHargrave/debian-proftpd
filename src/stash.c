@@ -14,7 +14,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, The ProFTPD Project and other respective copyright
  * holders give permission to link this program with OpenSSL, and distribute
@@ -23,7 +23,7 @@
  */
 
 /* Symbol table hashes
- * $Id: stash.c,v 1.8 2011/03/18 00:03:37 castaglia Exp $
+ * $Id: stash.c,v 1.10 2011/05/23 21:22:24 castaglia Exp $
  */
 
 #include "conf.h"
@@ -401,7 +401,7 @@ void *pr_stash_get_symbol(pr_stash_type_t sym_type, const char *name,
     namelen = strlen(name) + 1;
   }
 
-  if (idx_cache &&
+  if (idx_cache != NULL &&
       *idx_cache != -1) {
     idx = *idx_cache;
 
@@ -427,13 +427,13 @@ void *pr_stash_get_symbol(pr_stash_type_t sym_type, const char *name,
       idx = symtab_hash(buf, buflen + 1);
     }
 
-    if (idx_cache) {
+    if (idx_cache != NULL) {
       *idx_cache = idx;
     }
   }
 
   if (idx >= PR_TUNABLE_HASH_TABLE_SIZE) {
-    if (*idx_cache) {
+    if (idx_cache != NULL) {
       *idx_cache = -1;
     }
 

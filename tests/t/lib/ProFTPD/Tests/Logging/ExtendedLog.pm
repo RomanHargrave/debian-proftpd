@@ -199,6 +199,16 @@ my $TESTS = {
     test_class => [qw(forking)],
   },
 
+  extlog_xfer_timeout_bug3696 => {
+    order => ++$order,
+    test_class => [qw(bug forking)],
+  },
+
+  extlog_sftp_xfer_timeout_bug3696 => {
+    order => ++$order,
+    test_class => [qw(bug forking mod_sftp ssh2)],
+  },
+
   # XXX Need unit tests for all LogFormat variables
 };
 
@@ -311,7 +321,7 @@ sub extlog_retr_bug3137 {
 
       my $buf;
       $conn->read($buf, 8192, 30);
-      $conn->close();
+      eval { $conn->close() };
     };
 
     if ($@) {
@@ -446,7 +456,7 @@ sub extlog_stor_bug3137 {
 
       my $buf = "Foo!\n";
       $conn->write($buf, length($buf));
-      $conn->close();
+      eval { $conn->close() };
     };
 
     if ($@) {
@@ -1349,7 +1359,7 @@ sub extlog_bug1908 {
 
       my $buf;
       $conn->read($buf, 8192, 30);
-      $conn->close();
+      eval { $conn->close() };
 
       $client->quit();
     };
@@ -1510,7 +1520,7 @@ sub extlog_file_modified_bug3457 {
           $client->response_msg());
       }
 
-      $conn->close();
+      eval { $conn->close() };
       $client->quit();
     };
 
@@ -2174,7 +2184,7 @@ sub extlog_uid_bug3390 {
 
       my $buf;
       $conn->read($buf, 8192, 30);
-      $conn->close();
+      eval { $conn->close() };
     };
 
     if ($@) {
@@ -2306,7 +2316,7 @@ sub extlog_gid_bug3390 {
 
       my $buf;
       $conn->read($buf, 8192, 30);
-      $conn->close();
+      eval { $conn->close() };
     };
 
     if ($@) {
@@ -2728,7 +2738,7 @@ sub extlog_ftp_raw_bytes_bug3554 {
 
       my $buf = "ABCD\n" x 8;
       $conn->write($buf, length($buf), 30);
-      $conn->close();
+      eval { $conn->close() };
 
       my $resp_code = $client->response_code();
       my $resp_msg = $client->response_msg();
@@ -2911,7 +2921,7 @@ sub extlog_ftp_sendfile_raw_bytes_bug3554 {
 
       my $buf;
       $conn->read($buf, 16382, 30);
-      $conn->close();
+      eval { $conn->close() };
 
       my $resp_code = $client->response_code();
       my $resp_msg = $client->response_msg();
@@ -3090,7 +3100,7 @@ sub extlog_ftp_deflate_raw_bytes_bug3554 {
       my $buf = "ABCD\n" x 8;
       my $deflated = compress($buf);
       $conn->write($deflated, length($deflated), 30);
-      $conn->close();
+      eval { $conn->close() };
 
       my $resp_code = $client->response_code();
       my $resp_msg = $client->response_msg();
@@ -3350,8 +3360,8 @@ sub extlog_ftps_raw_bytes_bug3554 {
         next unless $cmd eq 'QUIT';
 
         # The expected bytes in/out will vary on the ciphers used, etc.
-        my $expected_min = 42340;
-        my $expected_max = 42358;
+        my $expected_min = 42240;
+        my $expected_max = 42378;
         $self->assert($expected_min <= $bytes_in &&
                       $expected_max >= $bytes_in,
           test_msg("Expected $expected_min - $expected_max, got $bytes_in"));
@@ -3550,7 +3560,7 @@ sub extlog_sftp_raw_bytes_bug3554 {
                       $expected_max >= $bytes_in,
           test_msg("Expected $expected_min - $expected_max, got $bytes_in"));
 
-        $expected_min = 2156;
+        $expected_min = 2116;
         $expected_max = 2196;
         $self->assert($expected_min <= $bytes_out &&
                       $expected_max >= $bytes_out,
@@ -3852,7 +3862,7 @@ sub extlog_exit_bug3559 {
 
       my $buf = "ABCD\n" x 8;
       $conn->write($buf, length($buf), 30);
-      $conn->close();
+      eval { $conn->close() };
 
       my $resp_code = $client->response_code();
       my $resp_msg = $client->response_msg();
@@ -3916,7 +3926,7 @@ sub extlog_exit_bug3559 {
         # number is ephemeral, chosen by the kernel.
 
         my $expected_min = 232;
-        my $expected_max = 236;
+        my $expected_max = 286;
         $self->assert($expected_min <= $bytes_out &&
                       $expected_max >= $bytes_out,
           test_msg("Expected $expected_min - $expected_max, got $bytes_out"));
@@ -5764,6 +5774,334 @@ sub extlog_cmd_resp {
 
   if ($ex) {
     die($ex);
+  }
+
+  unlink($log_file);
+}
+
+sub extlog_xfer_timeout_bug3696 {
+  my $self = shift;
+  my $tmpdir = $self->{tmpdir};
+
+  my $config_file = "$tmpdir/extlog.conf";
+  my $pid_file = File::Spec->rel2abs("$tmpdir/extlog.pid");
+  my $scoreboard_file = File::Spec->rel2abs("$tmpdir/extlog.scoreboard");
+
+  my $log_file = File::Spec->rel2abs('tests.log');
+
+  my $auth_user_file = File::Spec->rel2abs("$tmpdir/extlog.passwd");
+  my $auth_group_file = File::Spec->rel2abs("$tmpdir/extlog.group");
+
+  my $test_file = File::Spec->rel2abs("$tmpdir/foo.txt");
+
+  my $user = 'proftpd';
+  my $passwd = 'test';
+  my $group = 'ftpd';
+  my $home_dir = File::Spec->rel2abs($tmpdir);
+  my $uid = 500;
+  my $gid = 500;
+
+  # Make sure that, if we're running as root, that the home directory has
+  # permissions/privs set for the account we create
+  if ($< == 0) {
+    unless (chmod(0755, $home_dir)) {
+      die("Can't set perms on $home_dir to 0755: $!");
+    }
+
+    unless (chown($uid, $gid, $home_dir)) {
+      die("Can't set owner of $home_dir to $uid/$gid: $!");
+    }
+  }
+
+  auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
+    '/bin/bash');
+  auth_group_write($auth_group_file, $group, $gid, $user);
+
+  my $ext_log = File::Spec->rel2abs("$tmpdir/custom.log");
+
+  my $timeout_stalled = 2;
+
+  my $config = {
+    PidFile => $pid_file,
+    ScoreboardFile => $scoreboard_file,
+    SystemLog => $log_file,
+
+    AuthUserFile => $auth_user_file,
+    AuthGroupFile => $auth_group_file,
+
+    LogFormat => 'custom "%f"',
+    ExtendedLog => "$ext_log WRITE custom",
+
+    TimeoutStalled => $timeout_stalled,
+
+    IfModules => {
+      'mod_delay.c' => {
+        DelayEngine => 'off',
+      },
+    },
+  };
+
+  my ($port, $config_user, $config_group) = config_write($config_file, $config);
+
+  # Open pipes, for use between the parent and child processes.  Specifically,
+  # the child will indicate when it's done with its test by writing a message
+  # to the parent.
+  my ($rfh, $wfh);
+  unless (pipe($rfh, $wfh)) {
+    die("Can't open pipe: $!");
+  }
+
+  my $ex;
+
+  # Fork child
+  $self->handle_sigchld();
+  defined(my $pid = fork()) or die("Can't fork: $!");
+  if ($pid) {
+    eval {
+      my $client = ProFTPD::TestSuite::FTP->new('127.0.0.1', $port);
+      $client->login($user, $passwd);
+
+      my $conn = $client->stor_raw('foo.txt');
+      unless ($conn) {
+        die("Failed to STOR foo.txt: " . $client->response_code() . " " .
+          $client->response_msg());
+      }
+
+      # Wait for longer than the TimeoutStalled limit
+      sleep($timeout_stalled + 2);
+
+      eval {
+        my $buf = "Foo!\n";
+        $conn->write($buf, length($buf));
+        eval { $conn->close() };
+
+        $client->quit();
+      };
+    };
+
+    if ($@) {
+      $ex = $@;
+    }
+
+    $wfh->print("done\n");
+    $wfh->flush();
+
+  } else {
+    eval { server_wait($config_file, $rfh) };
+    if ($@) {
+      warn($@);
+      exit 1;
+    }
+
+    exit 0;
+  }
+
+  # Stop server
+  server_stop($pid_file);
+
+  $self->assert_child_ok($pid);
+
+  # Now, read in the ExtendedLog, and see whether the %f variable was
+  # properly written out.  Bug#3696 occurred because mod_log would not
+  # properly notice that a data transfer was in progress when the
+  # session was disconnected due to hitting TimeoutStalled.
+  # information.
+  if (open(my $fh, "< $ext_log")) {
+    my $line = <$fh>;
+    chomp($line);
+    close($fh);
+
+    $self->assert($test_file eq $line,
+      test_msg("Expected '$test_file', got '$line'"));
+
+  } else {
+    die("Can't read $ext_log: $!");
+  }
+
+  if ($ex) {
+    die($ex);
+  }
+
+  unlink($log_file);
+}
+
+sub extlog_sftp_xfer_timeout_bug3696 {
+  my $self = shift;
+  my $tmpdir = $self->{tmpdir};
+
+  my $config_file = "$tmpdir/extlog.conf";
+  my $pid_file = File::Spec->rel2abs("$tmpdir/extlog.pid");
+  my $scoreboard_file = File::Spec->rel2abs("$tmpdir/extlog.scoreboard");
+
+  my $log_file = File::Spec->rel2abs('tests.log');
+
+  my $auth_user_file = File::Spec->rel2abs("$tmpdir/extlog.passwd");
+  my $auth_group_file = File::Spec->rel2abs("$tmpdir/extlog.group");
+
+  my $user = 'proftpd';
+  my $passwd = 'test';
+  my $group = 'ftpd';
+  my $home_dir = File::Spec->rel2abs($tmpdir);
+  my $uid = 500;
+  my $gid = 500;
+
+  # Make sure that, if we're running as root, that the home directory has
+  # permissions/privs set for the account we create
+  if ($< == 0) {
+    unless (chmod(0755, $home_dir)) {
+      die("Can't set perms on $home_dir to 0755: $!");
+    }
+
+    unless (chown($uid, $gid, $home_dir)) {
+      die("Can't set owner of $home_dir to $uid/$gid: $!");
+    }
+  }
+
+  auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
+    '/bin/bash');
+  auth_group_write($auth_group_file, $group, $gid, $user);
+
+  my $rsa_host_key = File::Spec->rel2abs('t/etc/modules/mod_sftp/ssh_host_rsa_key');
+  my $dsa_host_key = File::Spec->rel2abs('t/etc/modules/mod_sftp/ssh_host_dsa_key');
+
+  my $ext_log = File::Spec->rel2abs("$tmpdir/custom.log");
+
+  my $test_file = File::Spec->rel2abs("$tmpdir/test.txt");
+  my $timeout_stalled = 2;
+
+  my $config = {
+    PidFile => $pid_file,
+    ScoreboardFile => $scoreboard_file,
+    SystemLog => $log_file,
+    TraceLog => $log_file,
+    Trace => 'DEFAULT:10 ssh2:20 sftp:20 scp:20',
+
+    AuthUserFile => $auth_user_file,
+    AuthGroupFile => $auth_group_file,
+
+    LogFormat => 'custom "%f"',
+    ExtendedLog => "$ext_log WRITE custom",
+
+    TimeoutStalled => $timeout_stalled,
+
+    IfModules => {
+      'mod_delay.c' => {
+        DelayEngine => 'off',
+      },
+
+      'mod_sftp.c' => [
+        "SFTPEngine on",
+        "SFTPLog $log_file",
+        "SFTPHostKey $rsa_host_key",
+        "SFTPHostKey $dsa_host_key",
+      ],
+    },
+  };
+
+  my ($port, $config_user, $config_group) = config_write($config_file, $config);
+
+  # Open pipes, for use between the parent and child processes.  Specifically,
+  # the child will indicate when it's done with its test by writing a message
+  # to the parent.
+  my ($rfh, $wfh);
+  unless (pipe($rfh, $wfh)) {
+    die("Can't open pipe: $!");
+  }
+
+  require Net::SSH2;
+
+  my $ex;
+
+  # Ignore SIGPIPE
+  local $SIG{PIPE} = sub { };
+
+  # Fork child
+  $self->handle_sigchld();
+  defined(my $pid = fork()) or die("Can't fork: $!");
+  if ($pid) {
+    eval {
+      my $ssh2 = Net::SSH2->new();
+
+      sleep(1);
+
+      unless ($ssh2->connect('127.0.0.1', $port)) {
+        my ($err_code, $err_name, $err_str) = $ssh2->error();
+        die("Can't connect to SSH2 server: [$err_name] ($err_code) $err_str");
+      }
+
+      unless ($ssh2->auth_password($user, $passwd)) {
+        my ($err_code, $err_name, $err_str) = $ssh2->error();
+        die("Can't login to SSH2 server: [$err_name] ($err_code) $err_str");
+      }
+
+      my $sftp = $ssh2->sftp();
+      unless ($sftp) {
+        my ($err_code, $err_name, $err_str) = $ssh2->error();
+        die("Can't use SFTP on SSH2 server: [$err_name] ($err_code) $err_str");
+      }
+
+      my $fh = $sftp->open('test.txt', O_WRONLY|O_CREAT|O_TRUNC, 0644);
+      unless ($fh) {
+        my ($err_code, $err_name) = $sftp->error();
+        die("Can't open test.txt: [$err_name] ($err_code)");
+      }
+
+      print $fh "ABCD\n" x 8;
+
+      # Wait for longer than the TimeoutStalled limit
+      sleep($timeout_stalled + 2);
+
+      # To issue the FXP_CLOSE, we have to explicitly destroy the filehandle
+      $fh = undef;
+
+      # To issue the CHANNEL_CLOSE, we have to explicitly destroy the sftp
+      # object.  Sigh.
+      $sftp = undef;
+
+      $ssh2->disconnect();
+    };
+
+    if ($@) {
+      $ex = $@;
+    }
+
+    $wfh->print("done\n");
+    $wfh->flush();
+
+  } else {
+    eval { server_wait($config_file, $rfh) };
+    if ($@) {
+      warn($@);
+      exit 1;
+    }
+
+    exit 0;
+  }
+
+  # Stop server
+  server_stop($pid_file);
+
+  $self->assert_child_ok($pid);
+
+  if ($ex) {
+    die($ex);
+  }
+
+  # Now, read in the ExtendedLog, and see whether the %f variable was
+  # properly written out.  Bug#3696 occurred because mod_log would not
+  # properly notice that a data transfer was in progress when the
+  # session was disconnected due to hitting TimeoutStalled.
+  # information.
+  if (open(my $fh, "< $ext_log")) {
+    my $line = <$fh>;
+    chomp($line);
+    close($fh);
+
+    $self->assert($test_file eq $line,
+      test_msg("Expected '$test_file', got '$line'"));
+
+  } else {
+    die("Can't read $ext_log: $!");
   }
 
   unlink($log_file);

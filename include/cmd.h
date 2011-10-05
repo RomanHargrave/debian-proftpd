@@ -14,14 +14,14 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, The ProFTPD Project team and other respective
  * copyright holders give permission to link this program with OpenSSL, and
  * distribute the resulting executable, without including the source code for
  * OpenSSL in the source distribution.
  *
- * $Id: cmd.h,v 1.3 2011/03/19 19:02:19 castaglia Exp $
+ * $Id: cmd.h,v 1.6 2011/05/23 20:35:35 castaglia Exp $
  */
 
 #ifndef PR_CMD_H
@@ -29,7 +29,7 @@
 
 cmd_rec *pr_cmd_alloc(pool *, int, ...);
 int pr_cmd_clear_cache(cmd_rec *);
-char *pr_cmd_get_displayable_str(cmd_rec *);
+char *pr_cmd_get_displayable_str(cmd_rec *, size_t *);
 
 int pr_cmd_cmp(cmd_rec *cmd, int cmd_id);
 int pr_cmd_strcmp(cmd_rec *cmd, const char *cmd_name);
@@ -99,6 +99,8 @@ int pr_cmd_get_id(const char *name_name);
 #define PR_CMD_MIC_ID		53
 #define PR_CMD_PBSZ_ID		54
 #define PR_CMD_PROT_ID		55
+#define PR_CMD_MFF_ID		56
+#define PR_CMD_MFMT_ID		57
 
 /* The minimum and maximum command name lengths. */
 #define PR_CMD_MIN_NAMELEN	3

@@ -1570,6 +1570,9 @@ Optional Features:
                           set how often (in loops) the mod_xfer module updates
                           the scoreboard (default=10)
 
+  --disable-strip         do not strip debugging symbols from installed code
+                          (default=no)
+
   --enable-timeout-ident  set the default timeout (in secs) for RFC931
                           connections (default=10)
 
@@ -1613,7 +1616,7 @@ Optional Packages:
                           --with-includes=/some/mysql/include:/my/include
 
   --with-libraries=LIST   add additional library paths to proftpd. LIST is a
-                          colon-separated list of include paths to add e.g.
+                          colon-separated list of library paths to add e.g.
                           --with-libraries=/some/mysql/libdir:/my/libs
 
   --with-modules=LIST     add additional modules to proftpd. LIST is a
@@ -3860,13 +3863,13 @@ if test "${lt_cv_nm_interface+set}" = set; then
 else
   lt_cv_nm_interface="BSD nm"
   echo "int some_variable = 0;" > conftest.$ac_ext
-  (eval echo "\"\$as_me:3863: $ac_compile\"" >&5)
+  (eval echo "\"\$as_me:3866: $ac_compile\"" >&5)
   (eval "$ac_compile" 2>conftest.err)
   cat conftest.err >&5
-  (eval echo "\"\$as_me:3866: $NM \\\"conftest.$ac_objext\\\"\"" >&5)
+  (eval echo "\"\$as_me:3869: $NM \\\"conftest.$ac_objext\\\"\"" >&5)
   (eval "$NM \"conftest.$ac_objext\"" 2>conftest.err > conftest.out)
   cat conftest.err >&5
-  (eval echo "\"\$as_me:3869: output\"" >&5)
+  (eval echo "\"\$as_me:3872: output\"" >&5)
   cat conftest.out >&5
   if $GREP 'External.*some_variable' conftest.out > /dev/null; then
     lt_cv_nm_interface="MS dumpbin"
@@ -5088,7 +5091,7 @@ ia64-*-hpux*)
   ;;
 *-*-irix6*)
   # Find out which ABI we are using.
-  echo '#line 5091 "configure"' > conftest.$ac_ext
+  echo '#line 5094 "configure"' > conftest.$ac_ext
   if { (eval echo "$as_me:$LINENO: \"$ac_compile\"") >&5
   (eval $ac_compile) 2>&5
   ac_status=$?
@@ -6938,11 +6941,11 @@ else
    -e 's:.*FLAGS}\{0,1\} :&$lt_compiler_flag :; t' \
    -e 's: [^ ]*conftest\.: $lt_compiler_flag&:; t' \
    -e 's:$: $lt_compiler_flag:'`
-   (eval echo "\"\$as_me:6941: $lt_compile\"" >&5)
+   (eval echo "\"\$as_me:6944: $lt_compile\"" >&5)
    (eval "$lt_compile" 2>conftest.err)
    ac_status=$?
    cat conftest.err >&5
-   echo "$as_me:6945: \$? = $ac_status" >&5
+   echo "$as_me:6948: \$? = $ac_status" >&5
    if (exit $ac_status) && test -s "$ac_outfile"; then
      # The compiler can only warn and ignore the option if not recognized
      # So say no if there are warnings other than the usual output.
@@ -7277,11 +7280,11 @@ else
    -e 's:.*FLAGS}\{0,1\} :&$lt_compiler_flag :; t' \
    -e 's: [^ ]*conftest\.: $lt_compiler_flag&:; t' \
    -e 's:$: $lt_compiler_flag:'`
-   (eval echo "\"\$as_me:7280: $lt_compile\"" >&5)
+   (eval echo "\"\$as_me:7283: $lt_compile\"" >&5)
    (eval "$lt_compile" 2>conftest.err)
    ac_status=$?
    cat conftest.err >&5
-   echo "$as_me:7284: \$? = $ac_status" >&5
+   echo "$as_me:7287: \$? = $ac_status" >&5
    if (exit $ac_status) && test -s "$ac_outfile"; then
      # The compiler can only warn and ignore the option if not recognized
      # So say no if there are warnings other than the usual output.
@@ -7382,11 +7385,11 @@ else
    -e 's:.*FLAGS}\{0,1\} :&$lt_compiler_flag :; t' \
    -e 's: [^ ]*conftest\.: $lt_compiler_flag&:; t' \
    -e 's:$: $lt_compiler_flag:'`
-   (eval echo "\"\$as_me:7385: $lt_compile\"" >&5)
+   (eval echo "\"\$as_me:7388: $lt_compile\"" >&5)
    (eval "$lt_compile" 2>out/conftest.err)
    ac_status=$?
    cat out/conftest.err >&5
-   echo "$as_me:7389: \$? = $ac_status" >&5
+   echo "$as_me:7392: \$? = $ac_status" >&5
    if (exit $ac_status) && test -s out/conftest2.$ac_objext
    then
      # The compiler can only warn and ignore the option if not recognized
@@ -7437,11 +7440,11 @@ else
    -e 's:.*FLAGS}\{0,1\} :&$lt_compiler_flag :; t' \
    -e 's: [^ ]*conftest\.: $lt_compiler_flag&:; t' \
    -e 's:$: $lt_compiler_flag:'`
-   (eval echo "\"\$as_me:7440: $lt_compile\"" >&5)
+   (eval echo "\"\$as_me:7443: $lt_compile\"" >&5)
    (eval "$lt_compile" 2>out/conftest.err)
    ac_status=$?
    cat out/conftest.err >&5
-   echo "$as_me:7444: \$? = $ac_status" >&5
+   echo "$as_me:7447: \$? = $ac_status" >&5
    if (exit $ac_status) && test -s out/conftest2.$ac_objext
    then
      # The compiler can only warn and ignore the option if not recognized
@@ -10206,7 +10209,7 @@ else
   lt_dlunknown=0; lt_dlno_uscore=1; lt_dlneed_uscore=2
   lt_status=$lt_dlunknown
   cat > conftest.$ac_ext <<_LT_EOF
-#line 10209 "configure"
+#line 10212 "configure"
 #include "confdefs.h"
 
 #if HAVE_DLFCN_H
@@ -10302,7 +10305,7 @@ else
   lt_dlunknown=0; lt_dlno_uscore=1; lt_dlneed_uscore=2
   lt_status=$lt_dlunknown
   cat > conftest.$ac_ext <<_LT_EOF
-#line 10305 "configure"
+#line 10308 "configure"
 #include "confdefs.h"
 
 #if HAVE_DLFCN_H
@@ -12838,15 +12841,23 @@ fi
 if test "${with_includes+set}" = set; then
   withval=$with_includes;
     if test x"$withval" != x; then
-      ac_addl_includes=`echo "$withval" | sed -e 's/:/ /g'` ;
-      for ainclude in $ac_addl_includes; do
-        if test x"$ac_build_addl_includes" = x ; then
-          ac_build_addl_includes="-I$ainclude"
-        else
-          ac_build_addl_includes="-I$ainclude $ac_build_addl_includes"
-        fi
-      done
-      CPPFLAGS="$CPPFLAGS $ac_build_addl_includes"
+      if test x"$withval" = xyes; then
+        { { echo "$as_me:$LINENO: error: --with-includes parameter missing required colon-separated list of include paths" >&5
+echo "$as_me: error: --with-includes parameter missing required colon-separated list of include paths" >&2;}
+   { (exit 1); exit 1; }; }
+      fi
+
+      if test x"$withval" != xno; then
+        ac_addl_includes=`echo "$withval" | sed -e 's/:/ /g'` ;
+        for ainclude in $ac_addl_includes; do
+          if test x"$ac_build_addl_includes" = x ; then
+            ac_build_addl_includes="-I$ainclude"
+          else
+            ac_build_addl_includes="-I$ainclude $ac_build_addl_includes"
+          fi
+        done
+        CPPFLAGS="$CPPFLAGS $ac_build_addl_includes"
+      fi
     fi
 
 fi
@@ -12857,15 +12868,23 @@ fi
 if test "${with_libraries+set}" = set; then
   withval=$with_libraries;
     if test x"$withval" != x; then
-      ac_addl_libdirs=`echo "$withval" | sed -e 's/:/ /g'` ;
-      for alibdir in $ac_addl_libdirs; do
-        if test x"$ac_build_addl_libdirs" = x ; then
-          ac_build_addl_libdirs="-L$alibdir"
-        else
-          ac_build_addl_libdirs="-L$alibdir $ac_build_addl_libdirs"
-        fi
-      done
-      LDFLAGS="$LDFLAGS $ac_build_addl_libdirs"
+      if test x"$withval" = xyes; then
+        { { echo "$as_me:$LINENO: error: --with-libraries parameter missing required colon-separated list of library paths" >&5
+echo "$as_me: error: --with-libraries parameter missing required colon-separated list of library paths" >&2;}
+   { (exit 1); exit 1; }; }
+      fi
+
+      if test x"$withval" != xno; then
+        ac_addl_libdirs=`echo "$withval" | sed -e 's/:/ /g'` ;
+        for alibdir in $ac_addl_libdirs; do
+          if test x"$ac_build_addl_libdirs" = x ; then
+            ac_build_addl_libdirs="-L$alibdir"
+          else
+            ac_build_addl_libdirs="-L$alibdir $ac_build_addl_libdirs"
+          fi
+        done
+        LDFLAGS="$LDFLAGS $ac_build_addl_libdirs"
+      fi
     fi
 
 fi
@@ -12877,44 +12896,52 @@ ifsession_requested="false"
 if test "${with_modules+set}" = set; then
   withval=$with_modules;
     if test x"$withval" != x; then
-      modules_list=`echo "$withval" | sed -e 's/:/ /g'`;
+      if test x"$withval" = xyes; then
+        { { echo "$as_me:$LINENO: error: --with-modules parameter missing required colon-separated list of modules" >&5
+echo "$as_me: error: --with-modules parameter missing required colon-separated list of modules" >&2;}
+   { (exit 1); exit 1; }; }
+      fi
 
-      for amodule in $modules_list; do
-        if test x"$amodule" == xmod_dso ; then
-          { { echo "$as_me:$LINENO: error: use --enable-dso instead of --with-modules=mod_dso for DSO support" >&5
+      if test x"$withval" != xno; then
+        modules_list=`echo "$withval" | sed -e 's/:/ /g'`;
+
+        for amodule in $modules_list; do
+          if test x"$amodule" = xmod_dso ; then
+            { { echo "$as_me:$LINENO: error: use --enable-dso instead of --with-modules=mod_dso for DSO support" >&5
 echo "$as_me: error: use --enable-dso instead of --with-modules=mod_dso for DSO support" >&2;}
    { (exit 1); exit 1; }; }
-        fi
+          fi
 
-        if test x"$amodule" == xmod_ifsession ; then
+          if test x"$amodule" = xmod_ifsession ; then
             ifsession_requested="true"
-        fi
+          fi
 
-        if test x"$amodule" == xmod_lang ; then
-          { { echo "$as_me:$LINENO: error: use --enable-nls instead of --with-modules=mod_lang for NLS/UTF8 support" >&5
+          if test x"$amodule" = xmod_lang ; then
+            { { echo "$as_me:$LINENO: error: use --enable-nls instead of --with-modules=mod_lang for NLS/UTF8 support" >&5
 echo "$as_me: error: use --enable-nls instead of --with-modules=mod_lang for NLS/UTF8 support" >&2;}
    { (exit 1); exit 1; }; }
-        fi
+          fi
 
-        if test x"$amodule" == xmod_memcache ; then
-          { { echo "$as_me:$LINENO: error: use --enable-memcache instead of --with-modules=mod_memcache for Memcache support" >&5
+          if test x"$amodule" = xmod_memcache ; then
+            { { echo "$as_me:$LINENO: error: use --enable-memcache instead of --with-modules=mod_memcache for Memcache support" >&5
 echo "$as_me: error: use --enable-memcache instead of --with-modules=mod_memcache for Memcache support" >&2;}
    { (exit 1); exit 1; }; }
+          fi
+        done
+
+        ac_static_modules=`echo "$withval" | sed -e 's/:/.o /g'`.o ;
+
+        for amodule in $ac_static_modules; do
+          ac_build_static_modules="modules/$amodule $ac_build_static_modules"
+        done
+
+                        if test x"$ifsession_requested" = xtrue; then
+          ac_static_modules=`echo "$ac_static_modules" | sed -e 's/mod_ifsession\.o//g'`
+          ac_static_modules="$ac_static_modules mod_ifsession.o"
+
+          ac_build_static_modules=`echo "$ac_build_static_modules" | sed -e 's/modules\/mod_ifsession\.o//g'`
+          ac_build_static_modules="$ac_build_static_modules modules/mod_ifsession.o";
         fi
-      done
-
-      ac_static_modules=`echo "$withval" | sed -e 's/:/.o /g'`.o ;
-
-      for amodule in $ac_static_modules; do
-        ac_build_static_modules="modules/$amodule $ac_build_static_modules"
-      done
-
-                  if test x"$ifsession_requested" == xtrue; then
-        ac_static_modules=`echo "$ac_static_modules" | sed -e 's/mod_ifsession\.o//g'`
-        ac_static_modules="$ac_static_modules mod_ifsession.o"
-
-        ac_build_static_modules=`echo "$ac_build_static_modules" | sed -e 's/modules\/mod_ifsession\.o//g'`
-        ac_build_static_modules="$ac_build_static_modules modules/mod_ifsession.o";
       fi
     fi
 
@@ -12936,24 +12963,32 @@ ac_unshareable_modules="mod_auth mod_auth_unix mod_core mod_dso mod_ls mod_xfer 
 if test "${with_shared+set}" = set; then
   withval=$with_shared;
     if test x"$withval" != x; then
-      shared_modules=`echo "$withval" | sed -e 's/:/ /g'`;
+      if test x"$withval" = xyes; then
+        { { echo "$as_me:$LINENO: error: --with-shared parameter missing required colon-separated list of modules" >&5
+echo "$as_me: error: --with-shared parameter missing required colon-separated list of modules" >&2;}
+   { (exit 1); exit 1; }; }
+      fi
 
-      # First double-check that the given list does not contain any
-      # unshareable modules
-      for amodule in $shared_modules; do
-        for smodule in $ac_unshareable_modules; do
-          if test x"$amodule" = x"$smodule"; then
-            { { echo "$as_me:$LINENO: error: cannot build $amodule as a shared module" >&5
+      if test x"$withval" != xno; then
+        shared_modules=`echo "$withval" | sed -e 's/:/ /g'`;
+
+        # First double-check that the given list does not contain any
+        # unshareable modules
+        for amodule in $shared_modules; do
+          for smodule in $ac_unshareable_modules; do
+            if test x"$amodule" = x"$smodule"; then
+              { { echo "$as_me:$LINENO: error: cannot build $amodule as a shared module" >&5
 echo "$as_me: error: cannot build $amodule as a shared module" >&2;}
    { (exit 1); exit 1; }; }
-          fi
+            fi
+          done
         done
-      done
 
-      ac_shared_modules=`echo "$withval" | sed -e 's/:/.la /g'`.la ;
-      for amodule in $ac_shared_modules; do
-        ac_build_shared_modules="modules/$amodule $ac_build_shared_modules"
-      done
+        ac_shared_modules=`echo "$withval" | sed -e 's/:/.la /g'`.la ;
+        for amodule in $ac_shared_modules; do
+          ac_build_shared_modules="modules/$amodule $ac_build_shared_modules"
+        done
+      fi
     fi
 
 fi
@@ -13037,7 +13072,15 @@ pkgconfigdir=NONE
 if test "${with_pkgconfig+set}" = set; then
   withval=$with_pkgconfig;
     if test x"$withval" != x; then
-      pkgconfigdir=`echo "$withval"`
+      if test x"$withval" = xyes; then
+        { { echo "$as_me:$LINENO: error: --with-pkgconfig parameter missing required directory path" >&5
+echo "$as_me: error: --with-pkgconfig parameter missing required directory path" >&2;}
+   { (exit 1); exit 1; }; }
+      fi
+
+      if test x"$withval" != xno; then
+        pkgconfigdir=`echo "$withval"`
+      fi
     fi
 
 fi
@@ -14057,7 +14100,7 @@ else
   lt_dlunknown=0; lt_dlno_uscore=1; lt_dlneed_uscore=2
   lt_status=$lt_dlunknown
   cat > conftest.$ac_ext <<_LT_EOF
-#line 14060 "configure"
+#line 14103 "configure"
 #include "confdefs.h"
 
 #if HAVE_DLFCN_H
@@ -15589,7 +15632,7 @@ fi
 # Check whether --enable-pcre was given.
 if test "${enable_pcre+set}" = set; then
   enableval=$enable_pcre;
-    if test x"$enableval" == x"yes" ; then
+    if test x"$enableval" = xyes ; then
 
 cat >>confdefs.h <<\_ACEOF
 #define PR_USE_PCRE 1
@@ -16874,6 +16917,18 @@ _ACEOF
 _ACEOF
 
     fi
+
+fi
+
+
+keepsyms="no"
+# Check whether --enable-strip was given.
+if test "${enable_strip+set}" = set; then
+  enableval=$enable_strip;
+    if test x"$enableval" = xno ; then
+      keepsyms="yes"
+    fi
+
 
 fi
 
@@ -19938,7 +19993,7 @@ echo "${ECHO_T}$ac_add_mod_cap" >&6; }
 
 if test x"$ac_add_mod_cap" = xyes; then
 
-      if test x"$ifsession_requested" == xtrue; then
+      if test x"$ifsession_requested" = xtrue; then
     ac_static_modules=`echo "$ac_static_modules" | sed -e 's/mod_ifsession\.o//g'`
     ac_static_modules="$ac_static_modules mod_cap.o mod_ifsession.o"
 
@@ -31040,7 +31095,8 @@ fi
 echo "${ECHO_T}$pr_cv_func_sendfile" >&6; }
 
 
-  if test "$pr_cv_func_sendfile" != "none"; then
+  if test x"$pr_cv_func_sendfile" != x"none"; then
+            if test x"$pr_cv_func_sendfile" != x"AIX"; then
 
 cat >>confdefs.h <<\_ACEOF
 #define HAVE_SENDFILE 1
@@ -31051,6 +31107,7 @@ cat >>confdefs.h <<\_ACEOF
 #define PR_USE_SENDFILE 1
 _ACEOF
 
+    fi
   fi
 
   case "$pr_cv_func_sendfile" in
@@ -31211,11 +31268,8 @@ _ACEOF
       ;;
 
     "AIX")
-
-cat >>confdefs.h <<\_ACEOF
-#define HAVE_AIX_SENDFILE 1
-_ACEOF
-
+      { echo "$as_me:$LINENO: WARNING: ** AIX sendfile support automatically disabled **" >&5
+echo "$as_me: WARNING: ** AIX sendfile support automatically disabled **" >&2;}
       ;;
 
     "Solaris")
@@ -33290,7 +33344,12 @@ echo "${ECHO_T}no" >&6; }
     INSTALL_STRIP=""
 else
 
-    INSTALL_STRIP="-s"
+  if test x"$keepsyms" = xyes ; then
+        INSTALL_STRIP=""
+
+  else
+        INSTALL_STRIP="-s"
+  fi
 fi
 
 if test "$OSTYPE" = "-DDARWIN6" -o "$OSTYPE" = "-DDARWIN7" -o "$OSTYPE" = "-DDARWIN8"; then

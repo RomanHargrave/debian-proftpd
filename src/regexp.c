@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, Public Flood Software/MacGyver aka Habeeb J. Dihu
  * and other respective copyright holders give permission to link this program
@@ -25,7 +25,7 @@
  */
 
 /* Regex management code
- * $Id: regexp.c,v 1.17 2011/03/06 21:20:53 castaglia Exp $
+ * $Id: regexp.c,v 1.19 2011/08/02 17:10:47 castaglia Exp $
  */
 
 #include "conf.h"
@@ -185,7 +185,7 @@ void pr_regexp_free(module *m, pr_regex_t *pre) {
 #ifdef PR_USE_PCRE
 static int regexp_compile_pcre(pr_regex_t *pre, const char *pattern,
     int flags) {
-  int err_offset, timerno = -1;
+  int err_offset;
 
   if (pre == NULL ||
       pattern == NULL) {

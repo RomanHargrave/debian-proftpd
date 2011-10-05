@@ -6,6 +6,23 @@ This file contains a description of the major changes to ProFTPD for the
 releases.  More information on these changes can be found in the NEWS and
 ChangeLog files.
 
+1.3.4rc3
+---------
+
+  + The mod_ldap configuration directives have changed to a simplified
+    version; please read the "Changes" section in README.LDAP for details.
+
+  + Support for using RADIUS for authentication SSH2 logins, and for
+    supporting the NAS-IPv6-Address RADIUS attribute.
+
+  + Automatically disable sendfile support on AIX systems.
+
+  + <Limit WRITE> now prevents renaming/moving a file out of the limited
+    directory.
+
+  + ExtendedLog entries now written for data transfers which time out.
+
+
 1.3.4rc2
 ---------
 
@@ -54,6 +71,15 @@ ChangeLog files.
       directive is used to detect and to throttle such malicious clients;
       it also generates an event that can be used by the mod_ban module
       for banning these clients.  See doc/modules/mod_core.html#MaxCommandRate.
+
+    ProcessTitles
+
+      By default, proftpd changes the process title for session processes
+      to include the authenticated user name and the FTP command being
+      handled, including the paths to files being downloaded.  The new
+      ProcessTitles directive can be used to modify proftpd's behavior with
+      regard to this session process title changing. See
+      doc/modules/mod_core.html#ProcessTitles for more info.
 
     SQLNamedConnectInfo
 
@@ -342,4 +368,4 @@ ChangeLog files.
 
       Support for this directive has been removed.
 
-Last Updated: $Date: 2011/03/29 17:52:48 $
+Last Updated: $Date: 2011/09/26 15:05:17 $

@@ -14,14 +14,14 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, TJ Saunders and other respective copyright holders
  * give permission to link this program with OpenSSL, and distribute the
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: channel.c,v 1.39 2011/03/17 22:16:47 castaglia Exp $
+ * $Id: channel.c,v 1.43 2011/05/24 20:55:50 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -33,6 +33,7 @@
 #include "interop.h"
 #include "fxp.h"
 #include "scp.h"
+#include "date.h"
 
 extern module sftp_module;
 
@@ -48,6 +49,7 @@ struct ssh2_channel_exec_handler {
 
   int (*set_params)(pool *, uint32_t, array_header *);
   int (*prepare)(uint32_t);
+  int (*postopen)(uint32_t);
   int (*handle_packet)(pool *, void *, uint32_t, char *, uint32_t);
   int (*finish)(uint32_t);
 };
@@ -144,6 +146,9 @@ static void destroy_channel(uint32_t channel_id) {
       if (chans[i]->recvd_close &&
           chans[i]->sent_close) {
         if (chans[i]->finish != NULL) {
+          pr_trace_msg(trace_channel, 15,
+            "calling finish handler for channel ID %lu",
+            (unsigned long) channel_id);
           (chans[i]->finish)(channel_id);
         }
 
@@ -816,6 +821,7 @@ static int handle_exec_channel(struct ssh2_channel *chan,
       }
 
       chan->prepare = handler->prepare;
+      chan->postopen = handler->postopen;
       chan->handle_packet = handler->handle_packet;
       chan->finish = handler->finish;
 
@@ -871,7 +877,6 @@ static int handle_signal_channel(struct ssh2_channel *chan,
   if (bool != FALSE) {
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
       "malformed 'signal' request (bool must be FALSE)");
-    res = -1;
   }
 
   sig_name = sftp_msg_read_string(pkt->pool, buf, buflen);
@@ -947,6 +952,7 @@ static int handle_subsystem_channel(struct ssh2_channel *chan,
 
     if (sftp_services & SFTP_SERVICE_FL_SFTP) {
       chan->prepare = sftp_fxp_open_session;
+      chan->postopen = NULL;
       chan->handle_packet = sftp_fxp_handle_packet;
       chan->finish = sftp_fxp_close_session;
 
@@ -1074,6 +1080,36 @@ static int handle_channel_req(struct ssh2_packet *pkt) {
     }
 
     destroy_pool(pkt2->pool);
+  }
+
+  /* If the handler has a postopen callback, invoke that. */
+  if (res == 0 &&
+      chan->postopen) {
+    int pres;
+
+    pr_trace_msg(trace_channel, 18,
+      "calling '%s' handler postopen callback", channel_request);
+
+    pres = (chan->postopen)(chan->local_channel_id);
+    if (pres < 0) {
+      int xerrno = errno;
+
+      (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+        "postopen error on channel ID %lu: %s",
+        (unsigned long) chan->local_channel_id, strerror(xerrno));
+
+    } else if (pres == 1) {
+      /* Special case: if the postopen callback returns 1, the handler
+       * is indicating that it has already handled the requests and requires
+       * no further data from the client.
+       *
+       * This means that we can call send_channel_done() for this channel.
+       */
+      pr_trace_msg(trace_channel, 18,
+        "sending CHANNEL_CLOSE for '%s', due to postopen return value",
+        channel_request);
+      send_channel_done(pkt->pool, chan->local_channel_id);
+    }
   }
 
   /* Make a special case for failed, but unsupported, channel requests.
@@ -1391,8 +1427,9 @@ int sftp_channel_init(void) {
       sizeof(struct ssh2_channel_exec_handler *));
   }
 
-  handler = pcalloc(channel_pool, sizeof(struct ssh2_channel_exec_handler));
+  /* Allocate the 'scp' handler */
 
+  handler = pcalloc(channel_pool, sizeof(struct ssh2_channel_exec_handler));
   handler->m = &sftp_module;
 
   /* XXX In the future, we should be able to handle clients which request
@@ -1401,8 +1438,27 @@ int sftp_channel_init(void) {
   handler->command = pstrdup(channel_pool, "scp");
   handler->set_params = sftp_scp_set_params;
   handler->prepare = sftp_scp_open_session;
+  handler->postopen = NULL;
   handler->handle_packet = sftp_scp_handle_packet;
   handler->finish = sftp_scp_close_session;
+
+  *((struct ssh2_channel_exec_handler **) push_array(channel_exec_handlers)) =
+    handler;
+
+  /* Allocate the 'date' handler */
+
+  handler = pcalloc(channel_pool, sizeof(struct ssh2_channel_exec_handler));
+  handler->m = &sftp_module;
+
+  /* XXX In the future, we should be able to handle clients which request
+   * something like "/bin/date", in addition to just "date".
+   */
+  handler->command = pstrdup(channel_pool, "date");
+  handler->set_params = sftp_date_set_params;
+  handler->prepare = sftp_date_open_session;
+  handler->postopen = sftp_date_postopen_session;
+  handler->handle_packet = sftp_date_handle_packet;
+  handler->finish = sftp_date_close_session;
 
   *((struct ssh2_channel_exec_handler **) push_array(channel_exec_handlers)) =
     handler;
@@ -1637,6 +1693,7 @@ unsigned int sftp_channel_opened(uint32_t *remote_channel_id) {
 int sftp_channel_register_exec_handler(module *m, const char *command,
     int (*set_params)(pool *, uint32_t, array_header *),
     int (*prepare)(uint32_t),
+    int (*postopen)(uint32_t),
     int (*handle_packet)(pool *, void *, uint32_t, char *, uint32_t),
     int (*finish)(uint32_t),
     int (**write_data)(pool *, uint32_t, char *, uint32_t)) {
@@ -1687,6 +1744,7 @@ int sftp_channel_register_exec_handler(module *m, const char *command,
   handler->command = pstrdup(channel_pool, command);
   handler->set_params = set_params;
   handler->prepare = prepare;
+  handler->postopen = postopen;
   handler->handle_packet = handle_packet;
   handler->finish = finish;
 

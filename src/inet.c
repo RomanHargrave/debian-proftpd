@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, Public Flood Software/MacGyver aka Habeeb J. Dihu
  * and other respective copyright holders give permission to link this program
@@ -25,7 +25,7 @@
  */
 
 /* Inet support functions, many wrappers for netdb functions
- * $Id: inet.c,v 1.131 2011/03/23 16:36:33 castaglia Exp $
+ * $Id: inet.c,v 1.135 2011/09/21 05:03:05 castaglia Exp $
  */
 
 #include "conf.h"
@@ -223,7 +223,8 @@ static conn_t *init_conn(pool *p, int fd, pr_netaddr_t *bind_addr,
     defined(FREEBSD4) || defined(FREEBSD5) || defined(FREEBSD6) || \
     defined(FREEBSD7) || defined(FREEBSD8) || defined(FREEBSD9) || \
     defined(__OpenBSD__) || defined(__NetBSD__) || \
-    defined(DARWIN6) || defined(DARWIN7) || defined(DARWIN8) || defined(DARWIN9) || defined(DARWIN10) || \
+    defined(DARWIN6) || defined(DARWIN7) || defined(DARWIN8) || \
+    defined(DARWIN9) || defined(DARWIN10) || defined(DARWIN11) || \
     defined(SCO3) || defined(CYGWIN) || defined(SYSV4_2MP) || \
     defined(SYSV5SCO_SV6) || defined(SYSV5UNIXWARE7)
 # ifdef SOLARIS2
@@ -242,7 +243,8 @@ static conn_t *init_conn(pool *p, int fd, pr_netaddr_t *bind_addr,
     defined(FREEBSD4) || defined(FREEBSD5) || defined(FREEBSD6) || \
     defined(FREEBSD7) || defined(FREEBSD8) || defined(FREEBSD9) || \
     defined(__OpenBSD__) || defined(__NetBSD__) || \
-    defined(DARWIN6) || defined(DARWIN7) || defined(DARWIN8) || defined(DARWIN9) || defined(DARWIN10) || \
+    defined(DARWIN6) || defined(DARWIN7) || defined(DARWIN8) || \
+    defined(DARWIN9) || defined(DARWIN10) || defined(DARWIN11) || \
     defined(SCO3) || defined(CYGWIN) || defined(SYSV4_2MP) || \
     defined(SYSV5SCO_SV6) || defined(SYSV5UNIXWARE7)
 # ifdef SOLARIS2
@@ -576,6 +578,36 @@ void pr_inet_lingering_abort(pool *p, conn_t *c, long linger) {
   destroy_pool(c->pool);
 }
 
+int pr_inet_set_proto_cork(int sockfd, int cork) {
+  int res = 0;
+
+  /* Linux defines TCP_CORK; BSD-derived systems (including Mac OSX) use
+   * TCP_NOPUSH.
+   *
+   * Both options work by "corking" the socket, only sending TCP packets
+   * if there's enough data for a full packet, otherwise buffering the data
+   * to be written.  "Uncorking" the socket should flush out the buffered
+   * data.
+   */
+
+#if defined(TCP_CORK) || defined(TCP_NOPUSH)
+# ifdef SOL_TCP
+  int tcp_level = SOL_TCP;
+# else
+  int tcp_level = tcp_proto;
+# endif /* SOL_TCP */
+#endif /* TCP_CORK or TCP_NOPUSH */
+
+#if defined(TCP_CORK)
+  res = setsockopt(sockfd, tcp_level, TCP_CORK, (void *) &cork, sizeof(cork));
+  
+#elif defined(TCP_NOPUSH)
+  res = setsockopt(sockfd, tcp_level, TCP_NOPUSH, (void *) &cork, sizeof(cork));
+#endif
+
+  return res;
+}
+
 int pr_inet_set_proto_opts(pool *p, conn_t *c, int mss, int nodelay,
     int tos, int nopush) {
 
@@ -661,11 +693,12 @@ int pr_inet_set_proto_opts(pool *p, conn_t *c, int mss, int nodelay,
 #endif /* IP_TOS */
 
 #ifdef TCP_NOPUSH
-  /* NOTE: TCP_NOPUSH is a BSDism. */
+  /* XXX Note: for backward compatibility, we only call set_proto_cork() for
+   * BSD systems.  This condition can be removed in 1.3.5rc1.
+   */
   if (c->listen_fd != -1) {
-    if (setsockopt(c->listen_fd, tcp_level, TCP_NOPUSH, (void *) &nopush,
-        sizeof(nopush)) < 0) {
-      pr_log_pri(PR_LOG_NOTICE, "error setting listen fd TCP_NOPUSH: %s",
+    if (pr_inet_set_proto_cork(c->listen_fd, nopush) < 0) {
+      pr_log_pri(PR_LOG_NOTICE, "error corking listen fd %d: %s", c->listen_fd,
         strerror(errno));
     }
   }
@@ -847,23 +880,33 @@ int pr_inet_set_block(pool *p, conn_t *c) {
 
 /* Put a connection in listen mode
  */
-int pr_inet_listen(pool *p, conn_t *c, int backlog) {
+int pr_inet_listen(pool *p, conn_t *c, int backlog, int flags) {
   if (!c || c->mode == CM_LISTEN)
     return -1;
 
-  while (TRUE)
+  while (TRUE) {
     if (listen(c->listen_fd, backlog) == -1) {
-      if (errno == EINTR) {
+      int xerrno = errno;
+
+      if (xerrno == EINTR) {
         pr_signals_handle();
         continue;
       }
 
       pr_log_pri(PR_LOG_ERR, "unable to listen on %s#%u: %s",
-        pr_netaddr_get_ipstr(c->local_addr), c->local_port, strerror(errno));
-      pr_session_disconnect(NULL, PR_SESS_DISCONNECT_BY_APPLICATION, NULL);
+        pr_netaddr_get_ipstr(c->local_addr), c->local_port, strerror(xerrno));
 
-    } else
+      if (flags & PR_INET_LISTEN_FL_FATAL_ON_ERROR) {
+        pr_session_disconnect(NULL, PR_SESS_DISCONNECT_BY_APPLICATION, NULL);
+      }
+
+      errno = xerrno;
+      return -1;
+
+    } else {
       break;
+    }
+  }
 
   c->mode = CM_LISTEN;
   return 0;

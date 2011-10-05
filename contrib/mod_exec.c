@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, TJ Saunders gives permission to link this program
  * with OpenSSL, and distribute the resulting executable, without including
@@ -24,7 +24,7 @@
  * This is mod_exec, contrib software for proftpd 1.3.x and above.
  * For more information contact TJ Saunders <tj@castaglia.org>.
  *
- * $Id: mod_exec.c,v 1.14 2011/03/26 00:43:26 castaglia Exp $
+ * $Id: mod_exec.c,v 1.20 2011/09/24 06:44:36 castaglia Exp $
  */
 
 #include "conf.h"
@@ -34,7 +34,7 @@
 # include <sys/resource.h>
 #endif
 
-#define MOD_EXEC_VERSION	"mod_exec/0.9.10"
+#define MOD_EXEC_VERSION	"mod_exec/0.9.11"
 
 /* Make sure the version of proftpd is as necessary. */
 #if PROFTPD_VERSION_NUMBER < 0x0001030402
@@ -169,7 +169,7 @@ static unsigned char exec_match_cmd(cmd_rec *cmd, array_header *cmd_array) {
         strcasecmp(cmds[i], cmd->group) == 0)
       return TRUE;
 
-    if (strcasecmp(cmds[i], "ALL") == 0)
+    if (strncasecmp(cmds[i], "ALL", 4) == 0)
       return TRUE;
   }
 
@@ -185,7 +185,7 @@ static int exec_openlog(void) {
     return 0;
 
   /* Check for "none". */
-  if (strcasecmp(exec_logname, "none") == 0) {
+  if (strncasecmp(exec_logname, "none", 5) == 0) {
     exec_logname = NULL;
     return 0;
   }
@@ -227,7 +227,7 @@ static char **exec_prepare_environ(pool *env_pool, cmd_rec *cmd) {
   while (c) {
     pr_signals_handle();
 
-    if (strcmp("-", c->argv[1]) == 0) {
+    if (strncmp("-", c->argv[1], 2) == 0) {
       *((char **) push_array(env)) = pstrcat(env_pool, c->argv[0], "=",
         getenv(c->argv[0]) ? getenv(c->argv[0]) : "", NULL);
 
@@ -598,7 +598,7 @@ static int exec_ssystem(cmd_rec *cmd, config_rec *c, int flags) {
             (char *) c->argv[i], exec_stdin_pipe[1]);
         }
 
-        if (write(exec_stdin_pipe[1], "\n", 2) < 0) {
+        if (write(exec_stdin_pipe[1], "\n", 1) < 0) {
           exec_log("error writing newline to stdin: %s", strerror(errno));
         }
       }
@@ -617,14 +617,14 @@ static int exec_ssystem(cmd_rec *cmd, config_rec *c, int flags) {
     }
 
     if (exec_opts & EXEC_OPT_USE_STDIN) {
-      close(exec_stdin_pipe[0]);
+      (void) close(exec_stdin_pipe[0]);
       exec_stdin_pipe[0] = -1;
     }
 
-    close(exec_stdout_pipe[1]);
+    (void) close(exec_stdout_pipe[1]);
     exec_stdout_pipe[1] = -1;
 
-    close(exec_stderr_pipe[1]);
+    (void) close(exec_stderr_pipe[1]);
     exec_stderr_pipe[1] = -1;
    
     if ((exec_opts & EXEC_OPT_LOG_STDOUT) ||
@@ -837,12 +837,23 @@ static int exec_ssystem(cmd_rec *cmd, config_rec *c, int flags) {
     return errno;
   }
 
-  if (WIFEXITED(status))
-    return WEXITSTATUS(status);
+  if (WIFEXITED(status)) {
+    int exit_status;
+
+    exit_status = WEXITSTATUS(status);
+    exec_log("'%s' terminated normally, with exit status %d",
+      (const char *) c->argv[2], exit_status);
+    return exit_status;
+  }
 
   if (WIFSIGNALED(status)) {
     exec_log("'%s' died from signal %d", (const char *) c->argv[2],
       WTERMSIG(status));
+
+    if (WCOREDUMP(status)) {
+      exec_log("'%s' created a coredump", (const char *) c->argv[2]);
+    }
+
     return EPERM;
   }
 
@@ -1526,11 +1537,11 @@ MODRET set_execonevent(cmd_rec *cmd) {
   eed->event = pstrdup(c->pool, cmd->argv[1]);
   eed->c = c;
 
-  if (strcasecmp(eed->event, "MaxConnectionRate") == 0) {
+  if (strncasecmp(eed->event, "MaxConnectionRate", 18) == 0) {
     pr_event_register(&exec_module, "core.max-connection-rate", exec_any_ev,
       eed);
 
-  } else if (strcasecmp(eed->event, "MaxInstances") == 0) {
+  } else if (strncasecmp(eed->event, "MaxInstances", 13) == 0) {
      pr_event_register(&exec_module, "core.max-instances", exec_any_ev, eed);
 
   } else
@@ -1610,16 +1621,16 @@ MODRET set_execoptions(cmd_rec *cmd) {
   c = add_config_param(cmd->argv[0], 1, NULL);
 
   for (i = 1; i < cmd->argc; i++) {
-    if (strcmp(cmd->argv[i], "logStdout") == 0) {
+    if (strncmp(cmd->argv[i], "logStdout", 10) == 0) {
       opts |= EXEC_OPT_LOG_STDOUT;
 
-    } else if (strcmp(cmd->argv[i], "logStderr") == 0) {
+    } else if (strncmp(cmd->argv[i], "logStderr", 10) == 0) {
       opts |= EXEC_OPT_LOG_STDERR;
 
-    } else if (strcmp(cmd->argv[i], "sendStdout") == 0) {
+    } else if (strncmp(cmd->argv[i], "sendStdout", 11) == 0) {
       opts |= EXEC_OPT_SEND_STDOUT;
 
-    } else if (strcmp(cmd->argv[i], "useStdin") == 0) {
+    } else if (strncmp(cmd->argv[i], "useStdin", 9) == 0) {
       opts |= EXEC_OPT_USE_STDIN;
 
     } else {
@@ -1706,7 +1717,7 @@ static void exec_exit_ev(const void *event_data, void *user_data) {
 
 #if defined(PR_SHARED_MODULE)
 static void exec_mod_unload_ev(const void *event_data, void *user_data) {
-  if (strcmp("mod_exec.c", (const char *) event_data) == 0) {
+  if (strncmp("mod_exec.c", (const char *) event_data, 11) == 0) {
     if (exec_pool) {
       destroy_pool(exec_pool);
       exec_pool = NULL;
@@ -1784,9 +1795,11 @@ static void exec_restart_ev(const void *event_data, void *user_data) {
 static int exec_sess_init(void) {
   unsigned char *use_exec = NULL;
   config_rec *c = NULL;
+  const char *proto;
 
- if ((use_exec = get_param_ptr(main_server->conf, "ExecEngine",
-    FALSE)) != NULL && *use_exec == TRUE) {
+  use_exec = get_param_ptr(main_server->conf, "ExecEngine", FALSE);
+  if (use_exec != NULL &&
+      *use_exec == TRUE) {
     exec_engine = TRUE;
 
   } else {
@@ -1794,9 +1807,23 @@ static int exec_sess_init(void) {
     return 0;
   }
 
+  /* Register a "core.exit" event handler. */
+  pr_event_register(&exec_module, "core.exit", exec_exit_ev, NULL);
+
   c = find_config(main_server->conf, CONF_PARAM, "ExecOptions", FALSE);
   if (c) {
     exec_opts = *((unsigned int *) c->argv[0]);
+  }
+
+  /* If we are handling an SSH2 session, then disable the sendStdout
+   * ExecOption, if present.
+   *
+   * Attempting to send the stdout of commands to connecting SSH2 clients
+   * can confuse them and lead to connection problems.
+   */
+  proto = pr_session_get_protocol(0);
+  if (strncmp(proto, "ssh2", 5) == 0) {
+    exec_opts &= ~EXEC_OPT_SEND_STDOUT;
   }
 
   c = find_config(main_server->conf, CONF_PARAM, "ExecTimeout", FALSE);
@@ -1835,9 +1862,6 @@ static int exec_sess_init(void) {
 
     c = find_config_next(c, c->next, CONF_PARAM, "ExecOnConnect", FALSE);
   }
-
-  /* Register a "core.exit" event handler. */
-  pr_event_register(&exec_module, "core.exit", exec_exit_ev, NULL);
 
   return 0;
 }

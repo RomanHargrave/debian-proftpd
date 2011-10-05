@@ -14,7 +14,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, the ProFTPD Project and other respective copyright
  * holders give permission to link this program with OpenSSL, and distribute
@@ -23,7 +23,7 @@
  */
 
 /* Trace functions
- * $Id: trace.c,v 1.32 2011/03/25 04:11:45 castaglia Exp $
+ * $Id: trace.c,v 1.36 2011/09/05 19:19:55 castaglia Exp $
  */
 
 
@@ -91,7 +91,8 @@ static void trace_restart_ev(const void *event_data, void *user_data) {
   return;
 }
 
-static int trace_write(const char *channel, int level, const char *msg) {
+static int trace_write(const char *channel, int level, const char *msg,
+    int discard) {
   char buf[PR_TUNABLE_BUFFER_SIZE];
   size_t buflen;
   struct tm *tm;
@@ -117,7 +118,7 @@ static int trace_write(const char *channel, int level, const char *msg) {
 
     gettimeofday(&now, NULL);
 
-    tm = pr_localtime(NULL, &(now.tv_sec));
+    tm = pr_localtime(NULL, (const time_t *) &(now.tv_sec));
 
     strftime(buf, sizeof(buf), "%b %d %H:%M:%S", tm);
 
@@ -171,7 +172,20 @@ static int trace_write(const char *channel, int level, const char *msg) {
     buf[sizeof(buf)-2] = '\n';
   }
 
-  return write(trace_logfd, buf, strlen(buf));
+  buflen = strlen(buf);
+
+  pr_log_event_generate(PR_LOG_TYPE_TRACELOG, trace_logfd, level, buf, buflen);
+
+  if (discard) {
+    /* This log message would not have been written to disk, so just discard
+     * it.  The discard value is TRUE when there's a log listener for
+     * TraceLog logging events, and the Trace log level configuration would
+     * otherwise have filtered out this log message.
+     */
+    return 0;
+  }
+
+  return write(trace_logfd, buf, buflen);
 }
 
 pr_table_t *pr_trace_get_table(void) {
@@ -439,6 +453,7 @@ int pr_trace_vmsg(const char *channel, int level, const char *fmt,
   char buf[PR_TUNABLE_BUFFER_SIZE] = {'\0'};
   size_t buflen;
   struct trace_levels *levels;
+  int discard = FALSE;
 
   /* Writing a trace message at level zero is NOT helpful; this makes it
    * impossible to quell messages to that trace channel by setting the level
@@ -459,15 +474,29 @@ int pr_trace_vmsg(const char *channel, int level, const char *fmt,
   }
 
   levels = trace_get_levels(channel);
-  if (levels == NULL)
-    return -1;
+  if (levels == NULL) {
+    discard = TRUE;
 
-  if (level < levels->min_level) {
-    return 0;
+    if (pr_log_event_listening(PR_LOG_TYPE_TRACELOG) == FALSE) {
+      return -1;
+    }
   }
 
-  if (level > levels->max_level) {
-    return 0;
+  if (discard == FALSE &&
+      level < levels->min_level) {
+    discard = TRUE;
+
+    if (pr_log_event_listening(PR_LOG_TYPE_TRACELOG) == FALSE) {
+      return 0;
+    }
+  }
+
+  if (discard == FALSE &&
+      level > levels->max_level) {
+
+    if (pr_log_event_listening(PR_LOG_TYPE_TRACELOG) == FALSE) {
+      return 0;
+    }
   }
 
   vsnprintf(buf, sizeof(buf), fmt, msg);
@@ -484,7 +513,7 @@ int pr_trace_vmsg(const char *channel, int level, const char *fmt,
     buflen = strlen(buf);
   }
 
-  return trace_write(channel, level, buf);
+  return trace_write(channel, level, buf, discard);
 }
 
 #else
@@ -530,6 +559,12 @@ int pr_trace_set_options(unsigned long opts) {
 }
 
 int pr_trace_msg(const char *channel, int level, const char *fmt, ...) {
+  errno = ENOSYS;
+  return -1;
+}
+
+int pr_trace_vmsg(const char *channel, int level, const char *fmt,
+    va_list vargs) {
   errno = ENOSYS;
   return -1;
 }

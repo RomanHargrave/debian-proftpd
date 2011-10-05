@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, Public Flood Software/MacGyver aka Habeeb J. Dihu
  * and other respective copyright holders give permission to link this program
@@ -25,7 +25,7 @@
  */
 
 /* House initialization and main program loop
- * $Id: main.c,v 1.425 2011/03/26 00:17:05 castaglia Exp $
+ * $Id: main.c,v 1.435 2011/09/24 19:52:48 castaglia Exp $
  */
 
 #include "conf.h"
@@ -255,7 +255,7 @@ static int _dispatch(cmd_rec *cmd, int cmd_type, int validate, char *match) {
   char *cmdargstr = NULL;
   cmdtable *c;
   modret_t *mr;
-  int success = 0;
+  int success = 0, xerrno = 0;
   int send_error = 0;
   static int match_index_cache = -1;
   static char *last_match = NULL;
@@ -280,9 +280,13 @@ static int _dispatch(cmd_rec *cmd, int cmd_type, int validate, char *match) {
   c = pr_stash_get_symbol(PR_SYM_CMD, match, NULL, index_cache);
 
   while (c && !success) {
+    size_t cmdargstrlen = 0;
+
     pr_signals_handle();
 
     session.curr_cmd = cmd->argv[0];
+    session.curr_cmd_id = cmd->cmd_id;
+    session.curr_cmd_rec = cmd;
     session.curr_phase = cmd_type;
 
     if (c->cmd_type == cmd_type) {
@@ -295,6 +299,7 @@ static int _dispatch(cmd_rec *cmd, int cmd_type, int validate, char *match) {
         pr_trace_msg("command", 8,
           "command '%s' failed 'requires_auth' check for mod_%s.c",
           cmd->argv[0], c->m->name);
+        errno = EACCES;
         return -1;
       }
 
@@ -303,13 +308,13 @@ static int _dispatch(cmd_rec *cmd, int cmd_type, int validate, char *match) {
         pr_pool_tag(cmd->tmp_pool, "cmd_rec tmp pool");
       }
 
-      cmdargstr = pr_cmd_get_displayable_str(cmd);
+      cmdargstr = pr_cmd_get_displayable_str(cmd, &cmdargstrlen);
 
       if (cmd_type == CMD) {
 
         /* The client has successfully authenticated... */
         if (session.user) {
-          char *args = strchr(cmdargstr, ' ');
+          char *args = memchr(cmdargstr, ' ', cmdargstrlen);
 
           pr_scoreboard_entry_update(session.pid,
             PR_SCORE_CMD, "%s", cmd->argv[0], NULL, NULL);
@@ -363,6 +368,7 @@ static int _dispatch(cmd_rec *cmd, int cmd_type, int validate, char *match) {
         success = 1;
 
       } else if (MODRET_ISERROR(mr)) {
+        xerrno = errno;
         success = -1;
 
         if (cmd_type == POST_CMD ||
@@ -394,6 +400,8 @@ static int _dispatch(cmd_rec *cmd, int cmd_type, int validate, char *match) {
             pr_response_send_raw("%s", MODRET_ERRMSG(mr));
           }
         }
+
+        errno = xerrno;
       }
 
       if (session.user &&
@@ -579,8 +587,13 @@ int pr_cmd_read(cmd_rec **res) {
 
 int pr_cmd_dispatch_phase(cmd_rec *cmd, int phase, int flags) {
   char *cp = NULL;
-  int success = 0;
+  int success = 0, xerrno = 0;
   pool *resp_pool = NULL;
+
+  if (cmd == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
 
   cmd->server = main_server;
 
@@ -633,9 +646,12 @@ int pr_cmd_dispatch_phase(cmd_rec *cmd, int phase, int flags) {
       _dispatch(cmd, LOG_CMD_ERR, FALSE, C_ANY);
       _dispatch(cmd, LOG_CMD_ERR, FALSE, NULL);
 
+      xerrno = errno;
       pr_trace_msg("response", 9, "flushing error response list for '%s'",
         cmd->argv[0]);
       pr_response_flush(&resp_err_list);
+
+      errno = xerrno;
       return success;
     }
 
@@ -651,9 +667,12 @@ int pr_cmd_dispatch_phase(cmd_rec *cmd, int phase, int flags) {
       _dispatch(cmd, LOG_CMD, FALSE, C_ANY);
       _dispatch(cmd, LOG_CMD, FALSE, NULL);
 
+      xerrno = errno;
       pr_trace_msg("response", 9, "flushing response list for '%s'",
         cmd->argv[0]);
       pr_response_flush(&resp_list);
+
+      errno = xerrno;
 
     } else if (success < 0) {
 
@@ -666,9 +685,12 @@ int pr_cmd_dispatch_phase(cmd_rec *cmd, int phase, int flags) {
       _dispatch(cmd, LOG_CMD_ERR, FALSE, C_ANY);
       _dispatch(cmd, LOG_CMD_ERR, FALSE, NULL);
 
+      xerrno = errno;
       pr_trace_msg("response", 9, "flushing error response list for '%s'",
         cmd->argv[0]);
       pr_response_flush(&resp_err_list);
+
+      errno = xerrno;
     }
 
   } else {
@@ -677,8 +699,10 @@ int pr_cmd_dispatch_phase(cmd_rec *cmd, int phase, int flags) {
       case POST_CMD:
       case POST_CMD_ERR:
         success = _dispatch(cmd, phase, FALSE, C_ANY);
-        if (!success)
+        if (!success) {
           success = _dispatch(cmd, phase, FALSE, NULL);
+          xerrno = errno;
+        }
         break;
 
       case CMD:
@@ -699,6 +723,8 @@ int pr_cmd_dispatch_phase(cmd_rec *cmd, int phase, int flags) {
     }
 
     if (flags & PR_CMD_DISPATCH_FL_SEND_RESPONSE) {
+      xerrno = errno;
+
       if (success == 1) {
         pr_trace_msg("response", 9, "flushing response list for '%s'",
           cmd->argv[0]);
@@ -709,12 +735,15 @@ int pr_cmd_dispatch_phase(cmd_rec *cmd, int phase, int flags) {
           cmd->argv[0]);
         pr_response_flush(&resp_err_list);
       }
+
+      errno = xerrno;
     }
   }
 
   /* Restore any previous pool to the Response API. */
   pr_response_set_pool(resp_pool);
 
+  errno = xerrno;
   return success;
 }
 
@@ -1204,42 +1233,9 @@ static void fork_server(int fd, conn_t *l, unsigned char nofork) {
   /* Find the server for this connection. */
   main_server = pr_ipbind_get_server(conn->local_addr, conn->local_port);
 
-  pr_inet_set_proto_opts(permanent_pool, conn, 0, 1, IPTOS_LOWDELAY, 0);
-
-  /* The follow code was ostensibly used to conserve memory, to free all other
-   * servers and associated configurations.  However, when large numbers of
-   * servers are configured, this process adds significant time to the
-   * establishment of a session.  More importantly, I do not think it is
-   * really necessary; copy-on-write semantics mean that those portions of
-   * memory won't actually be in this process' space until changed.  And if
-   * those configurations will never be reached, the only time the associated
-   * memory would change is now, when it is attempted to be freed.
-   *
-   * s = main_server;
-   * while (s) {
-   *   s_saved = s->next;
-   *   if (s != serv) {
-   *     if (s->listen && s->listen != l) {
-   *       if (s->listen->listen_fd == conn->rfd ||
-   *           s->listen->listen_fd == conn->wfd)
-   *         s->listen->listen_fd = -1;
-   *       else
-   *         inet_close(s->pool,s->listen);
-   *     }
-   *
-   *     if (s->listen) {
-   *       if (s->listen->listen_fd == conn->rfd ||
-   *          s->listen->listen_fd == conn->wfd)
-   *            s->listen->listen_fd = -1;
-   *     }
-   *
-   *     xaset_remove(server_list,(xasetmember_t*)s);
-   *     destroy_pool(s->pool);
-   *   }
-   *   s = s_saved;
-   * }
+  /* Make sure we allocate a session pool, even if this connection will
+   * dropped soon.
    */
-
   session.pool = make_sub_pool(permanent_pool);
   pr_pool_tag(session.pool, "Session Pool");
 
@@ -1248,6 +1244,23 @@ static void fork_server(int fd, conn_t *l, unsigned char nofork) {
   session.sf_flags = 0;
   session.sp_flags = 0;
   session.proc_prefix = "(connecting)";
+
+  /* If no server is configured to handle the addr the user is connected to,
+   * drop them.
+   */
+  if (main_server == NULL) {
+    pr_log_debug(DEBUG2, "No server configuration found for IP address %s",
+      pr_netaddr_get_ipstr(conn->local_addr));
+    pr_log_debug(DEBUG2, "Use the DefaultServer directive to designate "
+      "a default server configuration to handle requests like this");
+
+    pr_response_send(R_500,
+      _("Sorry, no server available to handle request on %s"),
+      pr_netaddr_get_dnsstr(conn->local_addr));
+    exit(0);
+  }
+
+  pr_inet_set_proto_opts(permanent_pool, conn, 0, 1, IPTOS_LOWDELAY, 0);
 
   /* Close the write side of the semaphore pipe to tell the parent
    * we are all grown up and have finished housekeeping (closing
@@ -1281,9 +1294,9 @@ static void fork_server(int fd, conn_t *l, unsigned char nofork) {
         pr_netaddr_get_ipstr(session.c->local_addr) :
         main_server->ServerAddress;
 
-      if ((c = find_config(main_server->conf, CONF_PARAM, "MasqueradeAddress",
-        FALSE)) != NULL) {
-
+      c = find_config(main_server->conf, CONF_PARAM, "MasqueradeAddress",
+        FALSE);
+      if (c != NULL) {
         pr_netaddr_t *masq_addr = (pr_netaddr_t *) c->argv[0];
         serveraddress = pr_netaddr_get_ipstr(masq_addr);
       }
@@ -1309,21 +1322,6 @@ static void fork_server(int fd, conn_t *l, unsigned char nofork) {
         _("FTP server shut down (%s) -- please try again later"), reason);
       exit(0);
     }
-  }
-
-  /* If no server is configured to handle the addr the user is
-   * connected to, drop them.
-   */
-  if (!main_server) {
-    pr_log_debug(DEBUG2, "No server configuration found for IP address %s",
-      pr_netaddr_get_ipstr(conn->local_addr));
-    pr_log_debug(DEBUG2, "Use the DefaultServer directive to designate "
-      "a default server configuration to handle requests like this");
-
-    pr_response_send(R_500,
-      _("Sorry, no server available to handle request on %s"),
-      pr_netaddr_get_dnsstr(conn->local_addr));
-    exit(0);
   }
 
   if (main_server->listen) {
@@ -1447,7 +1445,6 @@ static void daemon_loop(void) {
     run_schedule();
 
     FD_ZERO(&listenfds);
-    maxfd = 0;
     maxfd = pr_ipbind_listen(&listenfds);
 
     /* Monitor children pipes */
@@ -1859,17 +1856,11 @@ static void handle_stacktrace_signal(int signo, siginfo_t *info, void *ptr) {
 
   pr_log_pri(PR_LOG_ERR, "-----END STACK TRACE-----");
 
-  exit(0);
+  finish_terminate();
 }
 #endif /* PR_DEVEL_STACK_TRACE */
 
 static RETSIGTYPE sig_terminate(int signo) {
-
-  /* Make sure the scoreboard slot is properly cleared.  Note that this is
-   * possibly redundant, as it should already be handled properly in
-   * pr_session_end().
-   */
-  pr_scoreboard_entry_del(FALSE);
 
   /* Capture the signal number for later display purposes. */
   term_signo = signo;
@@ -1901,11 +1892,8 @@ static RETSIGTYPE sig_terminate(int signo) {
     pr_log_pri(PR_LOG_INFO, "%s session closed.",
       pr_session_get_protocol(PR_SESS_PROTO_FL_LOGOUT));
 
-    /* Restore the default signal handlers. */
 #ifdef PR_DEVEL_STACK_TRACE
     install_stacktrace_handler();
-#else
-    signal(signo, SIG_DFL);
 #endif /* PR_DEVEL_STACK_TRACE */
 
   } else if (signo == SIGTERM) {
@@ -1914,6 +1902,9 @@ static RETSIGTYPE sig_terminate(int signo) {
   } else {
     recvd_signal_flags |= RECEIVED_SIG_TERM_OTHER;
   }
+
+  /* Ignore future occurrences of this signal; we'll be terminating anyway. */
+  signal(signo, SIG_IGN);
 }
 
 static void handle_chld(void) {

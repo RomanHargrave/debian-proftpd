@@ -14,7 +14,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, the ProFTPD Project team and other respective
  * copyright holders give permission to link this program with OpenSSL, and
@@ -23,7 +23,7 @@
  */
 
 /* NetIO routines
- * $Id: netio.c,v 1.50 2011/02/26 02:31:36 castaglia Exp $
+ * $Id: netio.c,v 1.53 2011/09/21 14:48:41 castaglia Exp $
  */
 
 #include "conf.h"
@@ -922,8 +922,24 @@ int pr_netio_read(pr_netio_stream_t *nstrm, char *buf, size_t buflen,
           }
 
 #ifdef EAGAIN
-	  if (bread == -1 && errno == EAGAIN)
+	  if (bread == -1 &&
+              errno == EAGAIN) {
+            int xerrno = EAGAIN;
+
+            /* Treat this as an interrupted call, call pr_signals_handle()
+             * (which will delay for a few msecs because of EINTR), and try
+             * again.
+             *
+             * This should avoid a tightly spinning loop if read(2) returns
+             * EAGAIN, as on a data transfer (Bug#3639).
+             */
+
+            errno = EINTR;
+            pr_signals_handle();
+
+            errno = xerrno;
             goto polling;
+          }
 #endif
 
         } while (bread == -1 && errno == EINTR);
@@ -1136,7 +1152,6 @@ char *pr_netio_telnet_gets(char *buf, size_t buflen,
               case TELNET_DONT:
               case TELNET_IP:
               case TELNET_DM:
-
                 /* Why do we do this crazy thing where we set the "telnet mode"
                  * to be the action, and let the while loop, on the next pass,
                  * handle that action?  It's because we don't know, right now,
@@ -1147,6 +1162,16 @@ char *pr_netio_telnet_gets(char *buf, size_t buflen,
                  */
                 telnet_mode = cp;
                 continue;
+
+              case TELNET_IAC:
+                /* In this case, we know that the previous byte was TELNET_IAC,
+                 * and that the current byte is another TELNET_IAC.  The
+                 * first TELNET_IAC thus "escapes" the second, telling us
+                 * that the current byte (TELNET_IAC) should be written out
+                 * as is (Bug#3697).
+                 */
+                telnet_mode = 0;
+                break;
 
               default:
                 /* In this case, we know that the previous byte was TELNET_IAC,

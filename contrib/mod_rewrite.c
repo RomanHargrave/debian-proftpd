@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, TJ Saunders gives permission to link this program
  * with OpenSSL, and distribute the resulting executable, without including
@@ -24,7 +24,7 @@
  * This is mod_rewrite, contrib software for proftpd 1.2 and above.
  * For more information contact TJ Saunders <tj@castaglia.org>.
  *
- * $Id: mod_rewrite.c,v 1.60 2011/03/24 04:42:42 castaglia Exp $
+ * $Id: mod_rewrite.c,v 1.64 2011/09/24 05:33:59 castaglia Exp $
  */
 
 #include "conf.h"
@@ -465,7 +465,8 @@ static unsigned char rewrite_match_cond(cmd_rec *cmd, config_rec *cond) {
     }
 
     case REWRITE_COND_OP_REGEX: {
-      rewrite_log("rewrite_match_cond(): checking regex cond");
+      rewrite_log("rewrite_match_cond(): checking regex cond against '%s'",
+        cond_str);
 
       memset(&rewrite_cond_matches, '\0', sizeof(rewrite_cond_matches));
       rewrite_cond_matches.match_string = cond_str;
@@ -476,7 +477,8 @@ static unsigned char rewrite_match_cond(cmd_rec *cmd, config_rec *cond) {
     case REWRITE_COND_OP_TEST_DIR: {
       int res = FALSE;
       struct stat st;
-      rewrite_log("rewrite_match_cond(): checking dir test cond");
+      rewrite_log("rewrite_match_cond(): checking dir test cond against "
+        "path '%s'", cond_str);
 
       pr_fs_clear_cache();
       if (pr_fsio_lstat(cond_str, &st) >= 0 &&
@@ -492,7 +494,8 @@ static unsigned char rewrite_match_cond(cmd_rec *cmd, config_rec *cond) {
     case REWRITE_COND_OP_TEST_FILE: {
       int res = FALSE;
       struct stat st;
-      rewrite_log("rewrite_match_cond(): checking file test cond");
+      rewrite_log("rewrite_match_cond(): checking file test cond against "
+        "path '%s'", cond_str);
 
       pr_fs_clear_cache();
       if (pr_fsio_lstat(cond_str, &st) >= 0 &&
@@ -508,7 +511,8 @@ static unsigned char rewrite_match_cond(cmd_rec *cmd, config_rec *cond) {
     case REWRITE_COND_OP_TEST_SYMLINK: {
       int res = FALSE;
       struct stat st;
-      rewrite_log("rewrite_match_cond(): checking symlink test cond");
+      rewrite_log("rewrite_match_cond(): checking symlink test cond against "
+        "path '%s'", cond_str);
 
       pr_fs_clear_cache();
       if (pr_fsio_lstat(cond_str, &st) >= 0 &&
@@ -524,7 +528,8 @@ static unsigned char rewrite_match_cond(cmd_rec *cmd, config_rec *cond) {
     case REWRITE_COND_OP_TEST_SIZE: {
       int res = FALSE;
       struct stat st;
-      rewrite_log("rewrite_match_cond(): checking size test cond");
+      rewrite_log("rewrite_match_cond(): checking size test cond against "
+        "path '%s'", cond_str);
 
       pr_fs_clear_cache();
       if (pr_fsio_lstat(cond_str, &st) >= 0 &&
@@ -1359,12 +1364,15 @@ static char *rewrite_subst_maps_txt(cmd_rec *cmd, config_rec *c,
   txt_keys = (char **) txtmap->txt_keys;
   txt_vals = (char **) txtmap->txt_values;
 
-  for (i = 0; i < txtmap->txt_nents; i++)
-    if (strcmp(txtmap->txt_keys[i], map->map_lookup_key) == 0)
-      value = txtmap->txt_values[i];
+  for (i = 0; i < txtmap->txt_nents; i++) {
+    if (strcmp(txt_keys[i], map->map_lookup_key) == 0) {
+      value = txt_vals[i];
+    }
+  }
 
-  if (!value)
+  if (value == NULL) {
     value = map->map_default_value;
+  }
 
   return value;
 }
@@ -1869,10 +1877,9 @@ static void rewrite_closelog(void) {
 
 static void rewrite_log(char *fmt, ...) {
   va_list msg;
-  int res;
 
   va_start(msg, fmt);
-  res = pr_log_vwritefile(rewrite_logfd, MOD_REWRITE_VERSION, fmt, msg);
+  (void) pr_log_vwritefile(rewrite_logfd, MOD_REWRITE_VERSION, fmt, msg);
   va_end(msg);
 
   return;
@@ -2505,8 +2512,9 @@ MODRET rewrite_fixup(cmd_rec *cmd) {
 
         pr_cmd_clear_cache(cmd);
 
-      } else
+      } else {
         rewrite_log("rewrite_fixup(): error processing RewriteRule");
+      }
 
       /* If this Rule is marked as "last", break out of the loop. */
       if (rule_flags & REWRITE_RULE_FLAG_LAST) {
@@ -2587,18 +2595,29 @@ static void rewrite_rewrite_home_ev(const void *event_data, void *user_data) {
    * command dispatch mechanism.
    */
   mr = rewrite_fixup(cmd);
-
-  rewrite_log("rewrote home to be '%s'", cmd->arg);
-
-  /* Make sure to use a pool whose lifetime is longer/outside of the pools
-   * used here.
-   */
-  if (pr_table_set(session.notes, "mod_auth.home-dir",
-      pstrdup(session.pool, cmd->arg), 0) < 0) {
-    pr_trace_msg("auth", 3, MOD_REWRITE_VERSION
-      ": error stashing home directory in session.notes: %s", strerror(errno));
+  if (MODRET_ISERROR(mr)) {
+    rewrite_log("unable to rewrite home '%s'", pw_dir);
     destroy_pool(tmp_pool);
     return;
+  }
+
+  if (strcmp(pw_dir, cmd->arg) != 0) {
+    rewrite_log("rewrote home to be '%s'", cmd->arg);
+
+    /* Make sure to use a pool whose lifetime is longer/outside of the pools
+     * used here.
+     */
+    if (pr_table_set(session.notes, "mod_auth.home-dir",
+        pstrdup(session.pool, cmd->arg), 0) < 0) {
+      pr_trace_msg("auth", 3, MOD_REWRITE_VERSION
+        ": error stashing home directory in session.notes: %s",
+        strerror(errno));
+      destroy_pool(tmp_pool);
+      return;
+    }
+
+  } else {
+    rewrite_log("home directory '%s' not changed by RewriteHome", pw_dir);
   }
 
   destroy_pool(tmp_pool);

@@ -14,14 +14,14 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, TJ Saunders and other respective copyright holders
  * give permission to link this program with OpenSSL, and distribute the
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: keys.c,v 1.14 2011/03/31 22:17:15 castaglia Exp $
+ * $Id: keys.c,v 1.16 2011/05/23 21:03:12 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -121,7 +121,7 @@ static void prepare_provider_fds(int stdout_fd, int stderr_fd) {
   /* Appears that on some platforms (e.g. Solaris, Mac OSX), having too
    * high of an fd value can lead to undesirable behavior for some reason.
    * Need to track down why; the behavior I saw was the inability of
-   * select() to work property on the stdout/stderr fds attached to the
+   * select() to work properly on the stdout/stderr fds attached to the
    * exec'd script.
    */
   if (nfiles > 255) {

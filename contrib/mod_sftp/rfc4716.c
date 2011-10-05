@@ -1,6 +1,6 @@
 /*
  * ProFTPD - mod_sftp RFC4716 keystore
- * Copyright (c) 2008-2010 TJ Saunders
+ * Copyright (c) 2008-2011 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,14 +14,14 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, TJ Saunders and other respective copyright holders
  * give permission to link this program with OpenSSL, and distribute the
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: rfc4716.c,v 1.13 2010/08/02 23:57:25 castaglia Exp $
+ * $Id: rfc4716.c,v 1.15 2011/05/23 21:03:12 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -212,6 +212,7 @@ static struct filestore_key *filestore_get_key(sftp_keystore_t *store,
   BIO *bio = NULL;
   struct filestore_key *key = NULL;
   struct filestore_data *store_data = store->keystore_data;
+  size_t begin_markerlen = 0, end_markerlen = 0;
 
   line = filestore_getline(store, p);
   while (line == NULL &&
@@ -219,14 +220,21 @@ static struct filestore_key *filestore_get_key(sftp_keystore_t *store,
     line = filestore_getline(store, p);
   }
 
+  begin_markerlen = strlen(SFTP_SSH2_PUBKEY_BEGIN_MARKER);
+  end_markerlen = strlen(SFTP_SSH2_PUBKEY_END_MARKER);
+
   while (line) {
     pr_signals_handle();
 
-    if (strcmp(line, SFTP_SSH2_PUBKEY_BEGIN_MARKER) == 0) {
+    if (key == NULL &&
+        strncmp(line, SFTP_SSH2_PUBKEY_BEGIN_MARKER,
+        begin_markerlen + 1) == 0) {
       key = pcalloc(p, sizeof(struct filestore_key));
       bio = BIO_new(BIO_s_mem());
 
-    } else if (strcmp(line, SFTP_SSH2_PUBKEY_END_MARKER) == 0) {
+    } else if (key != NULL &&
+               strncmp(line, SFTP_SSH2_PUBKEY_END_MARKER,
+                 end_markerlen + 1) == 0) {
       if (bio) {
         BIO *b64 = NULL, *bmem = NULL;
         char chunk[1024], *data = NULL;

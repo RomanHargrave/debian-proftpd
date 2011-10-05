@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, Public Flood Software/MacGyver aka Habeeb J. Dihu
  * and other respective copyright holders give permission to link this program
@@ -25,7 +25,7 @@
  */
 
 /* Flexible logging module for proftpd
- * $Id: mod_log.c,v 1.117 2011/03/19 19:02:19 castaglia Exp $
+ * $Id: mod_log.c,v 1.124 2011/09/26 15:00:12 castaglia Exp $
  */
 
 #include "conf.h"
@@ -1156,13 +1156,13 @@ static char *get_next_meta(pool *p, cmd_rec *cmd, unsigned char **f) {
 
     case META_UID:
       argp = arg;
-      snprintf(argp, sizeof(arg), "%lu", (unsigned long) session.uid);
+      snprintf(argp, sizeof(arg), "%lu", (unsigned long) session.login_uid);
       m++;
       break;
 
     case META_GID:
       argp = arg;
-      snprintf(argp, sizeof(arg), "%lu", (unsigned long) session.gid);
+      snprintf(argp, sizeof(arg), "%lu", (unsigned long) session.login_gid);
       m++;
       break;
 
@@ -1226,6 +1226,7 @@ static void do_log(cmd_rec *cmd, logfile_t *lf) {
   char logbuf[EXTENDED_LOG_BUFFER_SIZE] = {'\0'};
   logformat_t *fmt = NULL;
   char *s, *bp;
+  size_t logbuflen;
 
   fmt = lf->lf_format;
   f = fmt->lf_format;
@@ -1257,13 +1258,19 @@ static void do_log(cmd_rec *cmd, logfile_t *lf) {
   *bp++ = '\n';
   *bp = '\0';
 
+  logbuflen = strlen(logbuf);
+
   if (lf->lf_fd != EXTENDED_LOG_SYSLOG) {
-    if (write(lf->lf_fd, logbuf, strlen(logbuf)) < 0) {
+    pr_log_event_generate(PR_LOG_TYPE_EXTLOG, lf->lf_fd, -1, logbuf, logbuflen);
+
+    if (write(lf->lf_fd, logbuf, logbuflen) < 0) {
       pr_log_pri(PR_LOG_ERR, "error: cannot write ExtendedLog to fd %d: %s",
         lf->lf_fd, strerror(errno));
     }
 
   } else {
+    pr_log_event_generate(PR_LOG_TYPE_EXTLOG, syslog_sockfd,
+      lf->lf_syslog_level, logbuf, logbuflen);
     pr_syslog(syslog_sockfd, lf->lf_syslog_level, "%s", logbuf);
   }
 }
@@ -1298,6 +1305,9 @@ MODRET log_any(cmd_rec *cmd) {
   return PR_DECLINED(cmd);
 }
 
+/* Event handlers
+ */
+
 static void log_exit_ev(const void *event_data, void *user_data) {
   cmd_rec *cmd;
 
@@ -1322,6 +1332,19 @@ static void log_restart_ev(const void *event_data, void *user_data) {
 
   return;
 }
+
+static void log_xfer_stalled_ev(const void *event_data, void *user_data) {
+  if (session.curr_cmd_rec != NULL) {
+    /* Automatically dispatch the current command, at the LOG_CMD_ERR phase,
+     * so that the ExtendedLog entry for the command gets written out.  This
+     * should handle any LIST/MLSD/NLST commands as well (Bug#3696).
+     */
+    (void) log_any(session.curr_cmd_rec);
+  }
+}
+
+/* Initialization handlers
+ */
 
 static int log_init(void) {
   log_pool = make_sub_pool(permanent_pool);
@@ -1536,26 +1559,23 @@ static int log_sess_init(void) {
 
         pr_signals_block();
         PRIVS_ROOT
-        res = pr_log_openfile(lf->lf_filename, &lf->lf_fd, EXTENDED_LOG_MODE);
+        res = pr_log_openfile(lf->lf_filename, &(lf->lf_fd), EXTENDED_LOG_MODE);
         PRIVS_RELINQUISH
         pr_signals_unblock();
 
-        if (res == -1) {
-          pr_log_pri(PR_LOG_NOTICE, "unable to open ExtendedLog '%s': %s",
-            lf->lf_filename, strerror(errno));
-          continue;
+        if (res < 0) {
+          if (res == -1) {
+            pr_log_pri(PR_LOG_NOTICE, "unable to open ExtendedLog '%s': %s",
+              lf->lf_filename, strerror(errno));
 
-        } else if (res == PR_LOG_WRITABLE_DIR) {
-          pr_log_pri(PR_LOG_NOTICE, "unable to open ExtendedLog '%s': "
-            "containing directory is world writable", lf->lf_filename);
-          continue;
+          } else if (res == PR_LOG_WRITABLE_DIR) {
+            pr_log_pri(PR_LOG_NOTICE, "unable to open ExtendedLog '%s': "
+              "containing directory is world writable", lf->lf_filename);
 
-        } else if (res == PR_LOG_SYMLINK) {
-          pr_log_pri(PR_LOG_NOTICE, "unable to open ExtendedLog '%s': "
-            "%s is a symbolic link", lf->lf_filename, lf->lf_filename);
-          close(lf->lf_fd);
-          lf->lf_fd = -1;
-          continue;
+          } else if (res == PR_LOG_SYMLINK) {
+            pr_log_pri(PR_LOG_NOTICE, "unable to open ExtendedLog '%s': "
+              "%s is a symbolic link", lf->lf_filename, lf->lf_filename);
+          }
         }
 
       } else {
@@ -1567,8 +1587,10 @@ static int log_sess_init(void) {
     }
   }
 
-  /* Register an exit handler for the session. */
+  /* Register event handlers for the session. */
   pr_event_register(&log_module, "core.exit", log_exit_ev, NULL);
+  pr_event_register(&log_module, "core.timeout-stalled", log_xfer_stalled_ev,
+    NULL);
 
   return 0;
 }

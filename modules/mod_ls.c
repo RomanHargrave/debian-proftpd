@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, Public Flood Software/MacGyver aka Habeeb J. Dihu
  * and other respective copyright holders give permission to link this program
@@ -25,7 +25,7 @@
  */
 
 /* Directory listing module for ProFTPD.
- * $Id: mod_ls.c,v 1.182 2011/02/26 02:31:36 castaglia Exp $
+ * $Id: mod_ls.c,v 1.186 2011/05/23 21:11:56 castaglia Exp $
  */
 
 #include "conf.h"
@@ -160,9 +160,7 @@ static void push_cwd(char *_cwd, unsigned char *symhold) {
   if (!_cwd)
     _cwd = cwd;
 
-  if (!symhold)
-    *symhold = show_symlinks_hold;
-
+  *symhold = show_symlinks_hold;
   sstrncpy(_cwd, pr_fs_getcwd(), PR_TUNABLE_PATH_MAX + 1);
   *symhold = list_show_symlinks;
 }
@@ -171,9 +169,7 @@ static void pop_cwd(char *_cwd, unsigned char *symhold) {
   if (!_cwd)
     _cwd = cwd;
 
-  if (!symhold)
-    *symhold = show_symlinks_hold;
-
+  *symhold = show_symlinks_hold;
   pr_fsio_chdir(_cwd, *symhold);
   list_show_symlinks = *symhold;
 }
@@ -869,23 +865,35 @@ static int outputfiles(cmd_rec *cmd) {
     while (q) {
       char pad[6] = {'\0'};
 
+      pr_signals_handle();
+
       if (!q->right) {
         sstrncpy(pad, "\n", sizeof(pad));
 
       } else {
+        unsigned int idx = 0;
+
         sstrncpy(pad, "\t\t\t\t\t", sizeof(pad));
-        pad[(colwidth + 7 - strlen(q->line)) / 8] = '\0';
+
+        idx = (colwidth + 7 - strlen(q->line)) / 8;
+        if (idx >= sizeof(pad)) {
+          idx = sizeof(pad)-1;
+        }
+
+        pad[idx] = '\0';
       }
 
-      if (sendline(0, "%s%s", q->line, pad) < 0)
+      if (sendline(0, "%s%s", q->line, pad) < 0) {
         return -1;
+      }
 
       q = q->right;
     }
   }
 
-  if (sendline(LS_SENDLINE_FL_FLUSH, " ") < 0)
+  if (sendline(LS_SENDLINE_FL_FLUSH, " ") < 0) {
     res = -1;
+  }
 
   destroy_pool(fpool);
   fpool = NULL;
@@ -916,13 +924,11 @@ static int dircmp(const void *a, const void *b) {
 }
 
 static char **sreaddir(const char *dirname, const int sort) {
-  DIR 		*d;
-  struct	dirent *de;
-  struct	stat st;
-  int		i;
-  char		**p;
-  int		dsize, ssize;
-  int		dir_fd;
+  DIR *d;
+  struct dirent *de;
+  struct stat st;
+  int i, dsize, ssize, dir_fd;
+  char **p;
 
   if (pr_fsio_stat(dirname, &st) < 0)
     return NULL;
@@ -976,7 +982,8 @@ static char **sreaddir(const char *dirname, const int sort) {
    * only freed when the _entire_ directory structure has been parsed.  Also,
    * this helps to keep the memory footprint a little smaller.
    */
-  if ((p = (char **) malloc(dsize * sizeof(char *))) == NULL) {
+  p = malloc(dsize * sizeof(char *));
+  if (p == NULL) {
     pr_log_pri(PR_LOG_ERR, "fatal: memory exhausted");
     exit(1);
   }
@@ -1030,8 +1037,6 @@ static char **sreaddir(const char *dirname, const int sort) {
 static int listdir(cmd_rec *cmd, pool *workp, const char *name) {
   char **dir;
   int dest_workp = 0;
-  config_rec *c = NULL;
-  unsigned char ignore_hidden = FALSE;
   register unsigned int i = 0;
 
   if (list_ndepth.curr && list_ndepth.max &&
@@ -1075,17 +1080,6 @@ static int listdir(cmd_rec *cmd, pool *workp, const char *name) {
 
   dir = sreaddir(".", TRUE);
 
-  /* Search for relevant <Limit>'s to this LIST command.  If found,
-   * check to see whether hidden files should be ignored.
-   */
-  c = find_ls_limit(cmd->argv[0]);
-  if (c != NULL) {
-    unsigned char *ignore = get_param_ptr(c->subset, "IgnoreHidden", FALSE);
-
-    if (ignore && *ignore == TRUE)
-      ignore_hidden = TRUE;
-  }
-
   if (dir) {
     char **s;
     char **r;
@@ -1099,10 +1093,6 @@ static int listdir(cmd_rec *cmd, pool *workp, const char *name) {
           d = 0;
 
         } else {
-
-          /* Make sure IgnoreHidden is properly honored. "." and ".." are
-           * not to be treated as hidden files, though.
-           */
           d = listfile(cmd, workp, *s);
         }
 
@@ -2400,7 +2390,7 @@ MODRET ls_nlst(cmd_rec *cmd) {
   char *target, buf[PR_TUNABLE_PATH_MAX + 1] = {'\0'};
   size_t targetlen = 0;
   config_rec *c = NULL;
-  int count = 0, res = 0, hidden = 0;
+  int res = 0, hidden = 0;
   int glob_flags = GLOB_NOSORT;
   unsigned char *tmp = NULL;
 
@@ -2654,9 +2644,6 @@ MODRET ls_nlst(cmd_rec *cmd) {
 
           res = nlstfile(cmd, p);
         }
-
-        if (res > 0)
-          count += res;
       }
     }
 
@@ -2768,9 +2755,6 @@ MODRET ls_nlst(cmd_rec *cmd) {
       pr_response_add_err(R_450, _("%s: Not a regular file"), cmd->arg);
       return PR_ERROR(cmd);
     }
-
-    if (res > 0)
-      count += res;
 
     sendline(LS_SENDLINE_FL_FLUSH, " ");
   }

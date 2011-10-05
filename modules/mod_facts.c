@@ -15,14 +15,14 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, TJ Saunders and other respective copyright holders
  * give permission to link this program with OpenSSL, and distribute the
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: mod_facts.c,v 1.40 2011/03/17 17:00:14 castaglia Exp $
+ * $Id: mod_facts.c,v 1.45 2011/05/23 21:11:56 castaglia Exp $
  */
 
 #include "conf.h"
@@ -162,10 +162,10 @@ static size_t facts_mlinfo_fmt(struct mlinfo *info, char *buf, size_t bufsz) {
 
   memset(buf, '\0', bufsz);
 
-  ptr = buf + buflen;
+  ptr = buf;
 
   if (facts_opts & FACTS_OPT_SHOW_MODIFY) {
-    snprintf(ptr, bufsz - buflen, "modify=%04d%02d%02d%02d%02d%02d;",
+    snprintf(ptr, bufsz, "modify=%04d%02d%02d%02d%02d%02d;",
       info->tm->tm_year+1900, info->tm->tm_mon+1, info->tm->tm_mday,
       info->tm->tm_hour, info->tm->tm_min, info->tm->tm_sec);
     buflen = strlen(buf);
@@ -646,14 +646,16 @@ static int facts_modify_mtime(pool *p, const char *path, char *timestamp) {
 
       if (matching_gid == TRUE &&
           (st.st_mode & S_IWGRP)) {
-        int merrno = xerrno;
+        int merrno = 0;
 
         /* Try the utimes(2) call again, this time with root privs. */
 
         pr_signals_block();
         PRIVS_ROOT
         res = pr_fsio_utimes(path, tvs);
-        merrno = errno;
+        if (res < 0) {
+          merrno = errno;
+        }
         PRIVS_RELINQUISH
         pr_signals_unblock();
 
@@ -807,7 +809,7 @@ MODRET facts_mff(cmd_rec *cmd) {
       }
 
       if (facts_modify_mtime(cmd->tmp_pool, decoded_path, timestamp) < 0) {
-        int xerrno = xerrno;
+        int xerrno = errno;
 
         pr_response_add_err(xerrno == ENOENT ? R_550 : R_501, "%s: %s", path,
           strerror(xerrno));
@@ -1425,8 +1427,8 @@ static conftable facts_conftab[] = {
 };
 
 static cmdtable facts_cmdtab[] = {
-  { CMD,	"MFF",		G_WRITE,facts_mff,  TRUE, FALSE, CL_WRITE },
-  { CMD,	"MFMT",		G_WRITE,facts_mfmt, TRUE, FALSE, CL_WRITE },
+  { CMD,	C_MFF,		G_WRITE,facts_mff,  TRUE, FALSE, CL_WRITE },
+  { CMD,	C_MFMT,		G_WRITE,facts_mfmt, TRUE, FALSE, CL_WRITE },
   { CMD,	C_MLSD,		G_DIRS,	facts_mlsd, TRUE, FALSE, CL_DIRS },
   { LOG_CMD,	C_MLSD,		G_NONE,	facts_mlsd_cleanup, FALSE, FALSE },
   { LOG_CMD_ERR,C_MLSD,		G_NONE,	facts_mlsd_cleanup, FALSE, FALSE },

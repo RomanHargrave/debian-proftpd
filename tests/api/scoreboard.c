@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server testsuite
- * Copyright (c) 2008-2010 The ProFTPD Project team
+ * Copyright (c) 2008-2011 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,7 +14,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, The ProFTPD Project team and other respective
  * copyright holders give permission to link this program with OpenSSL, and
@@ -23,7 +23,7 @@
  */
 
 /* Scoreboard API tests
- * $Id: scoreboard.c,v 1.4 2010/12/21 19:07:56 castaglia Exp $
+ * $Id: scoreboard.c,v 1.6 2011/09/23 16:54:03 castaglia Exp $
  */
 
 #include "tests.h"
@@ -511,15 +511,16 @@ START_TEST (scoreboard_scrub_test) {
 
   euid = geteuid();
   if (euid != 0) {
-    if (errno != EPERM) {
+    if (errno != EPERM &&
+        errno != ENOENT) {
       int xerrno = errno;
 
       (void) unlink(path);
       (void) unlink(mutex_path);
       (void) rmdir(dir);
 
-      fail("Failed to set errno to EPERM, got %d (euid = %lu)", xerrno,
-        (unsigned long) euid);
+      fail("Failed to set errno to EPERM/ENOENT, got %d [%s] (euid = %lu)",
+        xerrno, strerror(xerrno), (unsigned long) euid);
     }
 
   } else {
@@ -530,8 +531,8 @@ START_TEST (scoreboard_scrub_test) {
       (void) unlink(mutex_path);
       (void) rmdir(dir);
 
-      fail("Failed to set errno to ENOENT, got %d (euid = %lu)", xerrno,
-        (unsigned long) euid);
+      fail("Failed to set errno to ENOENT, got %d [%s] (euid = %lu)", xerrno,
+        strerror(xerrno), (unsigned long) euid);
     }
   }
 
