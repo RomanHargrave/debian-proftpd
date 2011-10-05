@@ -14,14 +14,14 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, The ProFTPD Project team and other respective
  * copyright holders give permission to link this program with OpenSSL, and
  * distribute the resulting executable, without including the source code for
  * OpenSSL in the source distribution.
  *
- * $Id: cmd.c,v 1.5 2011/03/20 05:59:46 castaglia Exp $
+ * $Id: cmd.c,v 1.8 2011/05/23 21:22:24 castaglia Exp $
  */
 
 #include "conf.h"
@@ -105,6 +105,8 @@ static struct cmd_entry cmd_ids[] = {
   { C_MIC,	3 },	/* PR_CMD_MIC_ID (53) */
   { C_PBSZ,	4 },	/* PR_CMD_PBSZ_ID (54) */
   { C_PROT,	4 },	/* PR_CMD_PROT_ID (55) */
+  { C_MFF,	3 },	/* PR_CMD_MFF_ID (56) */
+  { C_MFMT,	4 },	/* PR_CMD_PROT_ID (57) */
 
   { NULL,	0 }
 };
@@ -231,7 +233,7 @@ int pr_cmd_strcmp(cmd_rec *cmd, const char *cmd_name) {
   return strncmp(cmd->argv[0], cmd_name, cmd_namelen + 1);
 }
 
-char *pr_cmd_get_displayable_str(cmd_rec *cmd) {
+char *pr_cmd_get_displayable_str(cmd_rec *cmd, size_t *str_len) {
   char *res;
   int argc;
   char **argv;
@@ -253,8 +255,8 @@ char *pr_cmd_get_displayable_str(cmd_rec *cmd) {
   res = "";
 
   /* Check for "sensitive" commands. */
-  if (strcmp(argv[0], C_PASS) == 0 ||
-      strcmp(argv[0], C_ADAT) == 0) {
+  if (pr_cmd_cmp(cmd, PR_CMD_PASS_ID) == 0 ||
+      pr_cmd_cmp(cmd, PR_CMD_ADAT_ID) == 0) {
     argc = 2;
     argv[1] = "(hidden)";
   }
@@ -272,6 +274,10 @@ char *pr_cmd_get_displayable_str(cmd_rec *cmd) {
   /* XXX Check for errors here */
   pr_table_add(cmd->notes, pstrdup(cmd->pool, "displayable-str"),
     pstrdup(cmd->pool, res), 0);
+
+  if (str_len != NULL) {
+    *str_len = strlen(res);
+  }
 
   return res;
 }

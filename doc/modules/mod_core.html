@@ -1,4 +1,4 @@
-<!-- $Id: mod_core.html,v 1.11 2011/03/30 21:51:30 castaglia Exp $ -->
+<!-- $Id: mod_core.html,v 1.14 2011/07/01 18:34:07 castaglia Exp $ -->
 <!-- $Source: /cvsroot/proftp/proftpd/doc/modules/mod_core.html,v $ -->
 
 <html>
@@ -19,18 +19,59 @@ The <code>mod_core</code> module handles most of the core FTP commands.
 
 <h2>Directives</h2>
 <ul>
+  <li><a href="#GroupOwner">GroupOwner</a>
   <li><a href="#Include">Include</a>
   <li><a href="#MaxCommandRate">MaxCommandRate</a>
+  <li><a href="#PassivePorts">PassivePorts</a>
   <li><a href="#PathAllowFilter">PathAllowFilter</a>
   <li><a href="#PathDenyFilter">PathDenyFilter</a>
   <li><a href="#ProcessTitles">ProcessTitles</a>
   <li><a href="#Protocols">Protocols</a>
   <li><a href="#TCPBacklog">TCPBacklog</a>
+  <li><a href="#TimeoutLinger">TimeoutLinger</a>
   <li><a href="#Trace">Trace</a>
   <li><a href="#TraceLog">TraceLog</a>
   <li><a href="#TraceOptions">TraceOptions</a>
   <li><a href="#TransferLog">TransferLog</a>
 </ul>
+
+<hr>
+<h2><a name="GroupOwner">GroupOwner</a></h2>
+<strong>Syntax:</strong> GroupOwner <em>group-name|"~"</em><br>
+<strong>Default:</strong> None<br>
+<strong>Context:</strong> <code>&lt;Anonymous&gt;</code>, <code>&lt;Directory&gt;</code>, .ftpaccess<br>
+<strong>Module:</strong> mod_core<br>
+<strong>Compatibility:</strong> 0.99.0 and later
+
+<p>
+The <code>GroupOwner</code> directive configures which group (via the
+<em>group-name</em> parameter) will own all newly created directories and files,
+within the configuration context that <code>GroupOwner</code> is set.  The
+group ID of <em>group-name</em> <b>cannot</b> be 0.
+
+<p>
+Note that <code>GroupOwner</code> cannot be used to override the operating
+system/filesystem user/group paradigm.  If the current user is not a member of
+the specified group, new files and directories cannot be <code>chown()</code>ed
+to the <code>GroupOwner</code> group.  If this happens, the <code>STOR</code>
+and <code>MKD</code>/<code>XMKD</code> FTP commands will succeed normally,
+however the new directory entries will be owned by the current user's default
+group (and a warning message logged). However, if you <i>also</i> use
+the <code>UserOwner</code> directive in the same configuration context, this
+restriction is lifted.
+
+<p>
+Some operating systems (<i>e.g.</i> FreeBSD) will use the GID of the parent
+directory where the new file/directory is created, rather than GID of
+the logged-in user which creates the new file/directory.  To force the GID
+of the newly created file to be that of the logged-in user, use:
+<pre>
+  # The tilde (~) syntax uses the GID of the logged-in user
+  GroupOwner ~
+</pre>
+
+<p>
+See also: <a href="#UserOwner"><code>UserOwner</code></a>
 
 <hr>
 <h2><a name="Include">Include</a></h2>
@@ -88,6 +129,51 @@ sets a maximum command rate of 200 commands per sec. Or:
   MaxCommandRate 500 2
 </pre>
 sets a maximum command rate of 500 commands every 2 secs.
+
+<p>
+<hr>
+<h2><a name="PassivePorts">PassivePorts</a></h2>
+<strong>Syntax:</strong> PassivePorts <em>min max</em><br>
+<strong>Default:</strong> None<br>
+<strong>Context:</strong> server config, <code>&lt;VirtualHost&gt;</code>, <code>&lt;Global&gt;</code><br>
+<strong>Module:</strong> mod_core<br>
+<strong>Compatibility:</strong> 1.2.0rc2 and later
+
+<p>
+The <code>PassivePorts</code> directive restricts the range of ports from which
+the server will select, when the client sends the <code>PASV</code> or
+<code>EPSV</code> commands (<i>i.e.</i> requesting a passive data transfer).
+The server will randomly choose a number from within the specified range until
+an open port is found.  <b>Should no open ports be found within the 
+configured range, the server will default to a random kernel-assigned port,
+and a message logged.</b>
+
+<p>
+The port range configured <b>must</b> be in the non-privileged range
+(<i>e.g.</i> greater than or equal to 1024); it is <b>STRONGLY RECOMMENDED</b>
+that the chosen range be large enough to handle many simultaneous passive
+connections (for example, 49152-65534, the IANA-registered ephemeral port
+range).  The <b>smaller</b> your configured port range is, the greater the
+chance that all of those ports will be in use (depending on the traffic to your
+FTP server), and thus the greater the chance that a port outside that range
+will be configured.
+
+<p>
+Example:
+<pre>
+  # Use the IANA registered ephemeral port range
+  PassivePorts 49152 65534
+</pre>
+
+<p>
+<b>Note</b>: Many admins wonder why the recommended port range is so large.
+The answer is that there is really no value in having a small range.  ProFTPD
+does <b>NOT</b> automatically listen on these ports.  For those people who are
+worried about port scanning, having a larger <code>PassivePorts</code> range
+will not mean that port scans will show those ports as being open AND that
+something is listening there.  Conversely, the question to ask yourself as
+an administrator is: why do you think you need such a small
+<code>PassivePorts</code> range?
 
 <p>
 <hr>
@@ -305,6 +391,44 @@ additional tuning considerations on Solaris.
 
 <p>
 <hr>
+<h2><a name="TimeoutLinger">TimeoutLinger</a></h2>
+<strong>Syntax:</strong> TimeoutLinger <em>secs</em><br>
+<strong>Default:</strong> 30<br>
+<strong>Context:</strong> server config, <code>&lt;VirtualHost&gt;</code>, <code>&lt;Global&gt;</code><br>
+<strong>Module:</strong> mod_core<br>
+<strong>Compatibility:</strong> 1.2.10rc2 and later
+
+<p>
+The <code>TimeoutLinger</code> directive configures the maximum number of
+seconds that <code>proftpd</code> will wait (or "linger") when closing a data
+connection (<i>i.e.</i> for uploads, downloads, and directory listings).  Once
+the data connection is closed, <code>proftpd</code> will send a response
+message ("226 Transfer complete") on the control connection indicating the
+closure.  This delay is necessary for properly handling some FTP clients.
+
+<p>
+If the client aborts a transfer and there is a long delay, this lingering close
+is the most likely culprit.  So if you encounter this delay, set
+<code>TimeoutLinger</code> to a low number to remove the delay.
+
+<p>
+For the curious, here are the full details: some FTP clients will close their
+end of a data connection as soon as they are done sending their data; other
+FTP clients will wait until the server closes its end of the data connection,
+and some will close their side of the data connection <i>only after</i> they
+receive the "226 Transfer complete" message on the control connection.  In
+order to ensure that all of the data has been transferred on a data connection,
+<code>proftpd</code> will "linger" for a certain amount of time (governed
+by the <code>TimeoutLinger</code> directive) before sending that
+"226 Transfer complete" response, thus giving all client behaviors a chance
+to do the right thing.  However, this means that some clients will see a
+this <code>TimeoutLinger</code> delay unnecessarily.  The <code>proftpd</code>
+daemon can't detect which type of behavior the client will use, so it is
+up to the site admin to configure <code>proftpd</code> to work best with
+their FTP clients.
+
+<p>
+<hr>
 <h2><a name="Trace">Trace</a></h2>
 <strong>Syntax:</strong> Trace <em>channel1:level1 ...</em><br>
 <strong>Default:</strong> None<br>
@@ -427,7 +551,7 @@ The <code>mod_core</code>module is <b>always</b> installed.
 <hr><br>
 
 Author: <i>$Author: castaglia $</i><br>
-Last Updated: <i>$Date: 2011/03/30 21:51:30 $</i><br>
+Last Updated: <i>$Date: 2011/07/01 18:34:07 $</i><br>
 
 <br><hr>
 

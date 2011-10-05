@@ -163,7 +163,7 @@ my $TESTS = {
 
   sql_sqllog_var_uid_gid_bug3390 => {
     order => ++$order,
-    test_class => [qw(bug forking rootprivs)],
+    test_class => [qw(bug forking)],
   },
 
   sql_sqlite_auth_type_backend_bug3511 => {
@@ -231,6 +231,11 @@ my $TESTS = {
     test_class => [qw(bug forking)],
   },
 
+  sql_named_conn_sqllog_exit_bug3645 => {
+    order => ++$order,
+    test_class => [qw(bug forking rootprivs)],
+  },
+
   sql_sqllog_vars_H_L_matching_server_bug3620 => {
     order => ++$order,
     test_class => [qw(bug forking)],
@@ -246,7 +251,7 @@ my $TESTS = {
     test_class => [qw(forking mod_ifsession)],
   },
 
-  sql_sqllog_exit_ifuser => {
+  sql_sqllog_exit_ifgroup => {
     order => ++$order,
     test_class => [qw(forking mod_ifsession)],
   },
@@ -255,6 +260,12 @@ my $TESTS = {
     order => ++$order,
     test_class => [qw(bug forking)],
   },
+
+  sql_sqllog_ignore_errors_bug3692 => {
+    order => ++$order,
+    test_class => [qw(bug forking)],
+  },
+
 };
 
 sub new {
@@ -326,6 +337,14 @@ EOS
   if (scalar(@output) &&
       $ENV{TEST_VERBOSE}) {
     print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
   }
 
   my $config = {
@@ -469,6 +488,14 @@ EOS
   if (scalar(@output) &&
       $ENV{TEST_VERBOSE}) {
     print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
   }
 
   my $config = {
@@ -625,6 +652,14 @@ EOS
     print STDERR "Output: ", join('', @output), "\n";
   }
 
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
+  }
+
   my $config = {
     PidFile => $pid_file,
     ScoreboardFile => $scoreboard_file,
@@ -753,6 +788,14 @@ EOS
   if (scalar(@output) &&
       $ENV{TEST_VERBOSE}) {
     print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
   }
 
   # Bug#3124 occurred when SQLNegativeCache was on, and there was no group
@@ -891,6 +934,14 @@ EOS
     print STDERR "Output: ", join('', @output), "\n";
   }
 
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
+  }
+
   my $config = {
     PidFile => $pid_file,
     ScoreboardFile => $scoreboard_file,
@@ -1023,6 +1074,14 @@ EOS
   if (scalar(@output) &&
       $ENV{TEST_VERBOSE}) {
     print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
   }
 
   my $config = {
@@ -1169,6 +1228,14 @@ EOS
     print STDERR "Output: ", join('', @output), "\n";
   }
 
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
+  }
+
   my $config = {
     PidFile => $pid_file,
     ScoreboardFile => $scoreboard_file,
@@ -1313,6 +1380,14 @@ EOS
   if (scalar(@output) &&
       $ENV{TEST_VERBOSE}) {
     print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
   }
 
   my $config = {
@@ -1466,6 +1541,14 @@ EOS
   if (scalar(@output) &&
       $ENV{TEST_VERBOSE}) {
     print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
   }
 
   my $config = {
@@ -1641,6 +1724,14 @@ EOS
     print STDERR "Output: ", join('', @output), "\n";
   }
 
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
+  }
+
   my $config = {
     PidFile => $pid_file,
     ScoreboardFile => $scoreboard_file,
@@ -1810,6 +1901,14 @@ EOS
     print STDERR "Output: ", join('', @output), "\n";
   }
 
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
+  }
+
   my $config = {
     PidFile => $pid_file,
     ScoreboardFile => $scoreboard_file,
@@ -1827,7 +1926,7 @@ EOS
       'mod_sql.c' => {
         SQLEngine => 'log',
         SQLBackend => 'sqlite3',
-        SQLConnectInfo => $db_file,
+        SQLConnectInfo => "$db_file foo bar PERCONNECTION",
         SQLLogFile => $log_file,
         SQLNamedQuery => 'session_start FREEFORM "INSERT INTO ftpsessions (user, ip_addr, timestamp) VALUES (\'%u\', \'%L\', \'%{time:%Y-%m-%d %H:%M:%S}\')"',
         SQLLog => 'PASS session_start',
@@ -1976,6 +2075,14 @@ EOS
   if (scalar(@output) &&
       $ENV{TEST_VERBOSE}) {
     print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
   }
 
   my $config = {
@@ -2128,6 +2235,14 @@ EOS
     print STDERR "Output: ", join('', @output), "\n";
   }
 
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
+  }
+
   my $config = {
     PidFile => $pid_file,
     ScoreboardFile => $scoreboard_file,
@@ -2232,6 +2347,7 @@ sub sql_usersetfast_bug2434 {
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -2284,6 +2400,14 @@ EOS
     print STDERR "Output: ", join('', @output), "\n";
   }
 
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
+  }
+
   my $config = {
     PidFile => $pid_file,
     ScoreboardFile => $scoreboard_file,
@@ -2305,8 +2429,9 @@ EOS
         "SQLLogFile $log_file",
         'SQLNamedQuery get-all-usernames SELECT "userid FROM ftpusers"',
         'SQLNamedQuery get-all-users SELECT "userid, passwd, uid, gid, homedir, shell FROM ftpusers"',
-        'SQLNamedQuery get-user-info SELECT "userid, passwd, uid, gid, homedir, shell FROM ftpusers WHERE userid = \'%U\'"',
-        'SQLUserInfo custom:/get-user-info/get-all-usernames/get-all-users',
+        'SQLNamedQuery get-user-by-name SELECT "userid, passwd, uid, gid, homedir, shell FROM ftpusers WHERE userid = \'%U\'"',
+        'SQLNamedQuery get-user-by-id SELECT "userid, passwd, uid, gid, homedir, shell FROM ftpusers WHERE uid = %{0}"',
+        'SQLUserInfo custom:/get-user-by-name/get-user-by-id/get-all-usernames/get-all-users',
       ],
     },
   };
@@ -2447,6 +2572,14 @@ EOS
   if (scalar(@output) &&
       $ENV{TEST_VERBOSE}) {
     print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
   }
 
   my $config = {
@@ -2612,6 +2745,14 @@ EOS
     print STDERR "Output: ", join('', @output), "\n";
   }
 
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
+  }
+
   my $config = {
     PidFile => $pid_file,
     ScoreboardFile => $scoreboard_file,
@@ -2774,6 +2915,14 @@ EOS
   if (scalar(@output) &&
       $ENV{TEST_VERBOSE}) {
     print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
   }
 
   my $config = {
@@ -2959,6 +3108,14 @@ EOS
     print STDERR "Output: ", join('', @output), "\n";
   }
 
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
+  }
+
   my $src_file = File::Spec->rel2abs("$tmpdir/test.txt");
   if (open(my $fh, "> $src_file")) {
     close($fh);
@@ -3063,7 +3220,6 @@ EOS
 }
 
 sub sql_sqllog_var_w_chrooted {
-$ENV{TEST_VERBOSE}=1;
   my $self = shift;
   my $tmpdir = $self->{tmpdir};
 
@@ -3131,6 +3287,14 @@ EOS
   if (scalar(@output) &&
       $ENV{TEST_VERBOSE}) {
     print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
   }
 
   my $src_file = File::Spec->rel2abs("$tmpdir/test.txt");
@@ -3299,6 +3463,14 @@ EOS
     print STDERR "Output: ", join('', @output), "\n";
   }
 
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
+  }
+
   my $config = {
     PidFile => $pid_file,
     ScoreboardFile => $scoreboard_file,
@@ -3443,6 +3615,14 @@ EOS
   if (scalar(@output) &&
       $ENV{TEST_VERBOSE}) {
     print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
   }
 
   my $config = {
@@ -3621,6 +3801,14 @@ EOS
     print STDERR "Output: ", join('', @output), "\n";
   }
 
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
+  }
+
   my $config = {
     PidFile => $pid_file,
     ScoreboardFile => $scoreboard_file,
@@ -3783,6 +3971,14 @@ EOS
     print STDERR "Output: ", join('', @output), "\n";
   }
 
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
+  }
+
   my $config = {
     PidFile => $pid_file,
     ScoreboardFile => $scoreboard_file,
@@ -3936,6 +4132,14 @@ EOS
   if (scalar(@output) &&
       $ENV{TEST_VERBOSE}) {
     print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
   }
 
   my $config = {
@@ -4097,6 +4301,14 @@ EOS
   if (scalar(@output) &&
       $ENV{TEST_VERBOSE}) {
     print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
   }
 
   my $src_file = File::Spec->rel2abs("$tmpdir/test.txt");
@@ -4283,6 +4495,14 @@ EOS
   if (scalar(@output) &&
       $ENV{TEST_VERBOSE}) {
     print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
   }
 
   my $config = {
@@ -4479,6 +4699,14 @@ EOS
     print STDERR "Output: ", join('', @output), "\n";
   }
 
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
+  }
+
   my $config = {
     PidFile => $pid_file,
     ScoreboardFile => $scoreboard_file,
@@ -4671,6 +4899,14 @@ EOS
     print STDERR "Output: ", join('', @output), "\n";
   }
 
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
+  }
+
   my $config = {
     PidFile => $pid_file,
     ScoreboardFile => $scoreboard_file,
@@ -4778,6 +5014,7 @@ sub sql_sqllog_var_d_chroot_bug3395 {
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -4785,21 +5022,9 @@ sub sql_sqllog_var_d_chroot_bug3395 {
   my $sub_dir = File::Spec->rel2abs("$tmpdir/foo");
   mkpath($sub_dir);
 
-  # Make sure that, if we're running as root, that the home directory has
-  # permissions/privs set for the account we create
-  if ($< == 0) {
-    unless (chmod(0755, $home_dir, $sub_dir)) {
-      die("Can't set perms on $home_dir to 0755: $!");
-    }
-
-    unless (chown($uid, $gid, $home_dir, $sub_dir)) {
-      die("Can't set owner of $home_dir to $uid/$gid: $!");
-    }
-  }
-
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $db_file = File::Spec->rel2abs("$tmpdir/proftpd.db");
 
@@ -4835,6 +5060,22 @@ EOS
     print STDERR "Output: ", join('', @output), "\n";
   }
 
+  # Make sure that, if we're running as root, that the home directory has
+  # permissions/privs set for the account we create
+  if ($< == 0) {
+    unless (chmod(0755, $home_dir, $sub_dir)) {
+      die("Can't set perms on $home_dir to 0755: $!");
+    }
+
+    unless (chown($uid, $gid, $home_dir, $sub_dir)) {
+      die("Can't set owner of $home_dir to $uid/$gid: $!");
+    }
+
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
+  }
+
   my $config = {
     PidFile => $pid_file,
     ScoreboardFile => $scoreboard_file,
@@ -4842,7 +5083,6 @@ EOS
 
     AuthUserFile => $auth_user_file,
     AuthGroupFile => $auth_group_file,
-    DefaultRoot => '~',
 
     IfModules => {
       'mod_delay.c' => {
@@ -4921,7 +5161,7 @@ EOS
   $self->assert($expected eq $ip_addr,
     test_msg("Expected '$expected', got '$ip_addr'"));
 
-  $expected = '/foo';
+  $expected = $sub_dir;
   $self->assert($expected eq $dir,
     test_msg("Expected '$expected', got '$dir'"));
 
@@ -4965,6 +5205,7 @@ sub sql_sqllog_var_uid_gid_bug3390 {
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -4986,7 +5227,7 @@ sub sql_sqllog_var_uid_gid_bug3390 {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $db_file = File::Spec->rel2abs("$tmpdir/proftpd.db");
 
@@ -5023,6 +5264,14 @@ EOS
     print STDERR "Output: ", join('', @output), "\n";
   }
 
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
+  }
+
   my $config = {
     PidFile => $pid_file,
     ScoreboardFile => $scoreboard_file,
@@ -5030,7 +5279,6 @@ EOS
 
     AuthUserFile => $auth_user_file,
     AuthGroupFile => $auth_group_file,
-    DefaultRoot => '~',
 
     IfModules => {
       'mod_delay.c' => {
@@ -5042,8 +5290,8 @@ EOS
         SQLBackend => 'sqlite3',
         SQLConnectInfo => "$db_file foo bar PERCONNECTION",
         SQLLogFile => $log_file,
-        SQLNamedQuery => 'location FREEFORM "INSERT INTO ftpsessions (user, ip_addr, uid, gid) VALUES (\'%u\', \'%L\', \'%{uid}\', \'%{gid}\')"',
-        SQLLog => 'EXIT location',
+        SQLNamedQuery => 'location FREEFORM "INSERT INTO ftpsessions (user, ip_addr, uid, gid) VALUES (\'%u\', \'%L\', %{uid}, %{gid})"',
+        SQLLog => 'PASS location',
       },
     },
   };
@@ -5180,6 +5428,14 @@ EOS
   if (scalar(@output) &&
       $ENV{TEST_VERBOSE}) {
     print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
   }
 
   my $config = {
@@ -5336,6 +5592,14 @@ EOS
   if (scalar(@output) &&
       $ENV{TEST_VERBOSE}) {
     print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
   }
 
   my $config = {
@@ -5495,6 +5759,14 @@ EOS
     print STDERR "Output: ", join('', @output), "\n";
   }
 
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
+  }
+
   my $config = {
     PidFile => $pid_file,
     ScoreboardFile => $scoreboard_file,
@@ -5649,6 +5921,14 @@ EOS
   if (scalar(@output) &&
       $ENV{TEST_VERBOSE}) {
     print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
   }
 
   my $config = {
@@ -5829,6 +6109,14 @@ EOS
   if (scalar(@output) &&
       $ENV{TEST_VERBOSE}) {
     print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
   }
 
   my $config = {
@@ -6051,6 +6339,14 @@ EOG
     print STDERR "Output: ", join('', @output), "\n";
   }
 
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
+  }
+
   my $config = {
     PidFile => $pid_file,
     ScoreboardFile => $scoreboard_file,
@@ -6150,10 +6446,10 @@ sub get_cmds {
     chomp($row);
 
     # The default sqlite3 delimiter is '|'
-    $res = split(/\|/, $row);
+    $res = [split(/\|/, $row)];
   }
 
-  return $res;
+  return @$res;
 }
 
 sub sql_resolve_tag_bug3536 {
@@ -6237,6 +6533,14 @@ EOS
     print STDERR "Output: ", join('', @output), "\n";
   }
 
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
+  }
+
   my $config = {
     PidFile => $pid_file,
     ScoreboardFile => $scoreboard_file,
@@ -6255,7 +6559,7 @@ EOS
         SQLConnectInfo => $db_file,
         SQLLogFile => $log_file,
         SQLNamedQuery => 'command FREEFORM "INSERT INTO ftpsessions (user, ip_addr, command, request) VALUES (\'%u\', \'%L\', \'%m\', \'%r\')"',
-#        SQLLog => '* command',
+        SQLLog => '* command',
       },
     },
   };
@@ -6312,11 +6616,12 @@ EOS
     die($ex);
   }
 
-  my ($login, $ip_addr, $cmd, $req) = get_cmds($db_file, "user = \'$user\'");
+  my ($login, $ip_addr, $req);
+  ($login, $ip_addr, $cmd, $req) = get_cmds($db_file, "user = \'$config_user\'");
 
   my $expected;
 
-  $expected = $user;
+  $expected = $config_user;
   $self->assert($expected eq $login,
     test_msg("Expected '$expected', got '$login'"));
 
@@ -6417,6 +6722,14 @@ EOS
   if (scalar(@output) &&
       $ENV{TEST_VERBOSE}) {
     print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
   }
 
   my $config = {
@@ -6637,6 +6950,14 @@ EOS
     print STDERR "Output: ", join('', @output), "\n";
   }
 
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
+  }
+
   my $config = {
     PidFile => $pid_file,
     ScoreboardFile => $scoreboard_file,
@@ -6799,6 +7120,14 @@ EOS
   if (scalar(@output) &&
       $ENV{TEST_VERBOSE}) {
     print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
   }
 
   my $config = {
@@ -7010,6 +7339,14 @@ EOS
     print STDERR "Output: ", join('', @output), "\n";
   }
 
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
+  }
+
   my $config = {
     PidFile => $pid_file,
     ScoreboardFile => $scoreboard_file,
@@ -7174,6 +7511,14 @@ EOS
   if (scalar(@output) &&
       $ENV{TEST_VERBOSE}) {
     print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
   }
 
   my $config = {
@@ -7386,6 +7731,14 @@ EOS
     print STDERR "Output: ", join('', @output), "\n";
   }
 
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $userdb_file, $logdb_file)) {
+      die("Can't set perms on $userdb_file, $logdb_file to 0666: $!");
+    }
+  }
+
   my $config = {
     PidFile => $pid_file,
     ScoreboardFile => $scoreboard_file,
@@ -7406,6 +7759,241 @@ EOS
         'SQLUserInfo custom:/get-sql-user',
         'SQLNamedQuery session_start FREEFORM "INSERT INTO ftpsessions (user, ip_addr, timestamp) VALUES (\'%u\', \'%L\', \'%{time:%Y-%m-%d %H:%M:%S}\')" logdb',
         'SQLLog PASS session_start',
+      ],
+    },
+  };
+
+  my ($port, $config_user, $config_group) = config_write($config_file, $config);
+
+  # Open pipes, for use between the parent and child processes.  Specifically,
+  # the child will indicate when it's done with its test by writing a message
+  # to the parent.
+  my ($rfh, $wfh);
+  unless (pipe($rfh, $wfh)) {
+    die("Can't open pipe: $!");
+  }
+
+  my $ex;
+
+  # Fork child
+  $self->handle_sigchld();
+  defined(my $pid = fork()) or die("Can't fork: $!");
+  if ($pid) {
+    eval {
+      my $client = ProFTPD::TestSuite::FTP->new('127.0.0.1', $port);
+
+      $client->login($user, $passwd);
+
+      my $resp_msgs = $client->response_msgs();
+      my $nmsgs = scalar(@$resp_msgs);
+
+      my $expected;
+
+      $expected = 1;
+      $self->assert($expected == $nmsgs,
+        test_msg("Expected $expected, got $nmsgs")); 
+
+      $expected = "User proftpd logged in";
+      $self->assert($expected eq $resp_msgs->[0],
+        test_msg("Expected '$expected', got '$resp_msgs->[0]'"));
+
+    };
+
+    if ($@) {
+      $ex = $@;
+    }
+
+    $wfh->print("done\n");
+    $wfh->flush();
+
+  } else {
+    eval { server_wait($config_file, $rfh) };
+    if ($@) {
+      warn($@);
+      exit 1;
+    }
+
+    exit 0;
+  }
+
+  # Stop server
+  server_stop($pid_file);
+
+  $self->assert_child_ok($pid);
+
+  if ($ex) {
+    die($ex);
+  }
+
+  my ($login, $ip_addr, $timestamp) = get_sessions($userdb_file,
+    "user = \'$user\'");
+
+  $self->assert(!defined($login),
+    test_msg("Expected undef, got '$login'"));
+
+  $self->assert(!defined($ip_addr),
+    test_msg("Expected undef, got '$ip_addr'"));
+
+  $self->assert(!defined($timestamp),
+    test_msg("Expected undef, got '$timestamp'"));
+
+  ($login, $ip_addr, $timestamp) = get_sessions($logdb_file,
+    "user = \'$user\'");
+
+  my $expected;
+
+  $expected = $user;
+  $self->assert($expected eq $login,
+    test_msg("Expected '$expected', got '$login'"));
+
+  $expected = '127.0.0.1';
+  $self->assert($expected eq $ip_addr,
+    test_msg("Expected '$expected', got '$ip_addr'"));
+
+  $expected = '\d{4}\-\d{2}\-\d{2} \d{2}:\d{2}:\d{2}';
+  $self->assert(qr/$expected/, $timestamp,
+    test_msg("Expected '$expected', got '$timestamp'"));
+
+  unlink($log_file);
+}
+
+sub sql_named_conn_sqllog_exit_bug3645 {
+  my $self = shift;
+  my $tmpdir = $self->{tmpdir};
+
+  my $config_file = "$tmpdir/sqlite.conf";
+  my $pid_file = File::Spec->rel2abs("$tmpdir/sqlite.pid");
+  my $scoreboard_file = File::Spec->rel2abs("$tmpdir/sqlite.scoreboard");
+
+  my $log_file = File::Spec->rel2abs('tests.log');
+
+  my $user = 'proftpd';
+  my $passwd = 'test';
+  my $group = 'ftpd';
+  my $home_dir = File::Spec->rel2abs($tmpdir);
+  my $uid = 500;
+  my $gid = 500;
+
+  # Make sure that, if we're running as root, that the home directory has
+  # permissions/privs set for the account we create
+  if ($< == 0) {
+    unless (chmod(0755, $home_dir)) {
+      die("Can't set perms on $home_dir to 0755: $!");
+    }
+
+    unless (chown($uid, $gid, $home_dir)) {
+      die("Can't set owner of $home_dir to $uid/$gid: $!");
+    }
+  }
+
+  my $userdb_file = File::Spec->rel2abs("$tmpdir/proftpd-users.db");
+
+  # Build up sqlite3 command to create users, groups tables and populate them
+  my $db_script = File::Spec->rel2abs("$tmpdir/proftpd-users.sql");
+
+  if (open(my $fh, "> $db_script")) {
+    print $fh <<EOS;
+CREATE TABLE users (
+  userid TEXT,
+  passwd TEXT,
+  uid INTEGER,
+  gid INTEGER,
+  homedir TEXT, 
+  shell TEXT
+);
+INSERT INTO users (userid, passwd, uid, gid, homedir, shell) VALUES ('$user', '$passwd', $uid, $gid, '$home_dir', '/bin/bash');
+
+CREATE TABLE groups (
+  groupname TEXT,
+  gid INTEGER,
+  members TEXT
+);
+INSERT INTO groups (groupname, gid, members) VALUES ('$group', $gid, '$user');
+EOS
+
+    unless (close($fh)) {
+      die("Can't write $db_script: $!");
+    }
+
+  } else {
+    die("Can't open $db_script: $!");
+  }
+
+  my $cmd = "sqlite3 $userdb_file < $db_script";
+
+  if ($ENV{TEST_VERBOSE}) {
+    print STDERR "Executing sqlite3: $cmd\n";
+  }
+
+  my @output = `$cmd`;
+  if (scalar(@output) &&
+      $ENV{TEST_VERBOSE}) {
+    print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  my $logdb_file = File::Spec->rel2abs("$tmpdir/proftpd-log.db");
+
+  # Build up sqlite3 command to create users, groups tables and populate them
+  $db_script = File::Spec->rel2abs("$tmpdir/proftpd-log.sql");
+
+  if (open(my $fh, "> $db_script")) {
+    print $fh <<EOS;
+CREATE TABLE ftpsessions (
+  user TEXT,
+  ip_addr TEXT,
+  timestamp TEXT
+);
+
+EOS
+
+    unless (close($fh)) {
+      die("Can't write $db_script: $!");
+    }
+
+  } else {
+    die("Can't open $db_script: $!");
+  }
+
+  $cmd = "sqlite3 $logdb_file < $db_script";
+
+  if ($ENV{TEST_VERBOSE}) {
+    print STDERR "Executing sqlite3: $cmd\n";
+  }
+
+  @output = `$cmd`;
+  if (scalar(@output) &&
+      $ENV{TEST_VERBOSE}) {
+    print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $userdb_file, $logdb_file)) {
+      die("Can't set perms on $userdb_file, $logdb_file to 0666: $!");
+    }
+  }
+
+  my $config = {
+    PidFile => $pid_file,
+    ScoreboardFile => $scoreboard_file,
+    SystemLog => $log_file,
+
+    DefaultRoot => '~',
+
+    IfModules => {
+      'mod_delay.c' => {
+        DelayEngine => 'off',
+      },
+
+      'mod_sql.c' => [
+        'SQLAuthTypes plaintext',
+        'SQLBackend sqlite3',
+        "SQLConnectInfo $userdb_file",
+        "SQLNamedConnectInfo logdb sqlite3 $logdb_file",
+        "SQLLogFile $log_file",
+        'SQLNamedQuery session_end FREEFORM "INSERT INTO ftpsessions (user, ip_addr, timestamp) VALUES (\'%u\', \'%L\', \'%{time:%Y-%m-%d %H:%M:%S}\')" logdb',
+        'SQLLog EXIT session_end',
       ],
     },
   };
@@ -7572,6 +8160,14 @@ EOS
   if (scalar(@output) &&
       $ENV{TEST_VERBOSE}) {
     print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
   }
 
   my $src_file = File::Spec->rel2abs("$tmpdir/test.txt");
@@ -7742,6 +8338,14 @@ EOS
   if (scalar(@output) &&
       $ENV{TEST_VERBOSE}) {
     print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
   }
 
   my $src_file = File::Spec->rel2abs("$tmpdir/test.txt");
@@ -7956,6 +8560,14 @@ EOS
     print STDERR "Output: ", join('', @output), "\n";
   }
 
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
+  }
+
   my $config = {
     PidFile => $pid_file,
     ScoreboardFile => $scoreboard_file,
@@ -8018,7 +8630,7 @@ EOC
       $client->quit();
 
       # Then connect, login, and quit
-      my $client = ProFTPD::TestSuite::FTP->new('127.0.0.1', $port);
+      $client = ProFTPD::TestSuite::FTP->new('127.0.0.1', $port);
       $client->login($user, $passwd);
       $client->quit();
     };
@@ -8075,7 +8687,7 @@ EOC
   unlink($log_file);
 }
 
-sub sql_sqllog_exit_ifuser {
+sub sql_sqllog_exit_ifgroup {
   my $self = shift;
   my $tmpdir = $self->{tmpdir};
 
@@ -8144,6 +8756,14 @@ EOS
     print STDERR "Output: ", join('', @output), "\n";
   }
 
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
+  }
+
   my $config = {
     PidFile => $pid_file,
     ScoreboardFile => $scoreboard_file,
@@ -8172,9 +8792,9 @@ EOS
   if (open(my $fh, ">> $config_file")) {
     print $fh <<EOC;
 <IfModule mod_ifsession.c>
-  <IfUser regex .*>
+  <IfGroup regex .*>
     SQLLog EXIT logout
-  </IfUser>
+  </IfGroup>
 </IfModule>
 EOC
     unless (close($fh)) {
@@ -8206,7 +8826,7 @@ EOC
       $client->quit();
 
       # Then connect, login, and quit
-      my $client = ProFTPD::TestSuite::FTP->new('127.0.0.1', $port);
+      $client = ProFTPD::TestSuite::FTP->new('127.0.0.1', $port);
       $client->login($user, $passwd);
       $client->quit();
     };
@@ -8333,6 +8953,14 @@ EOS
     print STDERR "Output: ", join('', @output), "\n";
   }
 
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
+  }
+
   my $test_file = File::Spec->rel2abs("$home_dir/test.txt");
   if (open(my $fh, "> $test_file")) {
     print $fh "Hello, World!\n";
@@ -8454,6 +9082,159 @@ EOS
 
   } else {
     die("Can't read $ext_log: $!");
+  }
+
+  unlink($log_file);
+}
+
+sub sql_sqllog_ignore_errors_bug3692 {
+  my $self = shift;
+  my $tmpdir = $self->{tmpdir};
+
+  my $config_file = "$tmpdir/sqlite.conf";
+  my $pid_file = File::Spec->rel2abs("$tmpdir/sqlite.pid");
+  my $scoreboard_file = File::Spec->rel2abs("$tmpdir/sqlite.scoreboard");
+
+  my $log_file = File::Spec->rel2abs('tests.log');
+
+  my $auth_user_file = File::Spec->rel2abs("$tmpdir/sqlite.passwd");
+  my $auth_group_file = File::Spec->rel2abs("$tmpdir/sqlite.group");
+
+  my $user = 'proftpd';
+  my $passwd = 'test';
+  my $group = 'ftpd';
+  my $home_dir = File::Spec->rel2abs($tmpdir);
+  my $uid = 500;
+  my $gid = 500;
+
+  # Make sure that, if we're running as root, that the home directory has
+  # permissions/privs set for the account we create
+  if ($< == 0) {
+    unless (chmod(0755, $home_dir)) {
+      die("Can't set perms on $home_dir to 0755: $!");
+    }
+
+    unless (chown($uid, $gid, $home_dir)) {
+      die("Can't set owner of $home_dir to $uid/$gid: $!");
+    }
+  }
+
+  auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
+    '/bin/bash');
+  auth_group_write($auth_group_file, $group, $gid, $user);
+
+  my $db_file = File::Spec->rel2abs("$tmpdir/proftpd.db");
+
+  # Build up sqlite3 command to create users, groups tables and populate them
+  my $db_script = File::Spec->rel2abs("$tmpdir/proftpd.sql");
+
+  if (open(my $fh, "> $db_script")) {
+    print $fh <<EOS;
+CREATE TABLE ftpsessions (
+  user TEXT,
+  ip_addr TEXT,
+  timestamp TEXT
+);
+EOS
+
+    unless (close($fh)) {
+      die("Can't write $db_script: $!");
+    }
+
+  } else {
+    die("Can't open $db_script: $!");
+  }
+
+  my $cmd = "sqlite3 $db_file < $db_script";
+
+  if ($ENV{TEST_VERBOSE}) {
+    print STDERR "Executing sqlite3: $cmd\n";
+  }
+
+  my @output = `$cmd`;
+  if (scalar(@output) &&
+      $ENV{TEST_VERBOSE}) {
+    print STDERR "Output: ", join('', @output), "\n";
+  }
+
+  # Make sure that, if we're running as root, the database file has
+  # the permissions/privs set for use by proftpd
+  if ($< == 0) {
+    unless (chmod(0666, $db_file)) {
+      die("Can't set perms on $db_file to 0666: $!");
+    }
+  }
+
+  my $config = {
+    PidFile => $pid_file,
+    ScoreboardFile => $scoreboard_file,
+    SystemLog => $log_file,
+
+    AuthUserFile => $auth_user_file,
+    AuthGroupFile => $auth_group_file,
+
+    IfModules => {
+      'mod_delay.c' => {
+        DelayEngine => 'off',
+      },
+
+      'mod_sql.c' => {
+        SQLEngine => 'log',
+        SQLBackend => 'sqlite3',
+        SQLConnectInfo => $db_file,
+        SQLLogFile => $log_file,
+        SQLNamedQuery => 'session_start FREEFORM "INSERT INTO ftpsessions (user, ip_addr, ts) VALUES (\'%u\', \'%L\', \'%{time:%Y-%m-%d %H:%M:%S}\')"',
+        SQLLog => 'PASS session_start IGNORE_ERRORS',
+      },
+    },
+  };
+
+  my ($port, $config_user, $config_group) = config_write($config_file, $config);
+
+  # Open pipes, for use between the parent and child processes.  Specifically,
+  # the child will indicate when it's done with its test by writing a message
+  # to the parent.
+  my ($rfh, $wfh);
+  unless (pipe($rfh, $wfh)) {
+    die("Can't open pipe: $!");
+  }
+
+  my $ex;
+
+  # Fork child
+  $self->handle_sigchld();
+  defined(my $pid = fork()) or die("Can't fork: $!");
+  if ($pid) {
+    eval {
+      my $client = ProFTPD::TestSuite::FTP->new('127.0.0.1', $port);
+
+      $client->login($user, $passwd);
+    };
+
+    if ($@) {
+      $ex = $@;
+    }
+
+    $wfh->print("done\n");
+    $wfh->flush();
+
+  } else {
+    eval { server_wait($config_file, $rfh) };
+    if ($@) {
+      warn($@);
+      exit 1;
+    }
+
+    exit 0;
+  }
+
+  # Stop server
+  server_stop($pid_file);
+
+  $self->assert_child_ok($pid);
+
+  if ($ex) {
+    die($ex);
   }
 
   unlink($log_file);

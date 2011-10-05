@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, TJ Saunders and other respective copyright holders
  * give permission to link this program with OpenSSL, and distribute the
@@ -26,7 +26,7 @@
 /* Shows who is online via proftpd, in a manner similar to top.  Uses the
  * scoreboard files.
  *
- * $Id: ftptop.c,v 1.40 2011/01/12 06:54:49 castaglia Exp $
+ * $Id: ftptop.c,v 1.42 2011/05/23 20:46:20 castaglia Exp $
  */
 
 #define FTPTOP_VERSION "ftptop/0.9"
@@ -280,11 +280,11 @@ static const char *show_ftpd_uptime(void) {
   upminutes = upminutes % 60;
 
   if (uphours) {
-    pos += snprintf(buf + pos, sizeof(buf) - pos, "%2d hr%s %02d min", uphours,
+    snprintf(buf + pos, sizeof(buf) - pos, "%2d hr%s %02d min", uphours,
       (uphours != 1) ? "s" : "", upminutes);
 
   } else {
-    pos += snprintf(buf + pos, sizeof(buf) - pos, "%d min", upminutes);
+    snprintf(buf + pos, sizeof(buf) - pos, "%d min", upminutes);
   }
 
   return buf;

@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, TJ Saunders and other respective copyright holders
  * give permission to link this program with OpenSSL, and distribute the
@@ -26,13 +26,13 @@
  * This is mod_delay, contrib software for proftpd 1.2.10 and above.
  * For more information contact TJ Saunders <tj@castaglia.org>.
  *
- * $Id: mod_delay.c,v 1.55 2011/03/22 18:44:16 castaglia Exp $
+ * $Id: mod_delay.c,v 1.60 2011/06/05 23:18:23 castaglia Exp $
  */
 
 #include "conf.h"
 #include "privs.h"
 
-#define MOD_DELAY_VERSION		"mod_delay/0.6"
+#define MOD_DELAY_VERSION		"mod_delay/0.7"
 
 /* Make sure the version of proftpd is as necessary. */
 #if PROFTPD_VERSION_NUMBER < 0x0001021001
@@ -290,7 +290,6 @@ static void delay_mask_signals(unsigned char block) {
     sigaddset(&mask_sigset, SIGUSR1);
     sigaddset(&mask_sigset, SIGINT);
     sigaddset(&mask_sigset, SIGQUIT);
-    sigaddset(&mask_sigset, SIGALRM);
 #ifdef SIGIO
     sigaddset(&mask_sigset, SIGIO);
 #endif
@@ -301,8 +300,9 @@ static void delay_mask_signals(unsigned char block) {
 
     sigprocmask(SIG_BLOCK, &mask_sigset, NULL);
 
-  } else
+  } else {
     sigprocmask(SIG_UNBLOCK, &mask_sigset, NULL);
+  }
 }
 
 static void delay_signals_block(void) {
@@ -316,6 +316,7 @@ static void delay_signals_unblock(void) {
 static void delay_delay(long interval) {
   struct timeval tv;
   long rand_usec;
+  int res, xerrno;
 
   /* Add an additional delay of a random number of usecs, with a 
    * maximum of half of the given interval.
@@ -332,8 +333,43 @@ static void delay_delay(long interval) {
     (long int) ((tv.tv_sec * 1000000) + tv.tv_usec));
 
   delay_signals_block();
-  (void) select(0, NULL, NULL, NULL, &tv);
+  res = select(0, NULL, NULL, NULL, &tv);
+  xerrno = errno;
   delay_signals_unblock();
+
+  if (res < 0 &&
+      xerrno == EINTR) {
+
+    /* If we were interrupted, handle the interrupting signal. */
+    pr_signals_handle();
+  }
+}
+
+/* There are two rows (USER and PASS) for each server ID (SID).
+ *
+ * The main server has a SID of 1.  Thus to access the USER row for SID 1,
+ * the row index is 0; the PASS row for SID 1 has a row index of 1.
+ *
+ * The general formula for the USER row of a given SID is:
+ *
+ *   r = (sid * 2) - 2;
+ *
+ * and thus for accessing the PASS row, the formula is:
+ *
+ *   r = (sid * 2) - 1;
+ */
+static unsigned int delay_get_user_rownum(unsigned int sid) {
+  unsigned int r;
+
+  r = (sid * 2) - 2;
+  return r;
+}
+
+static unsigned int delay_get_pass_rownum(unsigned int sid) {
+  unsigned int r;
+
+  r = (sid * 2) - 1;
+  return r;
 }
 
 static void delay_table_add_interval(unsigned int rownum, const char *protocol,
@@ -530,10 +566,11 @@ static int delay_table_init(void) {
     struct delay_rec *row;
 
     for (s = (server_rec *) server_list->xas_list; s; s = s->next) {
-      unsigned int i = s->sid - 1;
+      unsigned int r;
 
       /* Row for USER values */
-      row = &((struct delay_rec *) delay_tab.dt_data)[i];
+      r = delay_get_user_rownum(s->sid);
+      row = &((struct delay_rec *) delay_tab.dt_data)[r];
       if (strcmp(pr_netaddr_get_ipstr(s->addr), row->d_addr) != 0) {
         reset_table = TRUE;
         break;
@@ -545,7 +582,8 @@ static int delay_table_init(void) {
       }
 
       /* Row for PASS values */
-      row = &((struct delay_rec *) delay_tab.dt_data)[i + 1];
+      r = delay_get_pass_rownum(s->sid);
+      row = &((struct delay_rec *) delay_tab.dt_data)[r];
       if (strcmp(pr_netaddr_get_ipstr(s->addr), row->d_addr) != 0) {
         reset_table = TRUE;
         break;
@@ -733,12 +771,13 @@ static void delay_table_reset(void) {
   server_rec *s;
 
   for (s = (server_rec *) server_list->xas_list; s; s = s->next) {
-    unsigned int i = s->sid - 1;
+    unsigned int r;
     struct delay_rec *row;
     struct delay_vals_rec *dv;
 
     /* Row for USER values */
-    row = &((struct delay_rec *) delay_tab.dt_data)[i];
+    r = delay_get_user_rownum(s->sid);
+    row = &((struct delay_rec *) delay_tab.dt_data)[r];
     row->d_sid = s->sid;
     sstrncpy(row->d_addr, pr_netaddr_get_ipstr(s->addr), sizeof(row->d_addr));
     row->d_port = s->ServerPort;
@@ -764,7 +803,8 @@ static void delay_table_reset(void) {
     memset(dv->dv_vals, -1, sizeof(dv->dv_vals));
 
     /* Row for PASS values */
-    row = &((struct delay_rec *) delay_tab.dt_data)[i + 1];
+    r = delay_get_pass_rownum(s->sid);
+    row = &((struct delay_rec *) delay_tab.dt_data)[r];
     row->d_sid = s->sid;
     sstrncpy(row->d_addr, pr_netaddr_get_ipstr(s->addr), sizeof(row->d_addr));
     row->d_port = s->ServerPort;
@@ -909,11 +949,11 @@ static int delay_handle_info(pr_ctrls_t *ctrl, int reqargc,
   }
   PRIVS_RELINQUISH
 
-  if (!fh) {
+  if (fh == NULL) {
     pr_ctrls_add_response(ctrl,
       "warning: unable to open DelayTable '%s': %s", delay_tab.dt_path,
       strerror(xerrno));
-    xerrno = errno;
+    errno = xerrno;
     return -1;
   }
 
@@ -941,11 +981,12 @@ static int delay_handle_info(pr_ctrls_t *ctrl, int reqargc,
   tmp_pool = make_sub_pool(delay_pool);
 
   for (s = (server_rec *) server_list->xas_list; s; s = s->next) {
-    unsigned int r = s->sid - 1;
+    unsigned int r;
     register unsigned int i;
     struct delay_rec *row;
- 
+
     /* Row for USER values */
+    r = delay_get_user_rownum(s->sid);
     row = &((struct delay_rec *) delay_tab.dt_data)[r];
     pr_ctrls_add_response(ctrl, "Address %s#%u: USER values (usecs):",
       row->d_addr, row->d_port);
@@ -990,7 +1031,8 @@ static int delay_handle_info(pr_ctrls_t *ctrl, int reqargc,
     pr_ctrls_add_response(ctrl, "%s", "");
 
     /* Row for PASS values */
-    row = &((struct delay_rec *) delay_tab.dt_data)[r + 1];
+    r = delay_get_pass_rownum(s->sid);
+    row = &((struct delay_rec *) delay_tab.dt_data)[r];
     pr_ctrls_add_response(ctrl, "Address %s#%u: PASS values (usecs):",
       row->d_addr, row->d_port);
 
@@ -1027,8 +1069,9 @@ static int delay_handle_info(pr_ctrls_t *ctrl, int reqargc,
       if (strlen(vals) > 0)
         pr_ctrls_add_response(ctrl, "    %s", vals);
     }
+
+    pr_ctrls_add_response(ctrl, "%s", "");
   }
-  pr_ctrls_add_response(ctrl, "%s", "");
 
   if (delay_table_unload(TRUE) < 0) {
     pr_ctrls_add_response(ctrl,
@@ -1225,13 +1268,8 @@ MODRET delay_post_pass(cmd_rec *cmd) {
       *authenticated == TRUE) {
     return PR_DECLINED(cmd);
   }
- 
-  /* We use sid-1, since the sid is a server number, and the locking
-   * routines want a row index.  However, PASS rows are always after
-   * USER rows, so we need to add 1 to the row number, leaving us
-   * with just the sid.
-   */
-  rownum = main_server->sid;
+
+  rownum = delay_get_pass_rownum(main_server->sid);
 
   /* Prepare for manipulating the table. */
   if (delay_table_load(FALSE) < 0) {
@@ -1339,10 +1377,7 @@ MODRET delay_post_user(cmd_rec *cmd) {
     return PR_DECLINED(cmd);
   }
  
-  /* We use sid-1, since the sid is a server number, and the locking
-   * routines want a row index.
-   */
-  rownum = main_server->sid - 1;
+  rownum = delay_get_user_rownum(main_server->sid);
 
   /* Prepare for manipulating the table. */
   if (delay_table_load(FALSE) < 0) {

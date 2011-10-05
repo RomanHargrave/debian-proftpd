@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, Public Flood Software/MacGyver aka Habeeb J. Dihu
  * and other respective copyright holders give permission to link this program
@@ -25,7 +25,7 @@
  */
 
 /* ProFTPD virtual/modular file-system support
- * $Id: fsio.c,v 1.99 2011/03/17 14:05:37 castaglia Exp $
+ * $Id: fsio.c,v 1.102 2011/05/27 00:38:45 castaglia Exp $
  */
 
 #include "conf.h"
@@ -426,6 +426,7 @@ static pr_fs_t *lookup_dir_fs(const char *path, int op) {
   char tmp_path[PR_TUNABLE_PATH_MAX + 1] = {'\0'};
   pr_fs_t *fs = NULL;
   int exact = FALSE;
+  size_t tmp_pathlen = 0;
 
 #ifdef PR_FS_MATCH
   pr_fs_match_t *fsm = NULL;
@@ -438,18 +439,25 @@ static pr_fs_t *lookup_dir_fs(const char *path, int op) {
    * not absolute, prepend the current location.
    */
   if (pr_fs_valid_path(path) < 0) {
-    if (pr_fs_dircat(tmp_path, sizeof(tmp_path), cwd, buf) < 0)
+    if (pr_fs_dircat(tmp_path, sizeof(tmp_path), cwd, buf) < 0) {
       return NULL;
+    }
 
-  } else
+  } else {
     sstrncpy(tmp_path, buf, sizeof(tmp_path));
+  }
 
   /* Make sure that if this is a directory operation, the path being
    * search ends in a trailing slash -- this is how files and directories
    * are differentiated in the fs_map.
    */
-  if ((FSIO_DIR_COMMON & op) && tmp_path[strlen(tmp_path) - 1] != '/')
+  tmp_pathlen = strlen(tmp_path);
+  if ((FSIO_DIR_COMMON & op) &&
+      tmp_pathlen > 0 &&
+      tmp_pathlen < sizeof(tmp_path) &&
+      tmp_path[tmp_pathlen - 1] != '/') {
     sstrcat(tmp_path, "/", sizeof(tmp_path));
+  }
 
   fs = pr_get_fs(tmp_path, &exact);
 
@@ -619,8 +627,12 @@ int pr_fs_copy_file(const char *src, const char *dst) {
    */
   src_fh = pr_fsio_open(src, O_RDONLY|O_NONBLOCK);
   if (src_fh == NULL) {
+    int xerrno = errno;
+
     pr_log_pri(PR_LOG_WARNING, "error opening source file '%s' "
-      "for copying: %s", src, strerror(errno));
+      "for copying: %s", src, strerror(xerrno));
+
+    errno = xerrno;
     return -1;
   }
 
@@ -634,11 +646,14 @@ int pr_fs_copy_file(const char *src, const char *dst) {
   /* This should never fail. */
   (void) pr_fsio_fstat(src_fh, &src_st);
   if (S_ISDIR(src_st.st_mode)) {
+    int xerrno = EISDIR;
+
     pr_fsio_close(src_fh);
 
-    errno = EISDIR;
     pr_log_pri(PR_LOG_WARNING, "warning: cannot copy source '%s': %s", src,
-      strerror(errno));
+      strerror(xerrno));
+
+    errno = xerrno;
     return -1;
   }
 
@@ -659,10 +674,11 @@ int pr_fs_copy_file(const char *src, const char *dst) {
     int xerrno = errno;
 
     pr_fsio_close(src_fh);
-    errno = xerrno;
 
     pr_log_pri(PR_LOG_WARNING, "error opening destination file '%s' "
-      "for copying: %s", dst, strerror(errno));
+      "for copying: %s", dst, strerror(xerrno));
+
+    errno = xerrno;
     return -1;
   }
 
@@ -671,8 +687,9 @@ int pr_fs_copy_file(const char *src, const char *dst) {
   /* Stat the source file to find its optimal copy block size. */
   if (pr_fsio_fstat(src_fh, &src_st) < 0) {
     int xerrno = errno;
+
     pr_log_pri(PR_LOG_WARNING, "error checking source file '%s' "
-      "for copying: %s", src, strerror(errno));
+      "for copying: %s", src, strerror(xerrno));
 
     pr_fsio_close(src_fh);
     pr_fsio_close(dst_fh);
@@ -710,7 +727,7 @@ int pr_fs_copy_file(const char *src, const char *dst) {
 
   bufsz = src_st.st_blksize;
   buf = malloc(bufsz);
-  if (!buf) {
+  if (buf == NULL) {
     pr_log_pri(PR_LOG_CRIT, "Out of memory!");
     exit(1);
   }
@@ -737,8 +754,8 @@ int pr_fs_copy_file(const char *src, const char *dst) {
       if (res < 0) {
         int xerrno = errno;
 
-        if (errno == EINTR ||
-            errno == EAGAIN) {
+        if (xerrno == EINTR ||
+            xerrno == EAGAIN) {
           pr_signals_handle();
           continue;
         }
@@ -753,6 +770,7 @@ int pr_fs_copy_file(const char *src, const char *dst) {
 
         pr_log_pri(PR_LOG_WARNING, "error copying to '%s': %s", dst,
           strerror(xerrno));
+        free(buf);
 
         errno = xerrno;
         return -1;
@@ -861,8 +879,12 @@ int pr_fs_copy_file(const char *src, const char *dst) {
 
   res = pr_fsio_close(dst_fh);
   if (res < 0) {
+    int xerrno = errno;
+
     pr_log_pri(PR_LOG_WARNING, "error closing '%s': %s", dst,
-      strerror(errno));
+      strerror(xerrno));
+
+    errno = xerrno;
   }
 
   return res;

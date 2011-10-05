@@ -14,14 +14,14 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, TJ Saunders and other respective copyright holders
  * give permission to link this program with OpenSSL, and distribute the
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: kex.c,v 1.21 2011/03/17 22:16:47 castaglia Exp $
+ * $Id: kex.c,v 1.26 2011/07/09 17:44:59 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -836,22 +836,30 @@ static int create_kexrsa(struct sftp_kex *kex, int type) {
 static array_header *parse_namelist(pool *p, const char *names) {
   char *ptr;
   array_header *list;
+  size_t names_len;
 
   list = make_array(p, 0, sizeof(const char *));
 
-  ptr = strchr(names, ',');
+  names_len = strlen(names);
+
+  ptr = memchr(names, ',', names_len);
   while (ptr) {
     char *elt;
+    size_t elt_len;
 
     pr_signals_handle();
 
-    elt = pcalloc(p, (ptr - names) + 1);
-    memcpy(elt, names, (ptr - names));
+    elt_len = ptr - names;
+
+    elt = palloc(p, elt_len + 1);
+    memcpy(elt, names, elt_len);
+    elt[elt_len] = '\0';
 
     *((const char **) push_array(list)) = elt;
     names = ++ptr;
+    names_len -= elt_len;
 
-    ptr = strchr(names, ',');
+    ptr = memchr(names, ',', names_len);
   }
   *((const char **) push_array(list)) = pstrdup(p, names);
 
@@ -1202,6 +1210,10 @@ static int setup_hostkey_algo(struct sftp_kex *kex, const char *algo) {
     return 0;
   }
 
+  /* XXX Need to handle "x509v3-ssh-dss", "x509v3-ssh-rsa", "x509v3-sign"
+   * algorithms here.
+   */
+
   errno = EINVAL;
   return -1;
 }
@@ -1308,6 +1320,8 @@ static int get_session_names(struct sftp_kex *kex, int *correct_guess) {
 
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
       " + Session key exchange: %s", shared);
+    pr_trace_msg(trace_channel, 20, "session key exchange algorithm: %s",
+      shared);
 
   } else {
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
@@ -1342,6 +1356,8 @@ static int get_session_names(struct sftp_kex *kex, int *correct_guess) {
 
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
       " + Session server hostkey: %s", shared);
+    pr_trace_msg(trace_channel, 20, "session server hostkey algorithm: %s",
+      shared);
 
   } else {
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
@@ -1376,6 +1392,8 @@ static int get_session_names(struct sftp_kex *kex, int *correct_guess) {
 
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
       " + Session client-to-server encryption: %s", shared);
+    pr_trace_msg(trace_channel, 20,
+      "session client-to-server encryption algorithm: %s", shared);
 
   } else {
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
@@ -1410,6 +1428,8 @@ static int get_session_names(struct sftp_kex *kex, int *correct_guess) {
 
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
       " + Session server-to-client encryption: %s", shared);
+    pr_trace_msg(trace_channel, 20,
+      "session server-to-client encryption algorithm: %s", shared);
 
   } else {
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
@@ -1444,6 +1464,8 @@ static int get_session_names(struct sftp_kex *kex, int *correct_guess) {
 
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
       " + Session client-to-server MAC: %s", shared);
+    pr_trace_msg(trace_channel, 20,
+      "session client-to-server MAC algorithm: %s", shared);
 
   } else {
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
@@ -1478,6 +1500,8 @@ static int get_session_names(struct sftp_kex *kex, int *correct_guess) {
 
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
       " + Session server-to-client MAC: %s", shared);
+    pr_trace_msg(trace_channel, 20,
+      "session server-to-client MAC algorithm: %s", shared);
 
   } else {
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
@@ -1512,6 +1536,8 @@ static int get_session_names(struct sftp_kex *kex, int *correct_guess) {
 
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
       " + Session client-to-server compression: %s", shared);
+    pr_trace_msg(trace_channel, 20,
+      "session client-to-server compression algorithm: %s", shared);
 
   } else {
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
@@ -1546,6 +1572,8 @@ static int get_session_names(struct sftp_kex *kex, int *correct_guess) {
 
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
       " + Session server-to-client compression: %s", shared);
+    pr_trace_msg(trace_channel, 20,
+      "session server-to-client compression algorithm: %s", shared);
 
   } else {
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
@@ -1580,6 +1608,8 @@ static int get_session_names(struct sftp_kex *kex, int *correct_guess) {
 
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
       " + Session client-to-server language: %s", shared);
+    pr_trace_msg(trace_channel, 20,
+      "session client-to-server language: %s", shared);
 
 /* XXX Do not error out if there are no shared languages yet. */
 #if 0
@@ -1617,6 +1647,8 @@ static int get_session_names(struct sftp_kex *kex, int *correct_guess) {
 
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
       " + Session server-to-client language: %s", shared);
+    pr_trace_msg(trace_channel, 20,
+      "session server-to-client language: %s", shared);
 
 /* XXX Do not error out if there are no shared languages yet. */
 #if 0
@@ -1634,7 +1666,7 @@ static int get_session_names(struct sftp_kex *kex, int *correct_guess) {
 }
 
 static int read_kexinit(struct ssh2_packet *pkt, struct sftp_kex *kex) {
-  char *buf, *cookie, *list;
+  char *buf, *list;
   uint32_t buflen;
 
   buf = pkt->payload;
@@ -1646,7 +1678,7 @@ static int read_kexinit(struct ssh2_packet *pkt, struct sftp_kex *kex) {
   memcpy(kex->client_kexinit_payload, pkt->payload, pkt->payload_len);
 
   /* Read the cookie, which is a mandated length of 16 bytes. */
-  cookie = sftp_msg_read_data(pkt->pool, &buf, &buflen, 16);
+  (void) sftp_msg_read_data(pkt->pool, &buf, &buflen, 16);
 
   list = sftp_msg_read_string(kex_pool, &buf, &buflen);
   kex->client_names->kex_algo = list;
@@ -3123,7 +3155,6 @@ int sftp_kex_handle(struct ssh2_packet *pkt) {
     }
 
     destroy_pool(pkt->pool);
-    sent_newkeys = TRUE;
   }
 
   /* Last but certainly not least, set up the keys for encryption and

@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, Public Flood Software/MacGyver aka Habeeb J. Dihu
  * and other respective copyright holders give permission to link this program
@@ -26,7 +26,7 @@
 
 /* Data transfer module for ProFTPD
  *
- * $Id: mod_xfer.c,v 1.288 2011/03/19 23:39:29 castaglia Exp $
+ * $Id: mod_xfer.c,v 1.297 2011/09/24 19:54:23 castaglia Exp $
  */
 
 #include "conf.h"
@@ -782,29 +782,19 @@ static long transmit_data(off_t data_len, off_t *data_offset, char *buf,
     long bufsz) {
   long res;
 
-#ifdef TCP_CORK
-  int on = 1;
-  socklen_t len = sizeof(int);
-
-# ifdef SOL_TCP
-  int tcp_level = SOL_TCP;
-# else
-  int tcp_level = IPPROTO_TCP;
-# endif /* SOL_TCP */
-#endif /* TCP_CORK */
-
 #ifdef HAVE_SENDFILE
   pr_sendfile_t sent_len;
   int ret;
 #endif /* HAVE_SENDFILE */
 
 #ifdef TCP_CORK
-  /* Note: TCP_CORK is a Linuxism, introduced with the 2.4 kernel.  It
-   * has effects similar to BSD's TCP_NOPUSH option.
+  /* XXX Note: For backward compatibility, we only cork the socket on Linux
+   * here.  In 1.3.5rc1, we should do this unconditionally.
    */
-  if (setsockopt(PR_NETIO_FD(session.d->outstrm), tcp_level, TCP_CORK, &on,
-      len) < 0)
-    pr_log_pri(PR_LOG_NOTICE, "error setting TCP_CORK: %s", strerror(errno));
+  if (pr_inet_set_proto_cork(PR_NETIO_FD(session.d->outstrm), 1) < 0) {
+    pr_log_pri(PR_LOG_NOTICE, "error corking socket fd %d: %s",
+      PR_NETIO_FD(session.d->outstrm), strerror(errno));
+  }
 #endif /* TCP_CORK */
 
 #ifdef HAVE_SENDFILE
@@ -829,24 +819,31 @@ static long transmit_data(off_t data_len, off_t *data_offset, char *buf,
       "falling back to normal data transmission", strerror(errno),
       errno);
     res = transmit_normal(buf, bufsz);
+
 # else
+#  ifdef TCP_CORK
+    if (session.d != NULL) {
+      (void) pr_inet_set_proto_cork(PR_NETIO_FD(session.d->outstrm), 0);
+    }
+#  endif /* TCP_CORK */
+
     errno = EIO;
     res = -1;
 # endif
   }
+
 #else
   res = transmit_normal(buf, bufsz);
 #endif /* HAVE_SENDFILE */
 
 #ifdef TCP_CORK
-  if (session.d) {
+  if (session.d != NULL) {
     /* The session.d struct can become null after transmit_normal() if the
      * client aborts the transfer, thus we need to check for this.
      */
-    on = 0;
-    if (setsockopt(PR_NETIO_FD(session.d->outstrm), tcp_level, TCP_CORK, &on,
-        len) < 0) {
-      pr_log_pri(PR_LOG_NOTICE, "error setting TCP_CORK: %s", strerror(errno));
+    if (pr_inet_set_proto_cork(PR_NETIO_FD(session.d->outstrm), 0) < 0) {
+      pr_log_pri(PR_LOG_NOTICE, "error uncorking socket fd %d: %s",
+        PR_NETIO_FD(session.d->outstrm), strerror(errno));
     }
   }
 #endif /* TCP_CORK */
@@ -1269,7 +1266,9 @@ MODRET xfer_pre_stor(cmd_rec *cmd) {
 #endif
        ) {
       pr_response_add_err(R_550, _("%s: Not a regular file"), cmd->arg);
-      errno = EPERM;
+
+      /* Deliberately use EISDIR for anything non-file (e.g. directories). */
+      errno = EISDIR;
       return PR_ERROR(cmd);
     }
   }
@@ -1448,6 +1447,9 @@ MODRET xfer_pre_stou(cmd_rec *cmd) {
       !S_ISREG(mode)) {
     (void) pr_fsio_unlink(cmd->arg);
     pr_response_add_err(R_550, _("%s: Not a regular file"), cmd->arg);
+
+    /* Deliberately use EISDIR for anything non-file (e.g. directories). */
+    errno = EISDIR;
     return PR_ERROR(cmd);
   }
 
@@ -1509,6 +1511,8 @@ MODRET xfer_stor(cmd_rec *cmd) {
   unsigned char have_limit = FALSE;
   struct stat st;
   off_t curr_pos = 0;
+
+  memset(&st, 0, sizeof(st));
 
   /* Prepare for any potential throttling. */
   pr_throttle_init(cmd);
@@ -1588,7 +1592,7 @@ MODRET xfer_stor(cmd_rec *cmd) {
     }
   }
 
-  if (stor_fh &&
+  if (stor_fh != NULL &&
       session.restart_pos) {
     int xerrno = 0;
 
@@ -1612,7 +1616,7 @@ MODRET xfer_stor(cmd_rec *cmd) {
     /* Make sure that the requested offset is valid (within the size of the
      * file being resumed).
      */
-    if (stor_fh &&
+    if (stor_fh != NULL &&
         session.restart_pos > st.st_size) {
       pr_response_add_err(R_554, _("%s: invalid REST argument"), cmd->arg);
       (void) pr_fsio_close(stor_fh);
@@ -1624,12 +1628,17 @@ MODRET xfer_stor(cmd_rec *cmd) {
     session.restart_pos = 0L;
   }
 
-  if (!stor_fh) {
+  if (stor_fh == NULL) {
     pr_log_debug(DEBUG4, "unable to open '%s' for writing: %s", cmd->arg,
       strerror(ferrno));
     pr_response_add_err(R_550, "%s: %s", cmd->arg, strerror(ferrno));
     return PR_ERROR(cmd);
   }
+
+  /* Get the latest stats on the file.  If the file already existed, we
+   * want to know its current size.
+   */
+  (void) pr_fsio_fstat(stor_fh, &st);
 
   /* Perform the actual transfer now */
   pr_data_init(cmd->arg, PR_NETIO_IO_RD);
@@ -1659,10 +1668,13 @@ MODRET xfer_stor(cmd_rec *cmd) {
    * This check is needed during the pr_data_xfer() loop, below, because
    * the size of the file being uploaded isn't known in advance
    */
-  if ((nbytes_max_store = find_max_nbytes("MaxStoreFileSize")) == 0UL)
+  nbytes_max_store = find_max_nbytes("MaxStoreFileSize");
+  if (nbytes_max_store == 0UL) {
     have_limit = FALSE;
-  else
+
+  } else {
     have_limit = TRUE;
+  }
 
   /* Check the MaxStoreFileSize, and abort now if zero. */
   if (have_limit &&
@@ -1675,13 +1687,16 @@ MODRET xfer_stor(cmd_rec *cmd) {
     /* Abort the transfer. */
     stor_abort();
 
-    /* Set errno to EDQOUT (or the most appropriate alternative). */
-#if defined(EDQUOT)
-    pr_data_abort(EDQUOT, FALSE);
-#elif defined(EFBIG)
+    /* Set errno to EFBIG (or the most appropriate alternative). */
+#if defined(EFBIG)
     pr_data_abort(EFBIG, FALSE);
+    errno = EFBIG;
+#elif defined(EDQUOT)
+    pr_data_abort(EDQUOT, FALSE);
+    errno = EDQUOT;
 #else
     pr_data_abort(EPERM, FALSE);
+    errno = EPERM;
 #endif
     return PR_ERROR(cmd);
   }
@@ -1699,11 +1714,12 @@ MODRET xfer_stor(cmd_rec *cmd) {
 
     nbytes_stored += len;
 
-    /* Double-check the current number of bytes stored against the
-     * MaxStoreFileSize, if configured.
+    /* If MaxStoreFileSize is configured, double-check the number of bytes
+     * uploaded so far against the configured limit.  Also make sure that
+     * we take into account the size of the file, i.e. if it already existed.
      */
     if (have_limit &&
-        nbytes_stored > nbytes_max_store) {
+        (nbytes_stored + st.st_size > nbytes_max_store)) {
 
       pr_log_pri(PR_LOG_INFO, "MaxStoreFileSize (%" PR_LU " bytes) reached: "
         "aborting transfer of '%s'", (pr_off_t) nbytes_max_store, path);
@@ -1711,13 +1727,16 @@ MODRET xfer_stor(cmd_rec *cmd) {
       /* Abort the transfer. */
       stor_abort();
 
-    /* Set errno to EDQOUT (or the most appropriate alternative). */
-#if defined(EDQUOT)
-      pr_data_abort(EDQUOT, FALSE);
-#elif defined(EFBIG)
+    /* Set errno to EFBIG (or the most appropriate alternative). */
+#if defined(EFBIG)
       pr_data_abort(EFBIG, FALSE);
+      errno = EFBIG;
+#elif defined(EDQUOT)
+      pr_data_abort(EDQUOT, FALSE);
+      errno = EDQUOT;
 #else
       pr_data_abort(EPERM, FALSE);
+      errno = EPERM;
 #endif
       return PR_ERROR(cmd);
     }
@@ -1741,6 +1760,8 @@ MODRET xfer_stor(cmd_rec *cmd) {
 
       stor_abort();
       pr_data_abort(xerrno, FALSE);
+
+      errno = xerrno;
       return PR_ERROR(cmd);
     }
 
@@ -1766,6 +1787,7 @@ MODRET xfer_stor(cmd_rec *cmd) {
     }
 
     pr_data_abort(xerrno, FALSE);
+    errno = xerrno;
     return PR_ERROR(cmd);
 
   } else {
@@ -1932,7 +1954,11 @@ MODRET xfer_pre_retr(cmd_rec *cmd) {
 
   fmode = file_mode(dir);
   if (fmode == 0) {
-    pr_response_add_err(R_550, "%s: %s", cmd->arg, strerror(errno));
+    int xerrno = errno;
+
+    pr_response_add_err(R_550, "%s: %s", cmd->arg, strerror(xerrno));
+
+    errno = xerrno;
     return PR_ERROR(cmd);
   }
 
@@ -1942,7 +1968,9 @@ MODRET xfer_pre_retr(cmd_rec *cmd) {
 #endif
      ) {
     pr_response_add_err(R_550, _("%s: Not a regular file"), cmd->arg);
-    errno = EPERM;
+
+    /* Deliberately use EISDIR for anything non-file (e.g. directories). */
+    errno = EISDIR;
     return PR_ERROR(cmd);
   }
 

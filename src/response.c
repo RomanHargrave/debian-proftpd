@@ -14,7 +14,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, Public Flood Software/MacGyver aka Habeeb J. Dihu
  * and other respective copyright holders give permission to link this program
@@ -23,7 +23,7 @@
  */
 
 /* Command response routines
- * $Id: response.c,v 1.20 2011/02/26 17:06:52 castaglia Exp $
+ * $Id: response.c,v 1.22 2011/08/13 19:24:06 castaglia Exp $
  */
 
 #include "conf.h"
@@ -145,6 +145,13 @@ void pr_response_flush(pr_response_t **head) {
   pr_response_t *resp = NULL;
 
   if (resp_blocked) {
+    return;
+  }
+
+  if (session.c == NULL) {
+    /* Not sure what happened to the control connection, but since it's gone,
+     * there's no need to flush any messages.
+     */
     return;
   }
 
@@ -284,8 +291,16 @@ void pr_response_send_async(const char *resp_numeric, const char *fmt, ...) {
   va_list msg;
   int maxlen;
 
-  if (resp_blocked)
+  if (resp_blocked) {
     return;
+  }
+
+  if (session.c == NULL) {
+    /* Not sure what happened to the control connection, but since it's gone,
+     * there's no need to flush any messages.
+     */
+    return;
+  }
 
   sstrncpy(buf, resp_numeric, sizeof(buf));
   sstrcat(buf, " ", sizeof(buf));
@@ -308,8 +323,16 @@ void pr_response_send_async(const char *resp_numeric, const char *fmt, ...) {
 void pr_response_send(const char *resp_numeric, const char *fmt, ...) {
   va_list msg;
 
-  if (resp_blocked)
+  if (resp_blocked) {
     return;
+  }
+
+  if (session.c == NULL) {
+    /* Not sure what happened to the control connection, but since it's gone,
+     * there's no need to flush any messages.
+     */
+    return;
+  }
 
   va_start(msg, fmt);
   vsnprintf(resp_buf, sizeof(resp_buf), fmt, msg);
@@ -327,8 +350,16 @@ void pr_response_send(const char *resp_numeric, const char *fmt, ...) {
 void pr_response_send_raw(const char *fmt, ...) {
   va_list msg;
 
-  if (resp_blocked)
+  if (resp_blocked) {
     return;
+  }
+
+  if (session.c == NULL) {
+    /* Not sure what happened to the control connection, but since it's gone,
+     * there's no need to flush any messages.
+     */
+    return;
+  }
 
   va_start(msg, fmt);
   vsnprintf(resp_buf, sizeof(resp_buf), fmt, msg);

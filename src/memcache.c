@@ -14,7 +14,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, The ProFTPD Project team and other respective
  * copyright holders give permission to link this program with OpenSSL, and
@@ -23,7 +23,7 @@
  */
 
 /* Memcache management
- * $Id: memcache.c,v 1.20 2011/02/22 03:20:30 castaglia Exp $
+ * $Id: memcache.c,v 1.23 2011/09/06 17:21:48 castaglia Exp $
  */
 
 #include "conf.h"
@@ -31,15 +31,17 @@
 #ifdef PR_USE_MEMCACHE
 
 #include <libmemcached/memcached.h>
-#include <libmemcached/util.h>
 
 #if defined(LIBMEMCACHED_VERSION_HEX)
-# if LIBMEMCACHED_VERSION_HEX < 0x00037000
-#  error "libmemcached-0.37 or later required"
+# if LIBMEMCACHED_VERSION_HEX < 0x00041000
+#  error "libmemcached-0.41 or later required"
 # endif /* LIBMEMCACHED_VERSION_HEX too old */
 #else
 # error "Unable to determine libmemcached version"
 #endif /* LIBMEMCACHED_VERSION_HEX */
+
+/* libmemcached-0.41 and later included this header file. */
+#include <libmemcached/util.h>
 
 extern tpl_hook_t tpl_hook;
 
@@ -70,7 +72,10 @@ static unsigned long memcache_rcv_millis = 500;
 static unsigned long memcache_snd_millis = 500;
 static unsigned long memcache_ejected_sec = 0;
 
+#if 0
+/* XXX Unused, for now. */
 static unsigned long memcache_ping_interval = 0;
+#endif
 
 static const char *trace_channel = "memcache";
 
@@ -843,7 +848,7 @@ int pr_memcache_set(pr_memcache_t *mcache, module *m, const char *key,
 }
 
 static void mcache_set_module_namespace(pr_memcache_t *mcache, module *m) {
-  memcached_return res;
+  memcached_return res = MEMCACHED_SUCCESS;
 
   if (m == NULL) {
     res = memcached_callback_set(mcache->mc, MEMCACHED_CALLBACK_PREFIX_KEY,

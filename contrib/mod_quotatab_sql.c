@@ -16,13 +16,13 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, TJ Saunders gives permission to link this program
  * with OpenSSL, and distribute the resulting executable, without including
  * the source code for OpenSSL in the source distribution.
  *
- * $Id: mod_quotatab_sql.c,v 1.12 2011/01/11 23:13:38 castaglia Exp $
+ * $Id: mod_quotatab_sql.c,v 1.16 2011/05/26 23:08:08 castaglia Exp $
  */
 
 #include "mod_quotatab.h"
@@ -77,7 +77,8 @@ static char *sqltab_get_name(pool *p, char *name) {
   res = pr_module_call(cmdtab->m, cmdtab->handler, cmd);
 
   /* Check the results. */
-  if (MODRET_ISERROR(res)) {
+  if (MODRET_ISDECLINED(res) ||
+      MODRET_ISERROR(res)) {
     quotatab_log("error executing 'sql_escapestring'");
     return name;
   }
@@ -504,35 +505,19 @@ static int sqltab_write(quota_table_t *sqltab, void *ptr) {
     quotatab_deltas.bytes_xfer_delta);
   tally_bytes_xfer[QUOTATAB_SQL_VALUE_BUFSZ-1] = '\0';
 
-  /* Try to prevent underflows here. */
-  if (tally->files_in_used == 0 &&
-      quotatab_deltas.files_in_delta < 0) {
-    tally_files_in[0] = '0';
-
-  } else {
-    snprintf(tally_files_in, QUOTATAB_SQL_VALUE_BUFSZ, "%d",
-      quotatab_deltas.files_in_delta);
-  }
+  /* Don't try to prevent underflows here; mod_quotatab already makes
+   * these checks.
+   */
+  snprintf(tally_files_in, QUOTATAB_SQL_VALUE_BUFSZ, "%d",
+    quotatab_deltas.files_in_delta);
   tally_files_in[QUOTATAB_SQL_VALUE_BUFSZ-1] = '\0';
 
-  if (tally->files_out_used == 0 &&
-      quotatab_deltas.files_out_delta < 0) {
-    tally_files_out[0] = '0';
-
-  } else {
-    snprintf(tally_files_out, QUOTATAB_SQL_VALUE_BUFSZ, "%d",
-      quotatab_deltas.files_out_delta);
-  }
+  snprintf(tally_files_out, QUOTATAB_SQL_VALUE_BUFSZ, "%d",
+    quotatab_deltas.files_out_delta);
   tally_files_out[QUOTATAB_SQL_VALUE_BUFSZ-1] = '\0';
 
-  if (tally->files_xfer_used == 0 &&
-      quotatab_deltas.files_xfer_delta < 0) {
-    tally_files_xfer[0] = '0';
-
-  } else {
-    snprintf(tally_files_xfer, QUOTATAB_SQL_VALUE_BUFSZ, "%d",
-      quotatab_deltas.files_xfer_delta);
-  }
+  snprintf(tally_files_xfer, QUOTATAB_SQL_VALUE_BUFSZ, "%d",
+    quotatab_deltas.files_xfer_delta);
   tally_files_xfer[QUOTATAB_SQL_VALUE_BUFSZ-1] = '\0';
 
   sql_cmd = sqltab_cmd_create(tmp_pool, 10, "sql_change", update_query,

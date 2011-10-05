@@ -14,7 +14,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, The ProFTPD Project team and other respective
  * copyright holders give permission to link this program with OpenSSL, and
@@ -23,8 +23,7 @@
  */
 
 /* Controls API routines
- *
- * $Id: ctrls.c,v 1.27 2011/03/18 18:22:19 castaglia Exp $
+ * $Id: ctrls.c,v 1.30 2011/06/05 22:45:14 castaglia Exp $
  */
 
 #include "conf.h"
@@ -1032,9 +1031,12 @@ static int ctrls_get_creds_peercred(int sockfd, uid_t *uid, gid_t *gid,
   socklen_t credlen = sizeof(cred);
 
   if (getsockopt(sockfd, SOL_SOCKET, SO_PEERCRED, &cred, &credlen) < 0) {
+    int xerrno = errno;
+
     pr_trace_msg(trace_channel, 2,
       "error obtaining peer credentials using SO_PEERCRED: %s",
-      strerror(errno));
+      strerror(xerrno));
+
     errno = EPERM;
     return -1;
   }
@@ -1055,8 +1057,12 @@ static int ctrls_get_creds_peercred(int sockfd, uid_t *uid, gid_t *gid,
 #if !defined(SO_PEERCRED) && defined(HAVE_GETPEEREID)
 static int ctrls_get_creds_peereid(int sockfd, uid_t *uid, gid_t *gid) {
   if (getpeereid(sockfd, uid, gid) < 0) {
+    int xerrno = errno;
+
     pr_trace_msg(trace_channel, 7, "error obtaining credentials using "
-      "getpeereid(2) on fd %d: %s", sockfd, strerror(errno));
+      "getpeereid(2) on fd %d: %s", sockfd, strerror(xerrno));
+
+    errno = xerrno;
     return -1;
   }
 
@@ -1070,8 +1076,12 @@ static int ctrls_get_creds_peerucred(int sockfd, uid_t *uid, gid_t *gid) {
   ucred_t *cred = NULL;
 
   if (getpeerucred(sockfd, &cred) < 0) {
+    int xerrno = errno;
+
     pr_trace_msg(trace_channel, 7, "error obtaining credentials using "
-      "getpeerucred(3) on fd %d: %s", sockfd, strerror(errno));
+      "getpeerucred(3) on fd %d: %s", sockfd, strerror(xerrno));
+
+    errno = xerrno;
     return -1;
   }
 
@@ -1119,7 +1129,9 @@ static int ctrls_get_creds_local(int sockfd, uid_t *uid, gid_t *gid,
 
   res = recvmsg(sockfd, &msg, 0);
   while (res < 0) {
-    if (errno == EINTR) {
+    int xerrno = errno;
+
+    if (xerrno == EINTR) {
       pr_signals_handle();
 
       res = recvmsg(sockfd, &msg, 0);
@@ -1127,7 +1139,9 @@ static int ctrls_get_creds_local(int sockfd, uid_t *uid, gid_t *gid,
     }
 
     pr_trace_msg(trace_channel, 6,
-      "error calling recvmsg() on fd %d: %s", sockfd, strerror(errno));
+      "error calling recvmsg() on fd %d: %s", sockfd, strerror(xerrno));
+
+    errno = xerrno;
     return -1;
   }
 
@@ -1206,15 +1220,19 @@ static int ctrls_get_creds_basic(struct sockaddr_un *sock, int cl_fd,
   /* Check the path -- hmmm... */
   PRIVS_ROOT
   while (stat(sock->sun_path, &st) < 0) {
-    if (errno == EINTR) {
+    int xerrno = errno;
+
+    if (xerrno == EINTR) {
       pr_signals_handle();
       continue;
     }
 
     PRIVS_RELINQUISH
     pr_trace_msg(trace_channel, 2, "error: unable to stat %s: %s",
-      sock->sun_path, strerror(errno));
+      sock->sun_path, strerror(xerrno));
     (void) close(cl_fd);
+
+    errno = xerrno;
     return -1;
   }
   PRIVS_RELINQUISH
@@ -1272,12 +1290,12 @@ static int ctrls_get_creds_basic(struct sockaddr_un *sock, int cl_fd,
          "secs)", sock->sun_path, (unsigned long) age, max_age);
     }
 
-    if (pr_ctrls_send_msg(cl_fd, -1, 1, &msg) < 0)
+    if (pr_ctrls_send_msg(cl_fd, -1, 1, &msg) < 0) {
       pr_trace_msg(trace_channel, 2, "error sending message: %s",
         strerror(errno));
+    }
 
-    close(cl_fd);
-    cl_fd = -1;
+    (void) close(cl_fd);
 
     errno = ETIMEDOUT;
     return -1;
@@ -1311,20 +1329,22 @@ int pr_ctrls_accept(int sockfd, uid_t *uid, gid_t *gid, pid_t *pid,
   len = sizeof(sock);
 
   while ((cl_fd = accept(sockfd, (struct sockaddr *) &sock, &len)) < 0) {
-    if (errno == EINTR) {
+    int xerrno = errno;
+
+    if (xerrno == EINTR) {
       pr_signals_handle();
       continue;
     }
 
     pr_trace_msg(trace_channel, 3,
-      "error: unable to accept on local socket: %s", strerror(errno));
+      "error: unable to accept on local socket: %s", strerror(xerrno));
+
+    errno = xerrno;
     return -1;
   }
 
-  len -= sizeof(sock.sun_family);
-
   /* NULL terminate the name */
-  sock.sun_path[len] = '\0';
+  sock.sun_path[sizeof(sock.sun_path)-1] = '\0';
 
 #if defined(SO_PEERCRED)
   pr_trace_msg(trace_channel, 5,

@@ -14,14 +14,14 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, TJ Saunders and other respective copyright holders
  * give permission to link this program with OpenSSL, and distribute the
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: channel.h,v 1.10 2011/03/19 02:56:48 castaglia Exp $
+ * $Id: channel.h,v 1.12 2011/05/24 20:55:50 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -63,6 +63,7 @@ struct ssh2_channel {
 
   /* For channel handling systems (e.g. fxp, scp) */
   int (*prepare)(uint32_t);
+  int (*postopen)(uint32_t);
   int (*handle_packet)(pool *, void *, uint32_t, char *, uint32_t);
   int (*finish)(uint32_t);
 };

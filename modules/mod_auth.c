@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, Public Flood Software/MacGyver aka Habeeb J. Dihu
  * and other respective copyright holders give permission to link this program
@@ -25,7 +25,7 @@
  */
 
 /* Authentication module for ProFTPD
- * $Id: mod_auth.c,v 1.291 2011/03/19 19:02:19 castaglia Exp $
+ * $Id: mod_auth.c,v 1.295 2011/05/23 21:11:56 castaglia Exp $
  */
 
 #include "conf.h"
@@ -255,13 +255,19 @@ MODRET auth_err_pass(cmd_rec *cmd) {
 }
 
 MODRET auth_log_pass(cmd_rec *cmd) {
+  size_t passwd_len;
 
   /* Only log, to the syslog, that the login has succeeded here, where we
    * know that the login has definitely succeeded.
    */
-
   pr_log_auth(PR_LOG_NOTICE, "%s %s: Login successful.",
     (session.anon_config != NULL) ? "ANON" : C_USER, session.user);
+
+  /* And scrub the memory holding the password sent by the client, for
+   * safety/security.
+   */
+  passwd_len = strlen(cmd->arg);
+  pr_memscrub(cmd->arg, passwd_len);
 
   return PR_DECLINED(cmd);
 }
@@ -635,8 +641,13 @@ static char *get_default_root(pool *p) {
   }
 
   if (dir) {
+    char *new_dir;
+
     /* Check for any expandable variables. */
-    dir = path_subst_uservar(p, &dir);
+    new_dir = path_subst_uservar(p, &dir);
+    if (new_dir != NULL) {
+      dir = new_dir;
+    }
 
     if (strncmp(dir, "/", 2) == 0) {
       dir = NULL;
@@ -665,7 +676,7 @@ static char *get_default_root(pool *p) {
         char interp_dir[PR_TUNABLE_PATH_MAX + 1];
 
         memset(interp_dir, '\0', sizeof(interp_dir));
-        ret = pr_fs_interpolate(dir, interp_dir, sizeof(interp_dir)-1); 
+        (void) pr_fs_interpolate(dir, interp_dir, sizeof(interp_dir)-1); 
 
         pr_log_pri(PR_LOG_NOTICE,
           "notice: unable to use '%s' [resolved to '%s']: %s", dir, interp_dir,
@@ -2190,7 +2201,6 @@ MODRET set_anonrequirepassword(cmd_rec *cmd) {
 
 MODRET set_anonrejectpasswords(cmd_rec *cmd) {
 #ifdef PR_USE_REGEX
-  config_rec *c = NULL;
   pr_regex_t *pre = NULL;
   int res;
 
@@ -2210,7 +2220,7 @@ MODRET set_anonrejectpasswords(cmd_rec *cmd) {
       cmd->argv[1], "': ", errstr, NULL));
   }
 
-  c = add_config_param(cmd->argv[0], 1, (void *) pre);
+  (void) add_config_param(cmd->argv[0], 1, (void *) pre);
   return PR_HANDLED(cmd);
 
 #else
@@ -2939,22 +2949,24 @@ MODRET set_timeoutsession(cmd_rec *cmd) {
   /* Set the precedence for this config_rec based on its configuration
    * context.
    */
-  if (ctxt & CONF_GLOBAL)
+  if (ctxt & CONF_GLOBAL) {
     precedence = 1;
 
-  /* these will never appear simultaneously */
-  else if (ctxt & CONF_ROOT || ctxt & CONF_VIRTUAL)
+  /* These will never appear simultaneously */
+  } else if ((ctxt & CONF_ROOT) ||
+             (ctxt & CONF_VIRTUAL)) {
     precedence = 2;
 
-  else if (ctxt & CONF_ANON)
+  } else if (ctxt & CONF_ANON) {
     precedence = 3;
+  }
 
-  if ((seconds = atoi(cmd->argv[1])) < 0) {
+  seconds = atoi(cmd->argv[1]);
+  if (seconds < 0) {
     CONF_ERROR(cmd, pstrcat(cmd->tmp_pool,
       "seconds must be greater than or equal to 0", NULL));
 
   } else if (seconds == 0) {
-
     /* do nothing */
     return PR_HANDLED(cmd);
   }
@@ -3021,6 +3033,10 @@ MODRET set_timeoutsession(cmd_rec *cmd) {
 
     /* don't forget the terminating NULL */
     *argv = NULL;
+
+  } else {
+    /* Should never reach here. */
+    CONF_ERROR(cmd, "wrong number of parameters");
   }
 
   c->flags |= CF_MERGEDOWN_MULTI;

@@ -14,7 +14,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, Public Flood Software/MacGyver aka Habeeb J. Dihu
  * and other respective copyright holders give permission to link this program
@@ -23,7 +23,7 @@
  */
 
 /* ProFTPD xferlog(5) logging support.
- * $Id: xferlog.c,v 1.9 2011/03/17 13:48:21 castaglia Exp $
+ * $Id: xferlog.c,v 1.11 2011/05/23 21:22:24 castaglia Exp $
  */
 
 #include "conf.h"
@@ -122,5 +122,6 @@ int xferlog_write(long xfertime, const char *remhost, off_t fsize, char *fname,
 
   buf[sizeof(buf)-1] = '\0';
 
+  pr_log_event_generate(PR_LOG_TYPE_XFERLOG, xferlogfd, -1, buf, len);
   return write(xferlogfd, buf, len);
 }

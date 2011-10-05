@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, TJ Saunders and other respective copyright holders
  * give permission to link this program with OpenSSL, and distribute the
@@ -25,7 +25,7 @@
  * This is mod_ban, contrib software for proftpd 1.2.x/1.3.x.
  * For more information contact TJ Saunders <tj@castaglia.org>.
  *
- * $Id: mod_ban.c,v 1.51 2011/03/22 18:44:16 castaglia Exp $
+ * $Id: mod_ban.c,v 1.54 2011/05/23 23:23:44 castaglia Exp $
  */
 
 #include "conf.h"
@@ -1334,35 +1334,13 @@ static int ban_get_sid_by_addr(pr_netaddr_t *server_addr,
   return -1;
 }
 
-static void ban_reset_getopt(void) {
-#if defined(FREEBSD4) || defined(FREEBSD5) || defined(FREEBSD6) || \
-    defined(FREEBSD7) || defined(FREEBSD8) || defined(FREEBSD9) || \
-    defined(DARWIN7) || defined(DARWIN8) || defined(DARWIN9)
-  optreset = 1;
-  opterr = 1;
-  optind = 1;
-
-#elif defined(SOLARIS2) || defined(HPUX11)
-  opterr = 0;
-  optind = 1;
-
-#else
-  opterr = 0;
-  optind = 0;
-#endif /* !FreeBSD, !Mac OSX and !Solaris2 */
-
-  if (pr_env_get(permanent_pool, "POSIXLY_CORRECT") == NULL) {
-    pr_env_set(permanent_pool, "POSIXLY_CORRECT", "1");
-  }
-}
-
 static int ban_handle_info(pr_ctrls_t *ctrl, int reqargc, char **reqargv) {
   register unsigned int i;
-  int optc, verbose = FALSE, show_events = FALSE, have_bans = FALSE;
+  int optc, verbose = FALSE, show_events = FALSE;
   const char *reqopts = "ev";
 
   /* Check for options. */
-  ban_reset_getopt();
+  pr_getopt_reset();
 
   while ((optc = getopt(reqargc, reqargv, reqopts)) != -1) {
     switch (optc) {
@@ -1393,7 +1371,6 @@ static int ban_handle_info(pr_ctrls_t *ctrl, int reqargc, char **reqargv) {
 
     for (i = 0; i < BAN_LIST_MAXSZ; i++) {
       if (ban_lists->bans.bl_entries[i].be_type == BAN_TYPE_USER) {
-        have_bans = TRUE;
 
         if (!have_user) {
           pr_ctrls_add_response(ctrl, "Banned Users:");
@@ -1432,7 +1409,6 @@ static int ban_handle_info(pr_ctrls_t *ctrl, int reqargc, char **reqargv) {
 
     for (i = 0; i < BAN_LIST_MAXSZ; i++) {
       if (ban_lists->bans.bl_entries[i].be_type == BAN_TYPE_HOST) {
-        have_bans = TRUE;
 
         if (!have_host) {
           if (have_user)
@@ -1474,7 +1450,6 @@ static int ban_handle_info(pr_ctrls_t *ctrl, int reqargc, char **reqargv) {
 
     for (i = 0; i < BAN_LIST_MAXSZ; i++) {
       if (ban_lists->bans.bl_entries[i].be_type == BAN_TYPE_CLASS) {
-        have_bans = TRUE;
 
         if (!have_class) {
           if (have_host)
@@ -1607,7 +1582,7 @@ static int ban_handle_ban(pr_ctrls_t *ctrl, int reqargc,
     return -1;
   }
 
-  ban_reset_getopt();
+  pr_getopt_reset();
 
   /* Only check for/process command-line options if this is not the 'info'
    * request; that request has its own command-line options.
@@ -1840,7 +1815,7 @@ static int ban_handle_permit(pr_ctrls_t *ctrl, int reqargc,
   }
 
   /* Check for options. */
-  ban_reset_getopt();
+  pr_getopt_reset();
 
   while ((optc = getopt(reqargc, reqargv, reqopts)) != -1) {
     switch (optc) {

@@ -1,7 +1,7 @@
 /*
  * ProFTPD: mod_radius -- a module for RADIUS authentication and accounting
  *
- * Copyright (c) 2001-2010 TJ Saunders
+ * Copyright (c) 2001-2011 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, TJ Saunders gives permission to link this program
  * with OpenSSL, and distribute the resulting executable, without including
@@ -27,7 +27,7 @@
  * This module is based in part on code in Alan DeKok's (aland@freeradius.org)
  * mod_auth_radius for Apache, in part on the FreeRADIUS project's code.
  *
- * $Id: mod_radius.c,v 1.61 2010/05/24 18:29:27 castaglia Exp $
+ * $Id: mod_radius.c,v 1.66 2011/08/16 16:13:02 castaglia Exp $
  */
 
 #define MOD_RADIUS_VERSION "mod_radius/0.9.1"
@@ -102,6 +102,7 @@ typedef struct {
 #define RADIUS_ACCT_SESSION_TIME	46
 #define RADIUS_ACCT_TERMINATE_CAUSE	49
 #define RADIUS_NAS_PORT_TYPE		61
+#define RADIUS_NAS_IPV6_ADDRESS		95
 
 /* RADIUS service types
  */
@@ -174,7 +175,7 @@ static char *radius_logname = NULL;
 static struct sockaddr radius_local_sock, radius_remote_sock;
 
 /* For tracking various values not stored in the session struct */
-static const char *radius_nas_identifier = "ftp";
+static const char *radius_nas_identifier_config = NULL;
 static char *radius_realm = NULL;
 static time_t radius_session_start = 0;
 static int radius_session_authtype = RADIUS_AUTH_LOCAL;
@@ -2067,6 +2068,7 @@ static void radius_build_packet(radius_packet_t *packet,
   unsigned int nas_port_type = htonl(RADIUS_NAS_PORT_TYPE_VIRTUAL);
   int nas_port = htonl(main_server->ServerPort);
   char *caller_id = NULL;
+  const char *nas_identifier = NULL;
   size_t userlen;
 
   /* Set the packet length. */
@@ -2094,15 +2096,47 @@ static void radius_build_packet(radius_packet_t *packet,
   }
 
   /* Add a NAS identifier attribute of the service name, e.g. 'ftp'. */
-  radius_add_attrib(packet, RADIUS_NAS_IDENTIFIER,
-    (const unsigned char *) radius_nas_identifier,
-    strlen((const char *) radius_nas_identifier));
 
-#ifndef PR_USE_IPV6
-  /* Add a NAS IP address attribute. */
-  radius_add_attrib(packet, RADIUS_NAS_IP_ADDRESS, (unsigned char *) &((struct in_addr *) pr_netaddr_get_inaddr(pr_netaddr_get_sess_local_addr()))->s_addr,
-    sizeof(((struct in_addr *) pr_netaddr_get_inaddr(pr_netaddr_get_sess_local_addr()))->s_addr));
+  nas_identifier = pr_session_get_protocol(0);
+  if (radius_nas_identifier_config != NULL) {
+    nas_identifier = radius_nas_identifier_config;
+  }
+
+  radius_add_attrib(packet, RADIUS_NAS_IDENTIFIER,
+    (const unsigned char *) nas_identifier,
+    strlen((const char *) nas_identifier));
+
+#ifdef PR_USE_IPV6
+  if (pr_netaddr_use_ipv6()) {
+    struct in6_addr *inaddr;
+
+    inaddr = pr_netaddr_get_inaddr(pr_netaddr_get_sess_local_addr());
+
+    /* Ideally we would use the inaddr->s6_addr32 to get to the 128-bit
+     * IPv6 address.  But `s6_addr32' turns out to be a macro that is not
+     * available on all systems (FreeBSD, for example, does not provide this
+     * macro unless you're building its kernel).
+     *
+     * As a workaround, try using the (hopefully) more portable s6_addr
+     * macro.
+     */
+
+    /* Add a NAS-IPv6-Address attribute. */
+    radius_add_attrib(packet, RADIUS_NAS_IPV6_ADDRESS,
+      (unsigned char *) inaddr->s6_addr, sizeof(inaddr->s6_addr));
+
+  } else {
+#else
+  if (TRUE) {
 #endif /* PR_USE_IPV6 */
+    struct in_addr *inaddr;
+
+    inaddr = pr_netaddr_get_inaddr(pr_netaddr_get_sess_local_addr());
+
+    /* Add a NAS-IP-Address attribute. */
+    radius_add_attrib(packet, RADIUS_NAS_IP_ADDRESS,
+      (unsigned char *) &(inaddr->s_addr), sizeof(inaddr->s_addr));
+  }
 
   /* Add a NAS port attribute. */
   radius_add_attrib(packet, RADIUS_NAS_PORT, (unsigned char *) &nas_port,
@@ -3389,9 +3423,10 @@ static int radius_sess_init(void) {
 
   c = find_config(main_server->conf, CONF_PARAM, "RadiusNASIdentifier", FALSE);
   if (c) {
-    radius_nas_identifier = c->argv[0];
+    radius_nas_identifier_config = c->argv[0];
 
-    radius_log("RadiusNASIdentifier '%s' configured", radius_nas_identifier);
+    radius_log("RadiusNASIdentifier '%s' configured",
+      radius_nas_identifier_config);
   }
 
   c = find_config(main_server->conf, CONF_PARAM, "RadiusVendor", FALSE);

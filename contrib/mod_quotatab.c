@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
  * As a special exemption, TJ Saunders gives permission to link this program
  * with OpenSSL, and distribute the resulting executable, without including
@@ -28,7 +28,7 @@
  * ftp://pooh.urbanrage.com/pub/c/.  This module, however, has been written
  * from scratch to implement quotas in a different way.
  *
- * $Id: mod_quotatab.c,v 1.72 2011/03/21 01:01:34 castaglia Exp $
+ * $Id: mod_quotatab.c,v 1.76 2011/05/26 23:14:01 castaglia Exp $
  */
 
 #include "mod_quotatab.h"
@@ -1320,22 +1320,26 @@ static int quotatab_fsio_write(pr_fh_t *fh, int fd, const char *buf,
 
   if (sess_limit.bytes_in_avail > 0.0 &&
       sess_tally.bytes_in_used + session.xfer.total_bytes > sess_limit.bytes_in_avail) {
+    int xerrno;
     char *errstr = NULL;
 
-    errno = get_quota_exceeded_errno(EIO, &errstr);
+    xerrno = get_quota_exceeded_errno(EIO, &errstr);
     quotatab_log("quotatab write(): limit exceeded, returning %s", errstr);
 
+    errno = xerrno;
     return -1;
   }
 
   if (sess_limit.bytes_xfer_avail > 0.0 &&
       sess_tally.bytes_xfer_used + session.xfer.total_bytes > sess_limit.bytes_xfer_avail) {
+    int xerrno;
     char *errstr = NULL;
 
-    errno = get_quota_exceeded_errno(EIO, &errstr);
+    xerrno = get_quota_exceeded_errno(EIO, &errstr);
     quotatab_log("quotatab write(): transfer limit exceeded, returning %s",
       errstr);
 
+    errno = xerrno;
     return -1;
   }
 
@@ -1788,7 +1792,16 @@ MODRET quotatab_post_appe(cmd_rec *cmd) {
 
     if (sess_tally.bytes_in_used > sess_limit.bytes_in_avail &&
         sess_limit.quota_limit_type == HARD_LIMIT) {
-      if (pr_fsio_unlink(cmd->arg) < 0) {
+      int res;
+
+      res = pr_fsio_unlink(cmd->arg);
+      if (res < 0 &&
+          errno == EISDIR &&
+          use_dirs == TRUE) {
+        res = pr_fsio_rmdir(cmd->arg);
+      }
+
+      if (res < 0) {
         quotatab_log("notice: unable to unlink '%s': %s", cmd->arg,
           strerror(errno));
 
@@ -1888,7 +1901,16 @@ MODRET quotatab_post_appe_err(cmd_rec *cmd) {
 
     if (sess_tally.bytes_in_used > sess_limit.bytes_in_avail &&
         sess_limit.quota_limit_type == HARD_LIMIT) {
-      if (pr_fsio_unlink(cmd->arg) < 0) {
+      int res;
+
+      res = pr_fsio_unlink(cmd->arg);
+      if (res < 0 &&
+          errno == EISDIR &&
+          use_dirs == TRUE) {
+        res = pr_fsio_rmdir(cmd->arg);
+      }
+
+      if (res < 0) {
         quotatab_log("notice: unable to unlink '%s': %s", cmd->arg,
           strerror(errno));
 
@@ -1915,7 +1937,16 @@ MODRET quotatab_post_appe_err(cmd_rec *cmd) {
 
     if (sess_tally.bytes_xfer_used > sess_limit.bytes_xfer_avail &&
         sess_limit.quota_limit_type == HARD_LIMIT) {
-      if (pr_fsio_unlink(cmd->arg) < 0) {
+      int res;
+
+      res = pr_fsio_unlink(cmd->arg);
+      if (res < 0 &&
+          errno == EISDIR &&
+          use_dirs == TRUE) {
+        res = pr_fsio_rmdir(cmd->arg);
+      }
+
+      if (res < 0) {
         quotatab_log("notice: unable to unlink '%s': %s", cmd->arg,
           strerror(errno));
 
@@ -2003,8 +2034,12 @@ MODRET quotatab_pre_copy(cmd_rec *cmd) {
     }
 
   } else {
-    quotatab_disk_nbytes = st.st_size;
-    quotatab_disk_nfiles = 0;
+
+    if (!S_ISDIR(st.st_mode) ||
+        (S_ISDIR(st.st_mode) && use_dirs == TRUE)) {
+      quotatab_disk_nbytes = st.st_size;
+      quotatab_disk_nfiles = 0;
+    }
   }
 
   if (quotatab_disk_nfiles == 1) {
@@ -2065,22 +2100,29 @@ MODRET quotatab_post_copy(cmd_rec *cmd) {
   pr_fs_clear_cache();
   if (pr_fsio_stat(cmd->argv[2], &st) == 0) {
     if (quotatab_disk_nfiles == 0) {
-      /* If the destination file already existed, the number of bytes
-       * copied is the current size less its previous size.  Unless its
-       * current size is smaller than its previous size...
-       */ 
 
-      if (st.st_size >= quotatab_disk_nbytes) {
-        copy_bytes = st.st_size - quotatab_disk_nbytes;
+      if (!S_ISDIR(st.st_mode) ||
+          (S_ISDIR(st.st_mode) && use_dirs == TRUE)) {
+        /* If the destination file already existed, the number of bytes
+         * copied is the current size less its previous size.  Unless its
+         * current size is smaller than its previous size...
+         */ 
 
-      } else {
-        copy_bytes = quotatab_disk_nbytes - st.st_size;
-        dst_truncated = TRUE;
+        if (st.st_size >= quotatab_disk_nbytes) {
+          copy_bytes = st.st_size - quotatab_disk_nbytes;
+
+        } else {
+          copy_bytes = quotatab_disk_nbytes - st.st_size;
+          dst_truncated = TRUE;
+        }
       }
  
     } else {
-      /* ... otherwise, its the entire size of the destination file. */
-      copy_bytes = st.st_size;
+      if (!S_ISDIR(st.st_mode) ||
+          (S_ISDIR(st.st_mode) && use_dirs == TRUE)) {
+        /* ... otherwise, its the entire size of the destination file. */
+        copy_bytes = st.st_size;
+      }
     }
   }
 
@@ -2114,7 +2156,16 @@ MODRET quotatab_post_copy(cmd_rec *cmd) {
 
     if (sess_tally.bytes_in_used > sess_limit.bytes_in_avail &&
         sess_limit.quota_limit_type == HARD_LIMIT) {
-      if (pr_fsio_unlink(cmd->argv[2]) < 0) {
+      int res;
+
+      res = pr_fsio_unlink(cmd->argv[2]);
+      if (res < 0 &&
+          errno == EISDIR &&
+          use_dirs == TRUE) {
+        res = pr_fsio_rmdir(cmd->argv[2]);
+      }
+
+      if (res < 0) {
         quotatab_log("notice: unable to unlink '%s': %s", cmd->argv[2],
           strerror(errno));
 
@@ -2143,7 +2194,16 @@ MODRET quotatab_post_copy(cmd_rec *cmd) {
 
     if (sess_tally.bytes_xfer_used > sess_limit.bytes_xfer_avail &&
         sess_limit.quota_limit_type == HARD_LIMIT) {
-      if (pr_fsio_unlink(cmd->argv[2]) < 0) {
+      int res;
+
+      res = pr_fsio_unlink(cmd->argv[2]);
+      if (res < 0 &&
+          errno == EISDIR &&
+          use_dirs == TRUE) {
+        res = pr_fsio_rmdir(cmd->argv[2]);
+      }
+
+      if (res < 0) {
         quotatab_log("notice: unable to unlink '%s': %s", cmd->argv[2],
           strerror(errno));
 
@@ -3346,7 +3406,16 @@ MODRET quotatab_post_stor(cmd_rec *cmd) {
 
     if (sess_tally.bytes_in_used > sess_limit.bytes_in_avail &&
         sess_limit.quota_limit_type == HARD_LIMIT) {
-      if (pr_fsio_unlink(cmd->arg) < 0) {
+      int res;
+
+      res = pr_fsio_unlink(cmd->arg);
+      if (res < 0 &&
+          errno == EISDIR &&
+          use_dirs == TRUE) {
+        res = pr_fsio_rmdir(cmd->arg);
+      }
+
+      if (res < 0) {
         quotatab_log("notice: unable to unlink '%s': %s", cmd->arg,
           strerror(errno));
 
@@ -3374,7 +3443,16 @@ MODRET quotatab_post_stor(cmd_rec *cmd) {
 
     if (sess_tally.bytes_xfer_used > sess_limit.bytes_xfer_avail &&
         sess_limit.quota_limit_type == HARD_LIMIT) {
-      if (pr_fsio_unlink(cmd->arg) < 0) {
+      int res;
+
+      res = pr_fsio_unlink(cmd->arg);
+      if (res < 0 &&
+          errno == EISDIR &&
+          use_dirs == TRUE) {
+        res = pr_fsio_rmdir(cmd->arg);
+      }
+
+      if (res < 0) {
         quotatab_log("notice: unable to unlink '%s': %s", cmd->arg,
           strerror(errno));
 
@@ -3501,7 +3579,16 @@ MODRET quotatab_post_stor_err(cmd_rec *cmd) {
 
     if (sess_tally.bytes_in_used > sess_limit.bytes_in_avail) {
       if (sess_limit.quota_limit_type == HARD_LIMIT) {
-        if (pr_fsio_unlink(cmd->arg) < 0) {
+        int res;
+
+        res = pr_fsio_unlink(cmd->arg);
+        if (res < 0 &&
+            errno == EISDIR &&
+            use_dirs == TRUE) {
+          res = pr_fsio_rmdir(cmd->arg);
+        }
+
+        if (res < 0) {
           quotatab_log("notice: unable to unlink '%s': %s", cmd->arg,
             strerror(errno));
 
@@ -3533,7 +3620,16 @@ MODRET quotatab_post_stor_err(cmd_rec *cmd) {
 
     if (sess_tally.bytes_xfer_used > sess_limit.bytes_xfer_avail) {
       if (sess_limit.quota_limit_type == HARD_LIMIT) {
-        if (pr_fsio_unlink(cmd->arg) < 0) {
+        int res;
+
+        res = pr_fsio_unlink(cmd->arg);
+        if (res < 0 &&
+            errno == EISDIR &&
+            use_dirs == TRUE) {
+          res = pr_fsio_rmdir(cmd->arg);
+        }
+
+        if (res < 0) {
           quotatab_log("notice: unable to unlink '%s': %s", cmd->arg,
             strerror(errno));
 
@@ -3584,11 +3680,36 @@ MODRET quotatab_pre_site(cmd_rec *cmd) {
   if (cmd->argc < 2)
     return PR_DECLINED(cmd);
 
-  if (strcasecmp(cmd->argv[1], "COPY") == 0) {
+  if (strncasecmp(cmd->argv[1], "COPY", 5) == 0) {
     cmd_rec *copy_cmd;
 
     copy_cmd = pr_cmd_alloc(cmd->tmp_pool, 3, cmd->argv[1], cmd->argv[2],
       cmd->argv[3]);
+    return quotatab_pre_copy(copy_cmd);
+
+  } else if (strncasecmp(cmd->argv[1], "CPTO", 5) == 0) {
+    register unsigned int i;
+    cmd_rec *copy_cmd;
+    char *from, *to = "";
+
+    if (cmd->argc < 3)
+      return PR_DECLINED(cmd);
+
+    from = pr_table_get(session.notes, "mod_copy.cpfr-path", NULL);
+    if (from == NULL) {
+      pr_response_add_err(R_503, _("Bad sequence of commands"));
+      return PR_ERROR(cmd);
+    }
+
+    /* Construct the target file name by concatenating all the parameters after
+     * the "SITE CPTO", separating them with spaces.
+     */
+    for (i = 2; i <= cmd->argc-1; i++) {
+      to = pstrcat(cmd->tmp_pool, to, *to ? " " : "",
+        pr_fs_decode_path(cmd->tmp_pool, cmd->argv[i]), NULL);
+    }
+
+    copy_cmd = pr_cmd_alloc(cmd->tmp_pool, 3, "COPY", from, to);
     return quotatab_pre_copy(copy_cmd);
   }
 
@@ -3601,7 +3722,7 @@ MODRET quotatab_site(cmd_rec *cmd) {
   if (cmd->argc < 2)
     return PR_DECLINED(cmd);
 
-  if (strcasecmp(cmd->argv[1], "QUOTA") == 0) {
+  if (strncasecmp(cmd->argv[1], "QUOTA", 6) == 0) {
     char *cmd_name;
     unsigned char *authenticated = get_param_ptr(cmd->server->conf,
       "authenticated", FALSE);
@@ -3686,7 +3807,7 @@ MODRET quotatab_site(cmd_rec *cmd) {
     return PR_HANDLED(cmd);
   }
 
-  if (strcasecmp(cmd->argv[1], "HELP") == 0) {
+  if (strncasecmp(cmd->argv[1], "HELP", 5) == 0) {
 
     /* Add a description of SITE QUOTA to the output. */
     pr_response_add(R_214, "QUOTA");
@@ -3701,11 +3822,36 @@ MODRET quotatab_post_site(cmd_rec *cmd) {
   if (cmd->argc < 2)
     return PR_DECLINED(cmd);
 
-  if (strcasecmp(cmd->argv[1], "COPY") == 0) {
+  if (strncasecmp(cmd->argv[1], "COPY", 5) == 0) {
     cmd_rec *copy_cmd;
 
     copy_cmd = pr_cmd_alloc(cmd->tmp_pool, 3, cmd->argv[1], cmd->argv[2],
       cmd->argv[3]);
+    return quotatab_post_copy(copy_cmd);
+
+  } else if (strncasecmp(cmd->argv[1], "CPTO", 5) == 0) {
+    register unsigned int i;
+    cmd_rec *copy_cmd;
+    char *from, *to = "";
+
+    if (cmd->argc < 3)
+      return PR_DECLINED(cmd);
+
+    from = pr_table_get(session.notes, "mod_copy.cpfr-path", NULL);
+    if (from == NULL) {
+      pr_response_add_err(R_503, _("Bad sequence of commands"));
+      return PR_ERROR(cmd);
+    }
+
+    /* Construct the target file name by concatenating all the parameters after
+     * the "SITE CPTO", separating them with spaces.
+     */
+    for (i = 2; i <= cmd->argc-1; i++) {
+      to = pstrcat(cmd->tmp_pool, to, *to ? " " : "",
+        pr_fs_decode_path(cmd->tmp_pool, cmd->argv[i]), NULL);
+    }
+
+    copy_cmd = pr_cmd_alloc(cmd->tmp_pool, 3, "COPY", from, to);
     return quotatab_post_copy(copy_cmd);
   }
 
@@ -3718,11 +3864,33 @@ MODRET quotatab_post_site_err(cmd_rec *cmd) {
   if (cmd->argc < 2)
     return PR_DECLINED(cmd);
 
-  if (strcasecmp(cmd->argv[1], "COPY") == 0) {
+  if (strncasecmp(cmd->argv[1], "COPY", 5) == 0) {
     cmd_rec *copy_cmd;
 
     copy_cmd = pr_cmd_alloc(cmd->tmp_pool, 3, cmd->argv[1], cmd->argv[2],
       cmd->argv[3]);
+    return quotatab_post_copy_err(copy_cmd);
+
+  } else if (strncasecmp(cmd->argv[1], "CPTO", 5) == 0) {
+    register unsigned int i;
+    cmd_rec *copy_cmd;
+    char *from, *to = "";
+
+    from = pr_table_get(session.notes, "mod_copy.cpfr-path", NULL);
+    if (from == NULL) {
+      pr_response_add_err(R_503, _("Bad sequence of commands"));
+      return PR_ERROR(cmd);
+    }
+
+    /* Construct the target file name by concatenating all the parameters after
+     * the "SITE CPTO", separating them with spaces.
+     */
+    for (i = 2; i <= cmd->argc-1; i++) {
+      to = pstrcat(cmd->tmp_pool, to, *to ? " " : "",
+        pr_fs_decode_path(cmd->tmp_pool, cmd->argv[i]), NULL);
+    }
+
+    copy_cmd = pr_cmd_alloc(cmd->tmp_pool, 3, "COPY", from, to);
     return quotatab_post_copy_err(copy_cmd);
   }
 

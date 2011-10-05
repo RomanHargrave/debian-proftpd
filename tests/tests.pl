@@ -106,6 +106,7 @@ if (scalar(@ARGV) > 0) {
     t/config/commandbuffersize.t
     t/config/createhome.t
     t/config/defaultchdir.t
+    t/config/defaultroot.t
     t/config/deleteabortedstores.t
     t/config/dirfakegroup.t
     t/config/dirfakemode.t
@@ -252,6 +253,22 @@ if (scalar(@ARGV) > 0) {
       test_class => [qw(mod_quotatab mod_quotatab_sql mod_sql_sqlite)],
     },
 
+    't/modules/mod_quotatab/copy.t' => {
+      order => ++$order,
+      test_class => [qw(mod_copy mod_quotatab mod_quotatab_sql mod_sql_sqlite)],
+    },
+
+    't/modules/mod_quotatab/site_misc.t' => {
+      order => ++$order,
+      test_class => [qw(
+        mod_copy
+        mod_quotatab
+        mod_quotatab_sql
+        mod_sql_sqlite
+        mod_site_misc
+      )],
+    },
+
     't/modules/mod_ratio.t' => {
       order => ++$order,
       test_class => [qw(mod_ratio)],
@@ -277,14 +294,24 @@ if (scalar(@ARGV) > 0) {
       test_class => [qw(mod_ban mod_sftp)],
     },
 
+    't/modules/mod_sftp/exec.t' => {
+      order => ++$order,
+      test_class => [qw(mod_exec mod_sftp)],
+    },
+
     't/modules/mod_sftp/rewrite.t' => {
       order => ++$order,
       test_class => [qw(mod_rewrite mod_sftp)],
     },
 
+    't/modules/mod_sftp/wrap2.t' => {
+      order => ++$order,
+      test_class => [qw(mod_sftp mod_wrap2)],
+    },
+
     't/modules/mod_sftp_sql.t' => {
       order => ++$order,
-      test_class => [qw(mod_sftp mod_sql_sqlite)],
+      test_class => [qw(mod_sftp mod_sftp_sql mod_sql_sqlite)],
     },
 
     't/modules/mod_shaper.t' => {
@@ -310,6 +337,11 @@ if (scalar(@ARGV) > 0) {
     't/modules/mod_sql_passwd.t' => {
       order => ++$order,
       test_class => [qw(mod_sql_passwd mod_sql_sqlite)],
+    },
+
+    't/modules/mod_sql_odbc.t' => {
+      order => ++$order,
+      test_class => [qw(mod_sql_odbc)],
     },
 
     't/modules/mod_sql_sqlite.t' => {
