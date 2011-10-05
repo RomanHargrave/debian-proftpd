@@ -5,9 +5,9 @@ Bug-Debian: http://bugs.debian.org/366397
 
 Index: proftpd-dfsg/contrib/mod_wrap.c
 ===================================================================
---- proftpd-dfsg.orig/contrib/mod_wrap.c	2011-02-07 17:47:07.000000000 +0100
-+++ proftpd-dfsg/contrib/mod_wrap.c	2011-02-08 13:35:42.000000000 +0100
-@@ -922,8 +922,7 @@
+--- proftpd-dfsg.orig/contrib/mod_wrap.c	2011-10-05 18:05:31.000000000 +0200
++++ proftpd-dfsg/contrib/mod_wrap.c	2011-10-05 18:06:49.000000000 +0200
+@@ -924,8 +924,7 @@
  
    fromhost(&request);
  

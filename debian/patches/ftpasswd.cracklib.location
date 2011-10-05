@@ -6,9 +6,9 @@ Forwarded: not needed
 
 Index: proftpd-dfsg/contrib/ftpasswd
 ===================================================================
---- proftpd-dfsg.orig/contrib/ftpasswd	2011-02-08 13:30:16.000000000 +0100
-+++ proftpd-dfsg/contrib/ftpasswd	2011-02-08 13:30:36.000000000 +0100
-@@ -37,7 +37,8 @@
+--- proftpd-dfsg.orig/contrib/ftpasswd	2011-10-05 18:05:31.000000000 +0200
++++ proftpd-dfsg/contrib/ftpasswd	2011-10-05 18:06:25.000000000 +0200
+@@ -36,7 +36,8 @@
  my $default_passwd_file = "./ftpd.passwd";
  my $default_group_file = "./ftpd.group";
  my $shell_file = "/etc/shells";
