@@ -4,9 +4,48 @@ Forwarded: not needed
 
 Index: proftpd-dfsg/contrib/xferstats.holger-preiss
 ===================================================================
---- proftpd-dfsg.orig/contrib/xferstats.holger-preiss	2011-02-08 13:28:11.000000000 +0100
-+++ proftpd-dfsg/contrib/xferstats.holger-preiss	2011-02-08 13:28:41.000000000 +0100
-@@ -250,14 +250,14 @@
+--- proftpd-dfsg.orig/contrib/xferstats.holger-preiss	2011-10-05 18:19:34.000000000 +0200
++++ proftpd-dfsg/contrib/xferstats.holger-preiss	2011-10-06 10:39:31.000000000 +0200
+@@ -38,6 +38,8 @@
+ #  -added option A which compares the addresses end with a given pattern
+ #  -added option i and o which reports either incoming or outgoing traffic only
+ 
++use Getopt::Std;
++
+ @mydom = split(/\./, `dnsdomainname`);
+ $mydom2 = pop(@mydom); chop($mydom2);
+ $mydom1 = pop(@mydom);
+@@ -59,8 +61,7 @@
+ $opt_t = 1;
+ $opt_l = 3;
+ 
+-require 'getopts.pl';
+-&Getopts('f:rahdD:l:s:A:iou:');
++getopts('f:rahdD:l:s:A:iou:');
+ 
+ if ($opt_r) { $real = 1;}
+ if ($opt_a) { $anon = 1;}
+@@ -196,8 +197,8 @@
+ }
+ close LOG;
+ 
+-@syslist = keys(systemfiles);
+-@dates = sort datecompare keys(xferbytes);
++@syslist = keys(%systemfiles);
++@dates = sort datecompare keys(%xferbytes);
+ 
+ if ($xferfiles == 0) {die "There was no data to process.\n";}
+ 
+@@ -231,7 +232,7 @@
+ 
+ # sort daily traffic by bytes sendt
+ #foreach $date ( sort datecompare keys(nbytes) ) {
+-foreach $date ( sort datecompare keys(xferbytes) ) {
++foreach $date ( sort datecompare keys(%xferbytes) ) {
+ 
+    $nfiles = $xferfiles{$date};
+    $nbytes = $xferbytes{$date};
+@@ -250,14 +251,14 @@
  
  Total Transfers from each Archive Section (By bytes)
  
@@ -26,3 +65,30 @@ Index: proftpd-dfsg/contrib/xferstats.holger-preiss
  .
  
  $| = 1;
+@@ -266,7 +267,7 @@
+ $~ = line2;
+ 
+ # sort total transfer for each archive by # files transfered
+-foreach $section ( sort bytecompare keys(groupfiles) ) {
++foreach $section ( sort bytecompare keys(%groupfiles) ) {
+ 
+    $files = $groupfiles{$section};
+    $bytes = $groupbytes{$section};
+@@ -298,7 +299,7 @@
+ $~ = line3;
+ 
+ # sort amount per domain by files
+-foreach $domain ( sort domnamcompare keys(domainfiles) ) {
++foreach $domain ( sort domnamcompare keys(%domainfiles) ) {
+ 
+    $files = $domainfiles{$domain};
+    $bytes = $domainbytes{$domain};
+@@ -340,7 +341,7 @@
+ $~ = line8;
+ 
+ # sort hourly transmission by sent bytes
+-foreach $time ( sort keys(xfertbytes) ) {
++foreach $time ( sort keys(%xfertbytes) ) {
+ 
+    $nfiles   = $xfertfiles{$time};
+    $nbytes   = $xfertbytes{$time};
