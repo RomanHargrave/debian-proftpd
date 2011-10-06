@@ -3,7 +3,7 @@ Section: net
 Priority: optional
 Maintainer: ProFTPD Maintainance Team <pkg-proftpd-maintainers@lists.alioth.debian.org>
 Uploaders: Francesco Paolo Lovergine <frankie@debian.org>
-Standards-Version: 3.9.1
+Standards-Version: 3.9.2
 Build-Depends: libmysqlclient-dev, libpam-dev, debhelper (>= 7), zlib1g-dev, 
  libpq-dev, libldap2-dev, libssl-dev (>= 0.9.8l), libwrap0-dev, libcap-dev [linux-any], 
  autotools-dev, libncurses5-dev, libacl1-dev, libattr1-dev, unixodbc-dev, libsqlite3-dev

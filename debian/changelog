@@ -5,8 +5,9 @@ proftpd-dfsg (1.3.4~rc3-1) unstable; urgency=low
   * Changed patch xferstats.holger-preiss to fix a few warnings and use
     Getopt::Std instead of the old getopts.pl which will be removed soon or
     later in perl5. Thanks lintian.
+  * Policy bumped to 3.9.2.
 
- -- Francesco Paolo Lovergine <frankie@debian.org>  Thu, 06 Oct 2011 10:44:15 +0200
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Thu, 06 Oct 2011 12:57:29 +0200
 
 proftpd-dfsg (1.3.4~rc2-4) unstable; urgency=low
 
