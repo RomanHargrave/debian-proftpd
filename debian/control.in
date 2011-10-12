@@ -19,7 +19,9 @@ Conflicts: ftp-server
 Breaks: proftpd (<< 1.3.2)
 Replaces: proftpd (<< 1.3.2)
 Provides: ftp-server, proftpd, proftpd-abi-@VERSION@
-Suggests: proftpd-doc, openssl, proftpd-mod-mysql, proftpd-mod-pgsql, proftpd-mod-ldap, proftpd-mod-odbc, proftpd-mod-sqlite, openbsd-inetd | inet-superserver
+Suggests: proftpd-doc, openssl, 
+ proftpd-mod-mysql, proftpd-mod-pgsql, proftpd-mod-ldap, proftpd-mod-odbc, proftpd-mod-sqlite, 
+ openbsd-inetd | inet-superserver
 Description: Versatile, virtual-hosting FTP daemon - binaries
  ProFTPD is a powerful modular FTP/SFTP/FTPS server. This File Transfer
  Protocol daemon supports also hidden directories, virtual hosts, and
@@ -37,7 +39,8 @@ Description: Versatile, virtual-hosting FTP daemon - binaries
 
 Package: proftpd-dev
 Architecture: any
-Depends: proftpd-basic (=${binary:Version}), ${shlibs:Depends}, ${misc:Depends}, libtool
+Depends: proftpd-basic (=${binary:Version}), ${shlibs:Depends}, ${misc:Depends}, 
+ libtool, libacl1-dev, libssl-dev
 Suggests: pkg-config
 Description: Versatile, virtual-hosting FTP daemon - development files
  ProFTPD is a powerful modular FTP/SFTP/FTPS server. This File Transfer
