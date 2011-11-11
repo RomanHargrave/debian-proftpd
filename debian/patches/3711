@@ -1,0 +1,24 @@
+Index: proftpd-dfsg/src/main.c
+===================================================================
+--- proftpd-dfsg.orig/src/main.c	2011-11-11 13:03:50.000000000 +0100
++++ proftpd-dfsg/src/main.c	2011-11-11 13:10:03.000000000 +0100
+@@ -651,6 +651,9 @@
+         cmd->argv[0]);
+       pr_response_flush(&resp_err_list);
+ 
++      /* Restore any previous pool to the Response API. */
++      pr_response_set_pool(resp_pool);
++
+       errno = xerrno;
+       return success;
+     }
+@@ -718,6 +721,9 @@
+         break;
+ 
+       default:
++        /* Restore any previous pool to the Response API. */
++        pr_response_set_pool(resp_pool);
++
+         errno = EINVAL;
+         return -1;
+     }
