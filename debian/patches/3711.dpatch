@@ -1,0 +1,31 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## 3711.dpatch by Francesco Paolo Lovergine <frankie@debian.org>
+##
+## All lines beginning with `## DP:' are a description of the patch.
+## DP: No description.
+
+@DPATCH@
+diff -urNad '--exclude=CVS' '--exclude=.svn' '--exclude=.git' '--exclude=.arch' '--exclude=.hg' '--exclude=_darcs' '--exclude=.bzr' proftpd-dfsg~/src/main.c proftpd-dfsg/src/main.c
+--- proftpd-dfsg~/src/main.c	2011-11-11 12:23:30.000000000 +0100
++++ proftpd-dfsg/src/main.c	2011-11-11 12:39:53.000000000 +0100
+@@ -706,6 +706,10 @@
+       _dispatch(cmd, LOG_CMD_ERR, FALSE, NULL);
+ 
+       pr_response_flush(&resp_err_list);
++
++      /* Restore any previous pool to the Response API. */
++      pr_response_set_pool(resp_pool);
++
+       return success;
+     }
+ 
+@@ -761,6 +765,9 @@
+         break;
+ 
+       default:
++        /* Restore any previous pool to the Response API. */
++        pr_response_set_pool(resp_pool);
++
+         errno = EINVAL;
+         return -1;
+     }
