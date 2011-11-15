@@ -3,7 +3,7 @@ Section: net
 Priority: optional
 Maintainer: Francesco Paolo Lovergine <frankie@debian.org>
 Standards-Version: 3.7.3
-Build-Depends: libmysqlclient15-dev (>= 5.0.16), libpam-dev, debhelper (>=5), zlib1g-dev, 
+Build-Depends: libmysqlclient15-dev (>= 5.0.16), libpam0g-dev, debhelper (>=5), zlib1g-dev, 
  libpq-dev, libldap2-dev, libssl-dev, libwrap0-dev, libcap-dev|not+linux-gnu, 
  autotools-dev, libncurses5-dev, dpatch, libacl1-dev, libattr1-dev
 Homepage: http://www.proftpd.org/
