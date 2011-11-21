@@ -41,7 +41,7 @@ Description: Versatile, virtual-hosting FTP daemon - binaries
 Package: proftpd-dev
 Architecture: any
 Depends: proftpd-basic (=${binary:Version}), ${shlibs:Depends}, ${misc:Depends}, 
- libtool, libacl1-dev, libssl-dev
+ libtool, libacl1-dev, libssl-dev, libpcre3-dev
 Suggests: pkg-config
 Description: Versatile, virtual-hosting FTP daemon - development files
  ProFTPD is a powerful modular FTP/SFTP/FTPS server. This File Transfer
