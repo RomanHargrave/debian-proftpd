@@ -1,4 +1,4 @@
-<!-- $Id: mod_sftp.html,v 1.55 2011/09/09 17:59:51 castaglia Exp $ -->
+<!-- $Id: mod_sftp.html,v 1.57 2011/10/18 14:52:24 castaglia Exp $ -->
 <!-- $Source: /cvsroot/proftp/proftpd/doc/contrib/mod_sftp.html,v $ -->
 
 <html>
@@ -94,6 +94,7 @@ This module supports the SFTP and SCP file transfer protocols; it does
 The <code>mod_sftp</code> module does <b>not</b> currently support:
 <ul>
   <li><code>&lt;Anonymous&gt;</code>
+  <li><code>ListOptions</code>
   <li><code>MaxRetrieveFileSize/MaxStoreFileSize</code>
 </ul>
 
@@ -818,6 +819,19 @@ The currently implemented options are:
     <p>
     <b>Note</b> that this option first appeared in
     <code>proftpd-1.3.4rc2</code>.
+  </li>
+
+  <p>
+  <li><code>IgnoreSFTPSetTimes</code><br>
+    <p>
+    Use this option to have <code>mod_sftp</code> silently ignore any
+    timestamps sent by SFTP clients via the <code>SETSTAT</code> or
+    <code>FSETSTAT</code> SFTP requests; these are equivlant to
+    an FTP <code>SITE UTIMES</code> command.
+
+    <p>
+    <b>Note</b> that this option first appeared in
+    <code>proftpd-1.3.4rc4</code>.
   </li>
 
   <p>
@@ -1853,7 +1867,7 @@ source of trouble.
 <hr><br>
 
 Author: <i>$Author: castaglia $</i><br>
-Last Updated: <i>$Date: 2011/09/09 17:59:51 $</i><br>
+Last Updated: <i>$Date: 2011/10/18 14:52:24 $</i><br>
 
 <br><hr>
 
