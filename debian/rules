@@ -116,7 +116,6 @@ myclean:
 	rm -f $$(find $(CURDIR) -name config.status )
 	rm -f contrib/mod_wrap2/mod_wrap2.h \
 	      contrib/mod_wrap2/Makefile \
-	      contrib/mod_load/mod_load.c \
 	      contrib/mod_load/mod_load.h \
 	      contrib/mod_load/Makefile 
 	# clean up libtool files still around
