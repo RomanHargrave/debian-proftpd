@@ -48,7 +48,7 @@ CONF_ARGS := --prefix=/usr \
 	     --with-includes=$(shell pg_config --includedir):$(shell mysql_config --include|sed -e 's/-I//') \
 	     --mandir=/usr/share/man --sysconfdir=/etc/$(NAME) --localstatedir=/var/run --libexecdir=/usr/lib/$(NAME) \
 	     --enable-sendfile --enable-facl --enable-dso --enable-autoshadow --enable-ctrls --with-modules=mod_readme \
-	     --enable-ipv6 --enable-nls --with-lastlog=/var/log/lastlog $(DEVELOPT)
+	     --enable-ipv6 --enable-nls --with-lastlog=/var/log/lastlog --enable-pcre $(DEVELOPT)
 
 ifeq ($(DEB_BUILD_GNU_TYPE), $(DEB_HOST_GNU_TYPE))
   CONF_ARGS += --build $(DEB_HOST_GNU_TYPE)
