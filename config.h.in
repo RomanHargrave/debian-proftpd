@@ -186,8 +186,14 @@
 /* Define as the return type of signal handlers (int or void).  */
 #undef RETSIGTYPE
 
-/* Define if the `setpgrp' function takes no argument.  */
-#undef SETPGRP_VOID
+/* Define if the `setpgrp' function takes no argument.  This is the default
+ * POSIX signature, so assume that the host system uses the POSIX
+ * signature.  This avoids cross-compilation errors; the Autoconf macro
+ * AC_FUNC_SETPGRP causes the configure script to fail when cross-compiling.
+ * Thus we always assume the POSIX signature.  If this is incorrect,
+ * the generated config.h file can be updated manually.
+ */
+#define SETPGRP_VOID 1
 
 /* Define if the `setgrent` function returns void.  */
 #undef SETGRENT_VOID
@@ -384,6 +390,9 @@
 /* Define if you have the munlockall function.  */
 #undef HAVE_MUNLOCKALL
 
+/* Define if you have the MySQL make_scrambled_password_323 function.  */
+#undef HAVE_MYSQL_MAKE_SCRAMBLED_PASSWORD_323
+
 /* Define if you have the nl_langinfo function.  */
 #undef HAVE_NL_LANGINFO
 
@@ -392,6 +401,9 @@
 
 /* Define if you have the perm_copy_fd function.  */
 #undef HAVE_PERM_COPY_FD
+
+/* Define if you have the Postgres PQescapeStringConn function.  */
+#undef HAVE_POSTGRES_PQESCAPESTRINGCONN
 
 /* Define if you have the pstat function.  */
 #undef HAVE_PSTAT

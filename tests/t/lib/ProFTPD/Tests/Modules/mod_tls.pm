@@ -768,7 +768,7 @@ sub tls_crl_file_ok {
           Croak => 1,
           Encryption => 'E',
           Port => $port,
-          SSL_Advanced => $ssl_opts,
+          SSL_Client_Certificate => $ssl_opts,
         );
       };
 
@@ -910,8 +910,14 @@ sub tls_list_no_session_reuse {
       # Since we are requiring SSL session resuse for data transfers,
       # and this client is not using SSL session resumption, I expect
       # this data transfer to fail.
-      my $res = $client->list('.');
-      if ($res) {
+      eval { 
+        my $res = $client->list('.');
+        if ($res) {
+          die("LIST succeeded unexpectedly");
+        }
+      };
+
+      unless ($@) {
         die("LIST succeeded unexpectedly");
       }
 
@@ -1190,7 +1196,7 @@ sub tls_list_fails_tls_required_by_dir_bug2178 {
         DataProtLevel => 'C',
         Encryption => 'E',
         Port => $port,
-        SSL_Advanced => $ssl_opts,
+        SSL_Client_Certificate => $ssl_opts,
       );
 
       unless ($client->login($user, $passwd)) {
@@ -1346,7 +1352,7 @@ sub tls_list_ok_tls_required_by_dir_bug2178 {
         DataProtLevel => 'P',
         Encryption => 'E',
         Port => $port,
-        SSL_Advanced => $ssl_opts,
+        SSL_Client_Certificate => $ssl_opts,
       );
 
       unless ($client->login($user, $passwd)) {
@@ -1512,7 +1518,7 @@ sub tls_list_fails_tls_required_by_ftpaccess_bug2178 {
         DataProtLevel => 'C',
         Encryption => 'E',
         Port => $port,
-        SSL_Advanced => $ssl_opts,
+        SSL_Client_Certificate => $ssl_opts,
       );
 
       unless ($client->login($user, $passwd)) {
@@ -1678,7 +1684,7 @@ sub tls_list_ok_tls_required_by_ftpaccess_bug2178 {
         DataProtLevel => 'P',
         Encryption => 'E',
         Port => $port,
-        SSL_Advanced => $ssl_opts,
+        SSL_Client_Certificate => $ssl_opts,
       );
 
       unless ($client->login($user, $passwd)) {
@@ -2032,7 +2038,7 @@ sub tls_client_cert_verify_failed_embedded_nul_bug3275 {
           Croak => 1,
           Encryption => 'E',
           Port => $port,
-          SSL_Advanced => $ssl_opts,
+          SSL_Client_Certificate => $ssl_opts,
         );
 
         # Net::FTPSSL is rather stupid, and treats the initial 234 response
@@ -2390,7 +2396,7 @@ sub tls_opts_std_env_vars_client_vars {
         Croak => 1,
         Encryption => 'E',
         Port => $port,
-        SSL_Advanced => $ssl_opts,
+        SSL_Client_Certificate => $ssl_opts,
       );
 
       unless ($client) {
@@ -2578,7 +2584,7 @@ sub tls_opts_ipaddr_required {
         Croak => 1,
         Encryption => 'E',
         Port => $port,
-        SSL_Advanced => $ssl_opts,
+        SSL_Client_Certificate => $ssl_opts,
       );
 
       unless ($client->login($user, $passwd)) {
@@ -3998,6 +4004,7 @@ sub tls_stor_empty_file {
         TLSRequired => 'on',
         TLSRSACertificateFile => $cert_file,
         TLSCACertificateFile => $ca_file,
+        TLSOptions => 'NoSessionReuseRequired',
       },
     },
   };
@@ -4155,6 +4162,7 @@ sub tls_retr_empty_file {
         TLSRequired => 'on',
         TLSRSACertificateFile => $cert_file,
         TLSCACertificateFile => $ca_file,
+        TLSOptions => 'NoSessionReuseRequired',
       },
     },
   };
@@ -4777,7 +4785,7 @@ sub tls_opts_commonname_required_bug3512 {
           Croak => 1,
           Encryption => 'E',
           Port => $port,
-          SSL_Advanced => $ssl_opts,
+          SSL_Client_Certificate => $ssl_opts,
         );
       };
 
@@ -4795,7 +4803,7 @@ sub tls_opts_commonname_required_bug3512 {
         Croak => 1,
         Encryption => 'E',
         Port => $port,
-        SSL_Advanced => $ssl_opts,
+        SSL_Client_Certificate => $ssl_opts,
       );
 
       sleep(1);
@@ -4939,7 +4947,7 @@ sub tls_opts_dns_name_required {
           Croak => 1,
           Encryption => 'E',
           Port => $port,
-          SSL_Advanced => $ssl_opts,
+          SSL_Client_Certificate => $ssl_opts,
         );
       };
 
@@ -4957,7 +4965,7 @@ sub tls_opts_dns_name_required {
         Croak => 1,
         Encryption => 'E',
         Port => $port,
-        SSL_Advanced => $ssl_opts,
+        SSL_Client_Certificate => $ssl_opts,
       );
 
       sleep(1);
@@ -5101,7 +5109,7 @@ sub tls_opts_ip_addr_dns_name_cn_required {
           Croak => 1,
           Encryption => 'E',
           Port => $port,
-          SSL_Advanced => $ssl_opts,
+          SSL_Client_Certificate => $ssl_opts,
         );
       };
 
@@ -5119,7 +5127,7 @@ sub tls_opts_ip_addr_dns_name_cn_required {
         Croak => 1,
         Encryption => 'E',
         Port => $port,
-        SSL_Advanced => $ssl_opts,
+        SSL_Client_Certificate => $ssl_opts,
       );
 
       sleep(1);
@@ -6535,7 +6543,7 @@ sub tls_verify_order_crl_bug3658 {
           Croak => 1,
           Encryption => 'E',
           Port => $port,
-          SSL_Advanced => $ssl_opts,
+          SSL_Client_Certificate => $ssl_opts,
         );
       };
 
@@ -6699,7 +6707,7 @@ sub tls_verify_order_ocsp {
           Croak => 1,
           Encryption => 'E',
           Port => $port,
-          SSL_Advanced => $ssl_opts,
+          SSL_Client_Certificate => $ssl_opts,
         );
       };
 
@@ -6866,7 +6874,7 @@ sub tls_verify_order_ocsp_https {
           Croak => 1,
           Encryption => 'E',
           Port => $port,
-          SSL_Advanced => $ssl_opts,
+          SSL_Client_Certificate => $ssl_opts,
         );
       };
 
