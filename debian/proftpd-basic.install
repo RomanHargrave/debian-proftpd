@@ -21,6 +21,7 @@ usr/lib/proftpd/mod_rewrite.so
 usr/lib/proftpd/mod_shaper.so
 usr/lib/proftpd/mod_site_misc.so
 usr/lib/proftpd/mod_sftp.so
+usr/lib/proftpd/mod_sftp_sql.so
 usr/lib/proftpd/mod_sftp_pam.so
 usr/lib/proftpd/mod_sql.so
 usr/lib/proftpd/mod_sql_passwd.so                                                                                                                           

@@ -1,17 +1,29 @@
 proftpd-dfsg (1.3.4a-2) UNRELEASED; urgency=low
 
   * Team upload.
-  * Fix typo in proftpd.conf templates line 133, thanks John Smith (Closes: #655630)
+  * Fix typo in proftpd.conf templates line 133, thanks John Smith.
+    (Closes: #655630)
   * Updated Danish translations, thanks Joe Dalton. (Closes: #659326)
+  * debian/copyright:
+    - Resync with latest dep5 format.
+    - Use stand-alone license paragraph for repeatable license.
+    - Use whitespace instead of comma separated for Files fields.
+  * debian/control:
+    - Bump Standards-Version to 3.9.3.
+  * debian/rules: Enabled hardened flags, patch from Moritz Muehlenhoff.
+    (Closes: #657213)
+  * debian/changelog: Wrap latest changelog line 3 to 80 line, thanks lintian.
+  * debian/proftpd-basic.install: Add missing sftp-sql modules.
+    (Closes: 665191)
 
- -- Mahyuddin Susanto <udienz@ubuntu.com>  Sun, 25 Mar 2012 18:11:56 +0700
+ -- Mahyuddin Susanto <udienz@ubuntu.com>  Mon, 26 Mar 2012 23:22:55 +0700
 
 proftpd-dfsg (1.3.4a-1) unstable; urgency=low
 
   * New upstream release.
   * Merged patch removed: 3711.
-  * Now enabled PCRE instead of glibc POSIX regex and added required libpcre3-dev 
-    build-dep.
+  * Now enabled PCRE instead of glibc POSIX regex and added required
+    libpcre3-dev build-dep.
   * Added libpcre3-dev dependency to libproftpd-dev due to header files
     inclusion.
 
