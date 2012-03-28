@@ -1,7 +1,9 @@
-Format: http://dep.debian.net/deps/dep5/
+Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: ProFTPD
 Upstream-Contact: The ProFTPD Project team, TJ Saunders <tj@castaglia.org>
 Source: http://www.proftpd.org/
+Comment: The DFSG tarball is created by removing by hand the rfc/ folder
+ distributed by upstream, because IETF RFCs license is not compatible.
 
 Files: *
 Copyright:  1997-1998, Public Flood Software
@@ -90,5 +92,5 @@ Files: debian/*
 Copyright: 1997-2000, Johnie Ingram <johnie@debian.org>
 	2001-2002, Ivo Timmermans <ivo@debian.org>
 	2002-2003, Paul Martin <pm@debian.org>
-	2003-2011, Francesco Paolo Lovergine <frankie@debian.org>
+	2003-2012, Francesco Paolo Lovergine <frankie@debian.org>
 License: GPL-2+
