@@ -6,10 +6,12 @@ Comment: The DFSG tarball is created by removing by hand the rfc/ folder
  distributed by upstream, because IETF RFCs license is not compatible.
 
 Files: *
-Copyright:  1997-1998, Public Flood Software
-	1999-2000, MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
-	2001-2008, The ProFTPD Project team
-	2001-2008, TJ Saunders <tj@castaglia.org>
+Copyright: 1997, 1998 Public Flood Software
+	1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
+	2001, 2008 The ProFTPD Project team
+	2001, 2008 TJ Saunders <tj@castaglia.org>
+License: GPL-2+
+
 License: GPL-2+
  This package is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
@@ -32,9 +34,11 @@ Comment: As a special exemption, Public Flood Software/MacGyver aka Habeeb J. Di
  with OpenSSL, and distribute the resulting executable, without including
  the source code for OpenSSL in the source distribution.
 
-Files: src/xferlog*, include/xferlog.h, contrib/xferstats.holger-preiss
+Files: src/xferlog* include/xferlog.h contrib/xferstats.holger-preiss
 Copyright: 1999-2000, WU-FTPD Development Group
 	1998, Holger Preiss (TU Dresden)
+License: Academic
+
 License: Academic
  Copyright (c) 1994  Washington University in Saint Louis.
  All rights reserved.

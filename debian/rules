@@ -12,25 +12,18 @@ VERSION=$(shell grep PROFTPD_VERSION_TEXT $(CURDIR)/include/version.h|cut -d\" -
 PROFTPD_FLAGS := -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64 -DHAVE_OPENSSL -DUSE_LDAP_TLS
 CFLAGS := $(PROFTPD_FLAGS) 
 CC := gcc
-OPTFLAG = -O2
 
 # Some special build options
 ifneq (,$(findstring debug,$(DEB_BUILD_OPTIONS)))
   DEVELOPT=--enable-devel=yes
-  OPTFLAG = -O0
 endif
 ifneq (,$(findstring verbose,$(DEB_BUILD_OPTIONS)))
 DH_VERBOSE=1
 export DH_VERBOSE
 endif
-ifneq (,$(findstring noopt,$(DEB_BUILD_OPTIONS)))
-  OPTFLAG = -O0 
-endif
 ifeq (,$(findstring nostrip,$(DEB_BUILD_OPTIONS)))
   INSTALL_STRIP=-s
 endif
-
-CFLAGS += $(OPTFLAG)
 
 #
 # dpkg-arch rules
@@ -66,7 +59,7 @@ build: debian/proftpd-substvars configure-stamp build-stamp
 build-stamp: 
 	dh_testdir
 	
-	$(MAKE) CC="$(CC)" CFLAGS="$(CFLAGS)" all
+	$(MAKE) CC="$(CC)" all
 	
 	touch $@
 
@@ -90,7 +83,7 @@ configure-stamp:
 		mv ./config.guess ./config.guess.original && \
 		cp -f /usr/share/misc/config.guess ./config.guess
 	
-	./configure $(CONF_ARGS) --with-shared=$(DSOMODS1)$(DSOMODS2)$(DSOMODS3)$(DSOMODS4)
+	./configure $(shell dpkg-buildflags --export=configure) $(CONF_ARGS) --with-shared=$(DSOMODS1)$(DSOMODS2)$(DSOMODS3)$(DSOMODS4)
 	
 	touch $@
 

@@ -1,17 +1,18 @@
 # Danish translation proftpd-dfsg.
-# Copyright (C) 2010 proftpd-dfsg & nedenstående oversættere.
+# Copyright (C) 2012 proftpd-dfsg & nedenstående oversættere.
 # This file is distributed under the same license as the proftpd-dfsg package.
 # Morten Brix Pedersen <morten@wtf.dk>, 2004.
-# Joe Hansen <joedalton2@yahoo.dk>, 2010.
+# Joe Hansen <joedalton2@yahoo.dk>, 2010, 2012.
 #
 msgid ""
 msgstr ""
 "Project-Id-Version: proftpd-dfsg\n"
 "Report-Msgid-Bugs-To: proftpd-dfsg@packages.debian.org\n"
-"POT-Creation-Date: 2009-09-01 22:31+0200\n"
-"PO-Revision-Date: 2010-10-11 05:26+0100\n"
+"POT-Creation-Date: 2011-02-10 10:03+0100\n"
+"PO-Revision-Date: 2012-02-10 05:26+0100\n"
 "Last-Translator: Joe Hansen <joedalton2@yahoo.dk>\n"
 "Language-Team: Danish <debian-l10n-danish@lists.debian.org> \n"
+"Language: \n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
@@ -26,7 +27,7 @@ msgstr "fra inetd"
 #. Choices
 #: ../proftpd-basic.templates:2001
 msgid "standalone"
-msgstr "alenestående"
+msgstr "uafhængig"
 
 #. Type: select
 #. Description
@@ -38,23 +39,22 @@ msgstr "Kør proftpd:"
 #. Description
 #: ../proftpd-basic.templates:2002
 msgid ""
-"ProFTPd can be run either as a service from inetd, or as a standalone "
+"ProFTPD can be run either as a service from inetd, or as a standalone "
 "server. Each choice has its own benefits. With only a few FTP connections "
-"per day, it is probably better to run ProFTPd from inetd in order to save "
+"per day, it is probably better to run ProFTPD from inetd in order to save "
 "resources."
 msgstr ""
-"ProFTPd kan køre enten som en tjeneste fra inetd, eller som en alenestående "
-"server. Hvert valg har deres fordele. Hvis du kun har et par "
-"ftp-forbindelser om dagen, kan det måske ikke være ressourcerne værd at have "
-"ProFTPd kørende hele tiden."
+"ProFTPD kan køre enten som en tjeneste fra inetd, eller som en uafhængig "
+"server. Hvert valg har deres fordele. Hvis du kun har et par ftp-"
+"forbindelser om dagen, så er det måske bedre at køre ProFTPD fra inetd "
+"for at spare på ressourcerne."
 
 #. Type: select
 #. Description
 #: ../proftpd-basic.templates:2002
 msgid ""
-"On the other hand, with higher traffic, ProFTPd should run as a standalone "
+"On the other hand, with higher traffic, ProFTPD should run as a standalone "
 "server to avoid spawning a new process for each incoming connection."
 msgstr ""
-"På den anden side, med højere trafik, skal ProFTPd køre som en alenestående "
+"På den anden side, med højere trafik, skal ProFTPD køre som en uafhængig "
 "server for at undgå kørsel af en ny proces for hver indgående forbindelse."
-
