@@ -19,7 +19,8 @@ Build-Depends: autotools-dev,
                libssl-dev (>= 0.9.8l),
                libwrap0-dev,
                unixodbc-dev,
-               zlib1g-dev
+               zlib1g-dev,
+               libgeoip-dev
 Homepage: http://www.proftpd.org/
 Vcs-Git: git://git.debian.org/pkg-proftpd/proftpd-dfsg.git
 Vcs-Browser: http://git.debian.org/?p=pkg-proftpd/proftpd-dfsg.git
@@ -185,3 +186,19 @@ Description: Versatile, virtual-hosting FTP daemon - SQLite3 module
  upload/download ratios are also supported.
  .
  This package provides SQLite based authentication.
+
+Package: proftpd-mod-geoip
+Architecture: any
+Depends: proftpd-basic (=${binary:Version}), ${misc:Depends}, ${shlibs:Depends}
+Description: Versatile, virtual-hosting FTP daemon - GeoIP module
+ ProFTPD is a powerful modular FTP/SFTP/FTPS server. This File Transfer
+ Protocol daemon supports also hidden directories, virtual hosts, and
+ per-directory ".ftpaccess" files. It uses a single main configuration
+ file, with a syntax similar to Apache.
+ .
+ Because of the advanced design, anonymous-FTP directories can have
+ an arbitrary internal structure (bin, lib, etc, and special files are
+ not needed). Advanced features such as multiple password files and
+ upload/download ratios are also supported.
+ .
+ This package provides GeoIP functionalities.
