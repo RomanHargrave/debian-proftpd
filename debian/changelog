@@ -1,3 +1,10 @@
+proftpd-dfsg (1.3.5~rc2-1) experimental; urgency=low
+
+  * New upstream pre-release.
+  * Refreshed main patchset for 1.3.5 source tree.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Tue, 08 Jan 2013 15:42:27 +0100
+
 proftpd-dfsg (1.3.4a-3) unstable; urgency=low
 
   [SECURITY] New patch 3841 fixes CVE-2012-6095: a possible race

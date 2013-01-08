@@ -7,8 +7,8 @@ Bug-Debian: http://bugs.debian.org/479893
 
 Index: proftpd-dfsg/lib/libcap/Makefile
 ===================================================================
---- proftpd-dfsg.orig/lib/libcap/Makefile	2011-10-05 18:13:28.000000000 +0200
-+++ proftpd-dfsg/lib/libcap/Makefile	2011-10-05 18:14:52.000000000 +0200
+--- proftpd-dfsg.orig/lib/libcap/Makefile	2013-01-08 14:50:16.000000000 +0100
++++ proftpd-dfsg/lib/libcap/Makefile	2013-01-08 15:45:56.000000000 +0100
 @@ -23,7 +23,7 @@
  INCLS=libcap.h cap_names.h $(INCS)
  OBJS=$(addsuffix .o, $(FILES))
@@ -20,9 +20,9 @@ Index: proftpd-dfsg/lib/libcap/Makefile
  	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
 Index: proftpd-dfsg/modules/mod_cap.c
 ===================================================================
---- proftpd-dfsg.orig/modules/mod_cap.c	2011-10-05 18:13:28.000000000 +0200
-+++ proftpd-dfsg/modules/mod_cap.c	2011-10-05 18:14:52.000000000 +0200
-@@ -42,10 +42,8 @@
+--- proftpd-dfsg.orig/modules/mod_cap.c	2013-01-08 15:42:19.000000000 +0100
++++ proftpd-dfsg/modules/mod_cap.c	2013-01-08 15:45:56.000000000 +0100
+@@ -43,10 +43,8 @@
  #  define _LINUX_BYTEORDER_GENERIC_H
  # endif
  
