@@ -1,7 +1,7 @@
 Index: proftpd-dfsg/contrib/mod_sftp/fxp.c
 ===================================================================
---- proftpd-dfsg.orig/contrib/mod_sftp/fxp.c	2013-01-08 14:01:27.000000000 +0100
-+++ proftpd-dfsg/contrib/mod_sftp/fxp.c	2013-01-08 14:01:46.000000000 +0100
+--- proftpd-dfsg.orig/contrib/mod_sftp/fxp.c	2013-01-08 14:04:43.000000000 +0100
++++ proftpd-dfsg/contrib/mod_sftp/fxp.c	2013-01-08 14:10:11.000000000 +0100
 @@ -6093,7 +6093,7 @@
    (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
      "creating directory '%s' with mode 0%o", path, (unsigned int) dir_mode);
@@ -13,8 +13,8 @@ Index: proftpd-dfsg/contrib/mod_sftp/fxp.c
      int xerrno = errno;
 Index: proftpd-dfsg/contrib/mod_sftp/scp.c
 ===================================================================
---- proftpd-dfsg.orig/contrib/mod_sftp/scp.c	2013-01-08 14:01:27.000000000 +0100
-+++ proftpd-dfsg/contrib/mod_sftp/scp.c	2013-01-08 14:01:46.000000000 +0100
+--- proftpd-dfsg.orig/contrib/mod_sftp/scp.c	2013-01-08 14:04:43.000000000 +0100
++++ proftpd-dfsg/contrib/mod_sftp/scp.c	2013-01-08 14:10:11.000000000 +0100
 @@ -731,7 +731,7 @@
           * recursive directory uploads via SCP?
           */
@@ -26,8 +26,8 @@ Index: proftpd-dfsg/contrib/mod_sftp/scp.c
            (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
 Index: proftpd-dfsg/include/fsio.h
 ===================================================================
---- proftpd-dfsg.orig/include/fsio.h	2013-01-08 14:01:27.000000000 +0100
-+++ proftpd-dfsg/include/fsio.h	2013-01-08 14:01:46.000000000 +0100
+--- proftpd-dfsg.orig/include/fsio.h	2013-01-08 14:04:43.000000000 +0100
++++ proftpd-dfsg/include/fsio.h	2013-01-08 14:10:11.000000000 +0100
 @@ -243,6 +243,7 @@
  int pr_fsio_rmdir(const char *);
  int pr_fsio_rename(const char *, const char *);
@@ -38,8 +38,8 @@ Index: proftpd-dfsg/include/fsio.h
  pr_fh_t *pr_fsio_open(const char *, int);
 Index: proftpd-dfsg/modules/mod_core.c
 ===================================================================
---- proftpd-dfsg.orig/modules/mod_core.c	2013-01-08 14:01:27.000000000 +0100
-+++ proftpd-dfsg/modules/mod_core.c	2013-01-08 14:01:46.000000000 +0100
+--- proftpd-dfsg.orig/modules/mod_core.c	2013-01-08 14:04:43.000000000 +0100
++++ proftpd-dfsg/modules/mod_core.c	2013-01-08 14:10:11.000000000 +0100
 @@ -4617,7 +4617,8 @@
      return PR_ERROR(cmd);
    }
@@ -124,8 +124,8 @@ Index: proftpd-dfsg/modules/mod_core.c
  
 Index: proftpd-dfsg/src/fsio.c
 ===================================================================
---- proftpd-dfsg.orig/src/fsio.c	2013-01-08 14:01:27.000000000 +0100
-+++ proftpd-dfsg/src/fsio.c	2013-01-08 14:03:23.000000000 +0100
+--- proftpd-dfsg.orig/src/fsio.c	2013-01-08 14:04:43.000000000 +0100
++++ proftpd-dfsg/src/fsio.c	2013-01-08 14:11:21.000000000 +0100
 @@ -29,6 +29,7 @@
   */
  
@@ -134,7 +134,19 @@ Index: proftpd-dfsg/src/fsio.c
  
  #ifdef HAVE_SYS_STATVFS_H
  # include <sys/statvfs.h>
-@@ -2498,6 +2499,170 @@
+@@ -175,6 +176,11 @@
+   return fchown(fd, uid, gid);
+ }
+ 
++static int sys_lchown(pr_fs_t *fs, const char *path, uid_t uid, gid_t gid) {
++  return lchown(path, uid, gid);
++}
++
++
+ /* We provide our own equivalent of access(2) here, rather than using
+  * access(2) directly, because access(2) uses the real IDs, rather than
+  * the effective IDs, of the process.
+@@ -2498,6 +2504,170 @@
    return res;
  }
  
@@ -305,7 +317,7 @@ Index: proftpd-dfsg/src/fsio.c
  int pr_fsio_rmdir(const char *path) {
    int res;
    pr_fs_t *fs;
-@@ -3357,6 +3522,33 @@
+@@ -3357,6 +3527,33 @@
    return res;
  }
  
@@ -339,7 +351,7 @@ Index: proftpd-dfsg/src/fsio.c
  int pr_fsio_access(const char *path, int mode, uid_t uid, gid_t gid,
      array_header *suppl_gids) {
    pr_fs_t *fs;
-@@ -4015,6 +4207,7 @@
+@@ -4015,6 +4212,7 @@
    root_fs->fchmod = sys_fchmod;
    root_fs->chown = sys_chown;
    root_fs->fchown = sys_fchown;
@@ -347,7 +359,7 @@ Index: proftpd-dfsg/src/fsio.c
    root_fs->access = sys_access;
    root_fs->faccess = sys_faccess;
    root_fs->utimes = sys_utimes;
-@@ -4096,6 +4289,9 @@
+@@ -4096,6 +4294,9 @@
    if (fs->chown)
      hooks = pstrcat(p, hooks, *hooks ? ", " : "", "chown(2)", NULL);
  
