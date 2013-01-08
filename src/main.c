@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2011 The ProFTPD Project team
+ * Copyright (c) 2001-2012 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* House initialization and main program loop
- * $Id: main.c,v 1.437 2011/11/09 17:32:35 castaglia Exp $
+ * $Id: main.c,v 1.449 2012/06/06 18:18:02 castaglia Exp $
  */
 
 #include "conf.h"
@@ -143,8 +143,9 @@ static int semaphore_fds(fd_set *rfd, int maxfd) {
     for (ch = child_get(NULL); ch; ch = child_get(ch)) {
       if (ch->ch_pipefd != -1) {
         FD_SET(ch->ch_pipefd, rfd);
-        if (ch->ch_pipefd > maxfd)
+        if (ch->ch_pipefd > maxfd) {
           maxfd = ch->ch_pipefd;
+        }
       }
     }
   }
@@ -252,7 +253,7 @@ static int get_command_class(const char *name) {
   /* By default, every command has a class of CL_ALL.  This insures that
    * any configured ExtendedLogs that default to "all" will log the command.
    */
-  return (c ? c->class : CL_ALL);
+  return (c ? c->cmd_class : CL_ALL);
 }
 
 static int _dispatch(cmd_rec *cmd, int cmd_type, int validate, char *match) {
@@ -318,7 +319,18 @@ static int _dispatch(cmd_rec *cmd, int cmd_type, int validate, char *match) {
 
         /* The client has successfully authenticated... */
         if (session.user) {
-          char *args = memchr(cmdargstr, ' ', cmdargstrlen);
+          char *args = NULL;
+
+          /* Be defensive, and check whether cmdargstrlen has a value.
+           * If it's zero, assume we need to use strchr(3), rather than
+           * memchr(2); see Bug#3714.
+           */
+          if (cmdargstrlen > 0) {
+            args = memchr(cmdargstr, ' ', cmdargstrlen);
+
+          } else {
+            args = strchr(cmdargstr, ' ');
+          }
 
           pr_scoreboard_entry_update(session.pid,
             PR_SCORE_CMD, "%s", cmd->argv[0], NULL, NULL);
@@ -356,7 +368,7 @@ static int _dispatch(cmd_rec *cmd, int cmd_type, int validate, char *match) {
          "(unknown)"),
         cmdargstr, c->m->name);
 
-      cmd->class |= c->class;
+      cmd->cmd_class |= c->cmd_class;
 
       /* KLUDGE: disable umask() for not G_WRITE operations.  Config/
        * Directory walking code will be completely redesigned in 1.3,
@@ -625,8 +637,8 @@ int pr_cmd_dispatch_phase(cmd_rec *cmd, int phase, int flags) {
   for (cp = cmd->argv[0]; *cp; cp++)
     *cp = toupper(*cp);
 
-  if (cmd->class == 0) {
-    cmd->class = get_command_class(cmd->argv[0]);
+  if (cmd->cmd_class == 0) {
+    cmd->cmd_class = get_command_class(cmd->argv[0]);
   }
 
   if (cmd->cmd_id == 0) {
@@ -807,72 +819,6 @@ static cmd_rec *make_ftp_cmd(pool *p, char *buf, int flags) {
   return cmd;
 }
 
-static void send_session_banner(server_rec *server) {
-  config_rec *c = NULL;
-  char *display = NULL;
-  const char *serveraddress = NULL;
-  config_rec *masq = NULL;
-
-  display = get_param_ptr(server->conf, "DisplayConnect", FALSE);
-  if (display != NULL) {
-    int flags = PR_DISPLAY_FL_NO_EOM|PR_DISPLAY_FL_SEND_NOW;
-
-    if (pr_display_file(display, NULL, R_220, flags) < 0) {
-      pr_log_debug(DEBUG6, "unable to display DisplayConnect file '%s': %s",
-        display, strerror(errno));
-    }
-  }
-
-  serveraddress = pr_netaddr_get_ipstr(session.c->local_addr);
-
-  masq = find_config(server->conf, CONF_PARAM, "MasqueradeAddress", FALSE);
-  if (masq != NULL) {
-    pr_netaddr_t *masq_addr = (pr_netaddr_t *) masq->argv[0];
-    serveraddress = pr_netaddr_get_ipstr(masq_addr);
-  }
-
-  c = find_config(server->conf, CONF_PARAM, "ServerIdent", FALSE);
-  if (c == NULL ||
-      *((unsigned char *) c->argv[0]) == FALSE) {
-    unsigned char *defer_welcome = get_param_ptr(main_server->conf,
-      "DeferWelcome", FALSE);
-
-    if (c &&
-        c->argc > 1) {
-      char *server_ident = c->argv[1];
-
-      if (strstr(server_ident, "%L") != NULL) {
-        server_ident = sreplace(session.pool, server_ident, "%L",
-          pr_netaddr_get_ipstr(session.c->local_addr), NULL);
-      }
-
-      if (strstr(server_ident, "%V") != NULL) {
-        server_ident = sreplace(session.pool, server_ident, "%V",
-          main_server->ServerFQDN, NULL);
-      }
-
-      if (strstr(server_ident, "%v") != NULL) {
-        server_ident = sreplace(session.pool, server_ident, "%v",
-          main_server->ServerName, NULL);
-      }
-
-      pr_response_send(R_220, "%s", server_ident);
-
-    } else if (defer_welcome &&
-               *defer_welcome == TRUE) {
-      pr_response_send(R_220, "ProFTPD " PROFTPD_VERSION_TEXT
-        " Server ready.");
-
-    } else {
-      pr_response_send(R_220, "ProFTPD " PROFTPD_VERSION_TEXT
-        " Server (%s) [%s]", server->ServerName, serveraddress);
-    }
-
-  } else {
-    pr_response_send(R_220, _("%s FTP server ready"), serveraddress);
-  }
-}
-
 static void cmd_loop(server_rec *server, conn_t *c) {
 
   while (TRUE) {
@@ -947,7 +893,7 @@ static void core_restart_cb(void *d1, void *d2, void *d3, void *d4) {
           for (ch = child_get(NULL); ch; ch = child_get(ch)) {
             if (ch->ch_pipefd != -1 &&
                FD_ISSET(ch->ch_pipefd, &childfds)) {
-              close(ch->ch_pipefd);
+              (void) close(ch->ch_pipefd);
               ch->ch_pipefd = -1;
             }
           }
@@ -976,6 +922,8 @@ static void core_restart_cb(void *d1, void *d2, void *d3, void *d4) {
     pr_netaddr_clear_cache();
 
     pr_parser_prepare(NULL, NULL);
+
+    pr_event_generate("core.preparse", NULL);
 
     PRIVS_ROOT
     if (pr_parser_parse_file(NULL, config_filename, NULL, 0) == -1) {
@@ -1034,17 +982,22 @@ static void core_restart_cb(void *d1, void *d2, void *d3, void *d4) {
 
 #ifndef PR_DEVEL_NO_FORK
 static int dup_low_fd(int fd) {
-  int i,need_close[3] = {-1, -1, -1};
+  int i, need_close[3] = {-1, -1, -1};
 
-  for (i = 0; i < 3; i++)
+  for (i = 0; i < 3; i++) {
     if (fd == i) {
       fd = dup(fd);
+      fcntl(fd, F_SETFD, FD_CLOEXEC);
+
       need_close[i] = 1;
     }
+  }
 
-  for (i = 0; i < 3; i++)
-    if (need_close[i] > -1)
-      close(i);
+  for (i = 0; i < 3; i++) {
+    if (need_close[i] > -1) {
+      (void) close(i);
+    }
+  }
 
   return fd;
 }
@@ -1110,9 +1063,14 @@ static void fork_server(int fd, conn_t *l, unsigned char nofork) {
     /* Need to make sure the child (writer) end of the pipe isn't
      * < 2 (stdio/stdout/stderr) as this will cause problems later.
      */
-
-    if (semfds[1] < 3)
+    if (semfds[1] < 3) {
       semfds[1] = dup_low_fd(semfds[1]);
+    }
+
+    /* Make sure we set the close-on-exec flag for the parent's read side
+     * of the pipe.
+     */
+    fcntl(semfds[0], F_SETFD, FD_CLOEXEC);
 
     /* We block SIGCHLD to prevent a race condition if the child
      * dies before we can record it's pid.  Also block SIGTERM to
@@ -1369,10 +1327,10 @@ static void fork_server(int fd, conn_t *l, unsigned char nofork) {
 
   if (main_server->listen) {
     if (main_server->listen->listen_fd == conn->rfd ||
-        main_server->listen->listen_fd == conn->wfd)
+        main_server->listen->listen_fd == conn->wfd) {
       main_server->listen->listen_fd = -1;
+    }
 
-    destroy_pool(main_server->listen->pool);
     main_server->listen = NULL;
   }
 
@@ -1380,10 +1338,10 @@ static void fork_server(int fd, conn_t *l, unsigned char nofork) {
   set_server_privs();
 
   /* Find the class for this session. */
-  session.class = pr_class_match_addr(session.c->remote_addr);
-  if (session.class != NULL) {
+  session.conn_class = pr_class_match_addr(session.c->remote_addr);
+  if (session.conn_class != NULL) {
     pr_log_debug(DEBUG2, "session requested from client in '%s' class",
-      session.class->cls_name);
+      session.conn_class->cls_name);
 
   } else {
     pr_log_debug(DEBUG5, "session requested from client in unknown class");
@@ -1436,7 +1394,8 @@ static void fork_server(int fd, conn_t *l, unsigned char nofork) {
   /* Make sure we can receive OOB data */
   pr_inet_set_async(session.pool, session.c);
 
-  send_session_banner(main_server);
+  pr_session_send_banner(main_server,
+    PR_DISPLAY_FL_NO_EOM|PR_DISPLAY_FL_SEND_NOW);
 
   cmd_handler(main_server, conn);
 
@@ -1616,7 +1575,7 @@ static void daemon_loop(void) {
       for (ch = child_get(NULL); ch; ch = child_get(ch)) {
 	if (ch->ch_pipefd != -1 &&
             FD_ISSET(ch->ch_pipefd, &listenfds)) {
-	  close(ch->ch_pipefd);
+	  (void) close(ch->ch_pipefd);
 	  ch->ch_pipefd = -1;
 	}
 
@@ -2602,7 +2561,8 @@ static void inetd_main(void) {
 
   /* Make sure the scoreboard file exists. */
   PRIVS_ROOT
-  if ((res = pr_open_scoreboard(O_RDWR)) < 0) {
+  res = pr_open_scoreboard(O_RDWR);
+  if (res < 0) {
     PRIVS_RELINQUISH
 
     switch (res) {
@@ -2630,7 +2590,7 @@ static void inetd_main(void) {
     }
   }
   PRIVS_RELINQUISH
-  pr_close_scoreboard();
+  pr_close_scoreboard(FALSE);
 
   pr_event_generate("core.startup", NULL);
 
@@ -2661,7 +2621,8 @@ static void standalone_main(void) {
 
   PRIVS_ROOT
   pr_delete_scoreboard();
-  if ((res = pr_open_scoreboard(O_RDWR)) < 0) {
+  res = pr_open_scoreboard(O_RDWR);
+  if (res < 0) {
     PRIVS_RELINQUISH
 
     switch (res) {
@@ -2686,7 +2647,7 @@ static void standalone_main(void) {
     }
   }
   PRIVS_RELINQUISH
-  pr_close_scoreboard();
+  pr_close_scoreboard(TRUE);
 
   pr_event_generate("core.startup", NULL);
 
@@ -2737,12 +2698,12 @@ static void show_settings(void) {
    * we're a 32- or 64-bit machine.
    */
   res = uname(&uts);
-  if (res == 0) {
-    printf("  Platform: " PR_PLATFORM " [%s %s %s]\n", uts.sysname,
-      uts.release, uts.machine);
+  if (res < 0) {
+    printf("%s", "  Platform: " PR_PLATFORM " [unavailable]\n");
 
   } else {
-    printf("%s", "  Platform: " PR_PLATFORM " [unavailable]\n");
+    printf("  Platform: " PR_PLATFORM " [%s %s %s]\n", uts.sysname,
+      uts.release, uts.machine);
   }
 #else
   printf("%s", "  Platform: " PR_PLATFORM " [unknown]\n");
@@ -3180,6 +3141,7 @@ int main(int argc, char *argv[], char **envp) {
 
   /* Initialize sub-systems */
   init_pools();
+  init_privs();
   init_log();
   init_regexp();
   init_inet();
@@ -3283,15 +3245,8 @@ int main(int argc, char *argv[], char **envp) {
     uid_t *uid = (uid_t *) get_param_ptr(main_server->conf, "UserID", FALSE);
     gid_t *gid = (gid_t *) get_param_ptr(main_server->conf, "GroupID", FALSE);
 
-    if (uid)
-      daemon_uid = *uid;
-    else
-      daemon_uid = PR_ROOT_UID;
-
-    if (gid)
-      daemon_gid = *gid;
-    else
-      daemon_gid = PR_ROOT_GID;
+    daemon_uid = (uid != NULL ? *uid : PR_ROOT_UID);
+    daemon_gid = (gid != NULL ? *gid : PR_ROOT_GID);
   }
 
   if (daemon_uid != PR_ROOT_UID) {

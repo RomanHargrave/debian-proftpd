@@ -2,7 +2,7 @@
  * ProFTPD: mod_delay -- a module for adding arbitrary delays to the FTP
  *                       session lifecycle
  *
- * Copyright (c) 2004-2011 TJ Saunders
+ * Copyright (c) 2004-2012 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,7 +26,7 @@
  * This is mod_delay, contrib software for proftpd 1.2.10 and above.
  * For more information contact TJ Saunders <tj@castaglia.org>.
  *
- * $Id: mod_delay.c,v 1.60 2011/06/05 23:18:23 castaglia Exp $
+ * $Id: mod_delay.c,v 1.64 2012/05/22 05:18:46 castaglia Exp $
  */
 
 #include "conf.h"
@@ -116,7 +116,7 @@ struct delay_rec {
 struct {
   const char *dt_path;
   int dt_fd;
-  off_t dt_size;
+  size_t dt_size;
   void *dt_data;
 
 } delay_tab;
@@ -127,6 +127,7 @@ static unsigned int delay_npass = 0;
 static pool *delay_pool = NULL;
 static struct timeval delay_tv;
 
+static int delay_sess_init(void);
 static void delay_table_reset(void);
 
 #define delay_swap(a, b) \
@@ -535,10 +536,10 @@ static int delay_table_init(void) {
   }
 
   delay_tab.dt_fd = fh->fh_fd;
-  delay_tab.dt_size = tab_size;
+  delay_tab.dt_size = (size_t) tab_size;
 
-  pr_trace_msg(trace_channel, 8, "mapping DelayTable '%s' (%" PR_LU
-    " bytes, fd %d) into memory", fh->fh_path, (pr_off_t) delay_tab.dt_size,
+  pr_trace_msg(trace_channel, 8, "mapping DelayTable '%s' (%lu bytes, fd %d) "
+    "into memory", fh->fh_path, (unsigned long) delay_tab.dt_size,
     delay_tab.dt_fd);
   delay_tab.dt_data = mmap(NULL, delay_tab.dt_size, PROT_READ|PROT_WRITE,
     MAP_SHARED, delay_tab.dt_fd, 0);
@@ -731,9 +732,9 @@ static int delay_table_load(int lock_table) {
   }
 
   if (delay_tab.dt_data == NULL) {
-    pr_trace_msg(trace_channel, 8, "mapping DelayTable '%s' (%" PR_LU
-      " bytes, fd %d) into memory", delay_tab.dt_path,
-      (pr_off_t) delay_tab.dt_size, delay_tab.dt_fd);
+    pr_trace_msg(trace_channel, 8, "mapping DelayTable '%s' (%lu bytes, fd %d) "
+      "into memory", delay_tab.dt_path, (unsigned long) delay_tab.dt_size,
+      delay_tab.dt_fd);
     delay_tab.dt_data = mmap(NULL, delay_tab.dt_size, PROT_READ|PROT_WRITE,
       MAP_SHARED, delay_tab.dt_fd, 0);
 
@@ -1360,6 +1361,31 @@ MODRET delay_pre_pass(cmd_rec *cmd) {
   return PR_DECLINED(cmd);
 }
 
+MODRET delay_post_host(cmd_rec *cmd) {
+
+  /* If the HOST command changed the main_server pointer, reinitialize
+   * ourselves.
+   */
+  if (session.prev_server != NULL) {
+    int res;
+
+    delay_engine = TRUE;
+
+    if (delay_tab.dt_fd > 0) {
+      close(delay_tab.dt_fd);
+      delay_tab.dt_fd = -1;
+    }
+
+    res = delay_sess_init();
+    if (res < 0) {
+      pr_session_disconnect(&delay_module,
+        PR_SESS_DISCONNECT_SESSION_INIT_FAILED, NULL);
+    }
+  }
+
+  return PR_DECLINED(cmd);
+}
+
 MODRET delay_post_user(cmd_rec *cmd) {
   struct timeval tv;
   unsigned int rownum;
@@ -1480,15 +1506,19 @@ static void delay_postparse_ev(const void *event_data, void *user_data) {
   config_rec *c;
 
   c = find_config(main_server->conf, CONF_PARAM, "DelayEngine", FALSE);
-  if (c && *((unsigned int *) c->argv[0]) == FALSE)
+  if (c != NULL &&
+      *((unsigned int *) c->argv[0]) == FALSE) {
     delay_engine = FALSE;
+  }
 
-  if (!delay_engine)
+  if (delay_engine == FALSE) {
     return;
+  }
 
   c = find_config(main_server->conf, CONF_PARAM, "DelayTable", FALSE);
-  if (c)
+  if (c != NULL) {
     delay_tab.dt_path = c->argv[0];
+  }
 
   (void) delay_table_init();
   return;
@@ -1499,8 +1529,12 @@ static void delay_restart_ev(const void *event_data, void *user_data) {
     register unsigned int i;
 #endif /* PR_USE_CTRLS */
 
-  if (delay_pool)
+  delay_tab.dt_path = PR_RUN_DIR "/proftpd.delay";
+  delay_tab.dt_data = NULL;
+
+  if (delay_pool) {
     destroy_pool(delay_pool);
+  }
 
   delay_pool = make_sub_pool(permanent_pool);
   pr_pool_tag(delay_pool, MOD_DELAY_VERSION);
@@ -1629,18 +1663,22 @@ static int delay_sess_init(void) {
   config_rec *c;
   int xerrno = errno;
 
-  if (!delay_engine)
+  if (delay_engine == FALSE) {
     return 0;
+  }
 
   /* Look up DelayEngine again, as it may have been disabled in an
    * <IfClass> section.
    */
   c = find_config(main_server->conf, CONF_PARAM, "DelayEngine", FALSE);
-  if (c && *((unsigned int *) c->argv[0]) == FALSE)
+  if (c != NULL &&
+      *((unsigned int *) c->argv[0]) == FALSE) {
     delay_engine = FALSE;
+  }
 
-  if (!delay_engine)
+  if (delay_engine == FALSE) {
     return 0;
+  }
 
   delay_nuser = 0;
   delay_npass = 0;
@@ -1695,6 +1733,7 @@ static cmdtable delay_cmdtab[] = {
   { PRE_CMD,		C_USER,	G_NONE,	delay_pre_user,		FALSE, FALSE },
   { POST_CMD,		C_USER,	G_NONE,	delay_post_user,	FALSE, FALSE },
   { POST_CMD_ERR,	C_USER,	G_NONE,	delay_post_user,	FALSE, FALSE },
+  { POST_CMD,		C_HOST,	G_NONE, delay_post_host,	FALSE, FALSE },
   { 0, NULL }
 };
 

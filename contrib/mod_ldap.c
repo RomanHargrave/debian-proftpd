@@ -1,6 +1,6 @@
 /*
  * mod_ldap - LDAP password lookup module for ProFTPD
- * Copyright (c) 1999-2010, John Morrissey <jwm@horde.net>
+ * Copyright (c) 1999-2012, John Morrissey <jwm@horde.net>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -45,14 +45,14 @@
  *                                                   LDAPDefaultAuthScheme
  *
  *
- * $Id: mod_ldap.c,v 1.93 2011/05/23 20:56:40 castaglia Exp $
+ * $Id: mod_ldap.c,v 1.98 2012/09/07 18:48:19 jwm Exp $
  * $Libraries: -lldap -llber$
  */
 
 #include "conf.h"
 #include "privs.h"
 
-#define MOD_LDAP_VERSION	"mod_ldap/2.9.0"
+#define MOD_LDAP_VERSION	"mod_ldap/2.9.2"
 
 #if PROFTPD_VERSION_NUMBER < 0x0001030103
 # error MOD_LDAP_VERSION " requires ProFTPD 1.3.1rc3 or later"
@@ -500,7 +500,8 @@ pr_ldap_user_lookup(pool *p,
        */
       if (strcasecmp(attrs[i], ldap_attr_uidnumber) == 0) {
         if (ldap_defaultuid == -1) {
-          pr_log_pri(PR_LOG_ERR, MOD_LDAP_VERSION ": pr_ldap_user_lookup(): no %s attr for DN %s and LDAPDefaultUID was not specified!", (dn = ldap_get_dn(ld, e)), ldap_attr_uidnumber);
+          dn = ldap_get_dn(ld, e);
+          pr_log_pri(PR_LOG_ERR, MOD_LDAP_VERSION ": pr_ldap_user_lookup(): no %s attr for DN %s and LDAPDefaultUID was not specified!", ldap_attr_uidnumber, dn);
           free(dn);
           return NULL;
         }
@@ -512,7 +513,8 @@ pr_ldap_user_lookup(pool *p,
       }
       if (strcasecmp(attrs[i], ldap_attr_gidnumber) == 0) {
         if (ldap_defaultgid == -1) {
-          pr_log_pri(PR_LOG_ERR, MOD_LDAP_VERSION ": pr_ldap_user_lookup(): no %s attr for DN %s and LDAPDefaultGID was not specified!", (dn = ldap_get_dn(ld, e)), ldap_attr_gidnumber);
+          dn = ldap_get_dn(ld, e);
+          pr_log_pri(PR_LOG_ERR, MOD_LDAP_VERSION ": pr_ldap_user_lookup(): no %s attr for DN %s and LDAPDefaultGID was not specified!", ldap_attr_gidnumber, dn);
           free(dn);
           return NULL;
         }
@@ -525,7 +527,8 @@ pr_ldap_user_lookup(pool *p,
 
       if (strcasecmp(attrs[i], ldap_attr_homedirectory) == 0) {
         if (!ldap_genhdir || !ldap_genhdir_prefix || !*ldap_genhdir_prefix) {
-          pr_log_pri(PR_LOG_ERR, MOD_LDAP_VERSION ": pr_ldap_user_lookup(): no %s attr for DN %s and LDAPGenerateHomedirPrefix was not enabled!", (dn = ldap_get_dn(ld, e)), ldap_attr_homedirectory);
+          dn = ldap_get_dn(ld, e);
+          pr_log_pri(PR_LOG_ERR, MOD_LDAP_VERSION ": pr_ldap_user_lookup(): no %s attr for DN %s and LDAPGenerateHomedirPrefix was not enabled!", ldap_attr_homedirectory, dn);
           free(dn);
           return NULL;
         }
@@ -536,7 +539,8 @@ pr_ldap_user_lookup(pool *p,
           LDAP_VALUE_T **canon_username;
           canon_username = LDAP_GET_VALUES(ld, e, ldap_attr_uid);
           if (!canon_username) {
-            pr_log_pri(PR_LOG_ERR, MOD_LDAP_VERSION ": pr_ldap_user_lookup(): couldn't get %s attr for canonical username for %s", ldap_attr_uid, (dn = ldap_get_dn(ld, e)));
+            dn = ldap_get_dn(ld, e);
+            pr_log_pri(PR_LOG_ERR, MOD_LDAP_VERSION ": pr_ldap_user_lookup(): couldn't get %s attr for canonical username for %s", ldap_attr_uid, dn);
             free(dn);
             return NULL;
           }
@@ -563,7 +567,8 @@ pr_ldap_user_lookup(pool *p,
        * fall through so we can complain.
        */
 
-      pr_log_pri(PR_LOG_ERR, MOD_LDAP_VERSION ": pr_ldap_user_lookup(): couldn't get values for attr %s for DN %s, ignoring request (perhaps this DN's entry does not have the attr?)", attrs[i], (dn = ldap_get_dn(ld, e)));
+      dn = ldap_get_dn(ld, e);
+      pr_log_pri(PR_LOG_ERR, MOD_LDAP_VERSION ": pr_ldap_user_lookup(): couldn't get values for attr %s for DN %s, ignoring request (perhaps this DN's entry does not have the attr?)", attrs[i], dn);
       free(dn);
       ldap_msgfree(result);
       return NULL;
@@ -603,7 +608,8 @@ pr_ldap_user_lookup(pool *p,
           LDAP_VALUE_T **canon_username;
           canon_username = LDAP_GET_VALUES(ld, e, ldap_attr_uid);
           if (!canon_username) {
-            pr_log_pri(PR_LOG_ERR, MOD_LDAP_VERSION ": pr_ldap_user_lookup(): couldn't get %s attr for canonical username for %s", ldap_attr_uid, (dn = ldap_get_dn(ld, e)));
+            dn = ldap_get_dn(ld, e);
+            pr_log_pri(PR_LOG_ERR, MOD_LDAP_VERSION ": pr_ldap_user_lookup(): couldn't get %s attr for canonical username for %s", ldap_attr_uid, dn);
             free(dn);
             return NULL;
           }
@@ -688,7 +694,8 @@ pr_ldap_group_lookup(pool *p,
       }
 
       ldap_msgfree(result);
-      pr_log_pri(PR_LOG_ERR, MOD_LDAP_VERSION ": pr_ldap_group_lookup(): couldn't get values for attr %s for DN %s, ignoring request (perhaps that DN does not have that attr?)", attrs[i], (dn = ldap_get_dn(ld, e)));
+      dn = ldap_get_dn(ld, e);
+      pr_log_pri(PR_LOG_ERR, MOD_LDAP_VERSION ": pr_ldap_group_lookup(): couldn't get values for attr %s for DN %s, ignoring request (perhaps that DN does not have that attr?)", attrs[i], dn);
       free(dn);
       return NULL;
     }
@@ -980,11 +987,19 @@ pr_ldap_getpwuid(pool *p, uid_t uid)
 MODRET
 handle_ldap_quota_lookup(cmd_rec *cmd)
 {
+  char *basedn;
+
+  basedn = pr_ldap_interpolate_filter(cmd->tmp_pool,
+    ldap_user_basedn, cmd->argv[0]);
+  if (!basedn) {
+    return PR_DECLINED(cmd);
+  }
+
   if (cached_quota == NULL ||
       strcasecmp(((char **)cached_quota->elts)[0], cmd->argv[0]) != 0)
   {
     if (pr_ldap_quota_lookup(cmd->tmp_pool, ldap_user_name_filter,
-                             cmd->argv[0], ldap_user_basedn) == FALSE)
+                             cmd->argv[0], basedn) == FALSE)
     {
       return PR_DECLINED(cmd);
     }
@@ -1978,14 +1993,14 @@ ldap_getconf(void)
     ldap_do_users = 1;
     ldap_user_basedn = pstrdup(session.pool, c->argv[0]);
 
-    if (c->argv[1]) {
+    if (c->argc > 1) {
       ldap_user_name_filter = pstrdup(session.pool, c->argv[1]);
     } else {
       ldap_user_name_filter = pstrcat(session.pool,
         "(&(", ldap_attr_uid, "=%v)(objectclass=posixAccount))", NULL);
     }
 
-    if (c->argv[2]) {
+    if (c->argc > 2) {
       ldap_user_uid_filter = pstrdup(session.pool, c->argv[2]);
     } else {
       ldap_user_uid_filter = pstrcat(session.pool,

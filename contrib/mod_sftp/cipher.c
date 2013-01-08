@@ -1,6 +1,6 @@
 /*
  * ProFTPD - mod_sftp ciphers
- * Copyright (c) 2008-2011 TJ Saunders
+ * Copyright (c) 2008-2012 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: cipher.c,v 1.9 2011/05/23 21:03:12 castaglia Exp $
+ * $Id: cipher.c,v 1.12 2012/07/20 20:41:34 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -151,8 +151,8 @@ static void clear_cipher(struct sftp_cipher *cipher) {
 }
 
 static int set_cipher_iv(struct sftp_cipher *cipher, const EVP_MD *hash,
-    const char *k, uint32_t klen, const char *h, uint32_t hlen, char *letter,
-    const unsigned char *id, uint32_t id_len) {
+    const unsigned char *k, uint32_t klen, const char *h, uint32_t hlen,
+    char *letter, const unsigned char *id, uint32_t id_len) {
 
   EVP_MD_CTX ctx;
   unsigned char *iv = NULL;
@@ -166,6 +166,13 @@ static int set_cipher_iv(struct sftp_cipher *cipher, const EVP_MD *hash,
 
   } else {
     iv_sz = EVP_MD_size(hash);
+  }
+
+  if (iv_sz == 0) {
+    (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+      "unable to determine IV length for cipher '%s'", cipher->algo);
+    errno = EINVAL;
+    return -1;
   }
 
   iv = malloc(iv_sz);
@@ -209,8 +216,8 @@ static int set_cipher_iv(struct sftp_cipher *cipher, const EVP_MD *hash,
 }
 
 static int set_cipher_key(struct sftp_cipher *cipher, const EVP_MD *hash,
-    const char *k, uint32_t klen, const char *h, uint32_t hlen, char *letter,
-    const unsigned char *id, uint32_t id_len) {
+    const unsigned char *k, uint32_t klen, const char *h, uint32_t hlen,
+    char *letter, const unsigned char *id, uint32_t id_len) {
 
   EVP_MD_CTX ctx;
   unsigned char *key = NULL;
@@ -220,6 +227,13 @@ static int set_cipher_key(struct sftp_cipher *cipher, const EVP_MD *hash,
   key_sz = sftp_crypto_get_size(cipher->key_len > 0 ?
       cipher->key_len : EVP_CIPHER_key_length(cipher->cipher),
     EVP_MD_size(hash));
+
+  if (key_sz == 0) {
+    (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+      "unable to determine key length for cipher '%s'", cipher->algo);
+    errno = EINVAL;
+    return -1;
+  }
 
   key = malloc(key_sz);
   if (key == NULL) {
@@ -339,7 +353,8 @@ int sftp_cipher_set_read_algo(const char *algo) {
 int sftp_cipher_set_read_key(pool *p, const EVP_MD *hash, const BIGNUM *k,
     const char *h, uint32_t hlen) {
   const unsigned char *id = NULL;
-  char letter, *buf, *ptr;
+  unsigned char *buf, *ptr;
+  char letter;
   uint32_t buflen, bufsz, id_len;
   int key_len;
   struct sftp_cipher *cipher;
@@ -500,7 +515,8 @@ int sftp_cipher_set_write_algo(const char *algo) {
 int sftp_cipher_set_write_key(pool *p, const EVP_MD *hash, const BIGNUM *k,
     const char *h, uint32_t hlen) {
   const unsigned char *id = NULL;
-  char letter, *buf, *ptr;
+  unsigned char *buf, *ptr;
+  char letter;
   uint32_t buflen, bufsz, id_len;
   int key_len;
   struct sftp_cipher *cipher;
@@ -589,7 +605,7 @@ int sftp_cipher_write_data(struct ssh2_packet *pkt, char *buf, size_t *buflen) {
 
   if (cipher->key) {
     int res;
-    char *data, *ptr;
+    unsigned char *data, *ptr;
     uint32_t datalen, datasz = sizeof(uint32_t) + pkt->packet_len;
 
     datalen = datasz;
@@ -606,6 +622,7 @@ int sftp_cipher_write_data(struct ssh2_packet *pkt, char *buf, size_t *buflen) {
       (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
         "error encrypting %s data for client: %s", cipher->algo,
         sftp_crypto_get_errors());
+      errno = EIO;
       return -1;
     }
 
@@ -633,6 +650,5 @@ int sftp_cipher_write_data(struct ssh2_packet *pkt, char *buf, size_t *buflen) {
   }
 
   *buflen = 0;
-
   return 0;
 }

@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2010-2011 The ProFTPD Project team
+ * Copyright (c) 2010-2012 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@
  */
 
 /* Memcache management
- * $Id: memcache.c,v 1.23 2011/09/06 17:21:48 castaglia Exp $
+ * $Id: memcache.c,v 1.25 2012/01/26 17:55:07 castaglia Exp $
  */
 
 #include "conf.h"

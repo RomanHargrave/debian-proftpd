@@ -1,6 +1,6 @@
 /*
  * ProFTPD - mod_sftp MACs
- * Copyright (c) 2008-2010 TJ Saunders
+ * Copyright (c) 2008-2012 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: mac.c,v 1.9 2011/09/09 18:13:53 castaglia Exp $
+ * $Id: mac.c,v 1.12 2012/07/20 20:41:34 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -143,8 +143,8 @@ static void clear_mac(struct sftp_mac *mac) {
 }
 
 static int set_mac_key(struct sftp_mac *mac, const EVP_MD *hash,
-    const char *k, uint32_t klen, const char *h, uint32_t hlen, char *letter,
-    const unsigned char *id, uint32_t id_len) {
+    const unsigned char *k, uint32_t klen, const char *h, uint32_t hlen,
+    char *letter, const unsigned char *id, uint32_t id_len) {
  
   EVP_MD_CTX ctx;
   unsigned char *key = NULL;
@@ -153,6 +153,13 @@ static int set_mac_key(struct sftp_mac *mac, const EVP_MD *hash,
  
   key_sz = sftp_crypto_get_size(EVP_MD_block_size(mac->digest),
     EVP_MD_size(hash)); 
+
+  if (key_sz == 0) {
+    (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+      "unable to determine key length for MAC '%s'", mac->algo);
+    errno = EINVAL;
+    return -1;
+  }
 
   key = malloc(key_sz);
   if (key == NULL) {
@@ -355,7 +362,7 @@ int sftp_mac_set_read_algo(const char *algo) {
 int sftp_mac_set_read_key(pool *p, const EVP_MD *hash, const BIGNUM *k,
     const char *h, uint32_t hlen) {
   const unsigned char *id = NULL;
-  char *buf, *ptr;
+  unsigned char *buf, *ptr;
   uint32_t buflen, bufsz, id_len;
   char letter;
   size_t blocksz;
@@ -420,8 +427,7 @@ int sftp_mac_read_data(struct ssh2_packet *pkt) {
   mac_ctx = &(read_ctxs[read_mac_idx]);
 
   if (mac->key) {
-    unsigned char *mac_data;
-    char *buf, *ptr;
+    unsigned char *buf, *ptr, *mac_data;
     uint32_t buflen, bufsz = (sizeof(uint32_t) * 2) + pkt->packet_len,
       mac_len = 0;
 
@@ -561,7 +567,7 @@ int sftp_mac_set_write_algo(const char *algo) {
 int sftp_mac_set_write_key(pool *p, const EVP_MD *hash, const BIGNUM *k,
     const char *h, uint32_t hlen) {
   const unsigned char *id = NULL;
-  char *buf, *ptr;
+  unsigned char *buf, *ptr;
   uint32_t buflen, bufsz, id_len;
   char letter;
   struct sftp_mac *mac;
@@ -605,7 +611,7 @@ int sftp_mac_write_data(struct ssh2_packet *pkt) {
 
   if (mac->key) {
     unsigned char *mac_data;
-    char *buf, *ptr;
+    unsigned char *buf, *ptr;
     uint32_t buflen, bufsz = (sizeof(uint32_t) * 2) + pkt->packet_len,
       mac_len = 0;
 
@@ -663,6 +669,8 @@ int sftp_mac_write_data(struct ssh2_packet *pkt) {
       (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
         "error computing MAC using %s: %s", mac->algo,
         sftp_crypto_get_errors());
+
+      errno = EIO;
       return -1;
     }
 

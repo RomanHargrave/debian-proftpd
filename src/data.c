@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2011 The ProFTPD Project team
+ * Copyright (c) 2001-2012 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* Data connection management functions
- * $Id: data.c,v 1.138 2011/05/23 21:22:24 castaglia Exp $
+ * $Id: data.c,v 1.144 2012/10/03 16:22:52 castaglia Exp $
  */
 
 #include "conf.h"
@@ -60,8 +60,8 @@ static int timeout_stalled = PR_TUNABLE_TIMEOUTSTALLED;
  */
 static int stalled_timeout_cb(CALLBACK_FRAME) {
   pr_event_generate("core.timeout-stalled", NULL);
-  pr_log_pri(PR_LOG_NOTICE, "Data transfer stall timeout: %d seconds",
-    timeout_stalled);
+  pr_log_pri(PR_LOG_NOTICE, "Data transfer stall timeout: %d %s",
+    timeout_stalled, timeout_stalled != 1 ? "seconds" : "second");
   pr_session_disconnect(NULL, PR_SESS_DISCONNECT_TIMEOUT,
     "TimeoutStalled during data transfer");
 
@@ -79,8 +79,9 @@ static RETSIGTYPE data_urgent(int signo) {
       "setting 'aborted' session flag", signo);
     session.sf_flags |= SF_ABORT;
 
-    if (nstrm)
+    if (nstrm) {
       pr_netio_abort(nstrm);
+    }
   }
 
   signal(SIGURG, data_urgent);
@@ -261,11 +262,13 @@ static int data_pasv_open(char *reason, off_t size) {
 
   if (session.xfer.direction == PR_NETIO_IO_RD) {
     pr_inet_set_socket_opts(session.d->pool, session.d,
-      (main_server->tcp_rcvbuf_override ? main_server->tcp_rcvbuf_len : 0), 0);
+      (main_server->tcp_rcvbuf_override ? main_server->tcp_rcvbuf_len : 0), 0,
+      main_server->tcp_keepalive);
 
   } else {
     pr_inet_set_socket_opts(session.d->pool, session.d,
-      0, (main_server->tcp_sndbuf_override ? main_server->tcp_sndbuf_len : 0));
+      0, (main_server->tcp_sndbuf_override ? main_server->tcp_sndbuf_len : 0),
+      main_server->tcp_keepalive);
   }
 
   c = pr_inet_accept(session.pool, session.d, session.c, -1, -1, TRUE);
@@ -332,8 +335,9 @@ static int data_pasv_open(char *reason, off_t size) {
 
 static int data_active_open(char *reason, off_t size) {
   conn_t *c;
-  int rev;
+  int bind_port, rev;
   pr_netaddr_t *bind_addr;
+  unsigned char *root_revoke = NULL;
 
   if (!reason && session.xfer.filename)
     reason = session.xfer.filename;
@@ -348,8 +352,35 @@ static int data_active_open(char *reason, off_t size) {
     bind_addr = pr_netaddr_v6tov4(session.xfer.p, session.c->local_addr);
   }
 
-  session.d = pr_inet_create_conn(session.pool, -1, bind_addr,
-    session.c->local_port-1, TRUE);
+  /* Default source port to which to bind for the active transfer, as
+   * per RFC959.
+   */
+  bind_port = session.c->local_port-1;
+
+  /* A RootRevoke value of 0 indicates 'false', 1 indicates 'true', and
+   * 2 indicates 'NonCompliantActiveTransfer'.  We change the source port for
+   * a RootRevoke value of 2.
+   */
+  root_revoke = get_param_ptr(TOPLEVEL_CONF, "RootRevoke", FALSE);
+  if (root_revoke != NULL &&
+      *root_revoke == 2) {
+    bind_port = INPORT_ANY;
+  }
+
+  session.d = pr_inet_create_conn(session.pool, -1, bind_addr, bind_port, TRUE);
+
+  /* Default remote address to which to connect for an active transfer,
+   * if the client has not specified a different address via PORT/EPRT,
+   * as per RFC 959.
+   */
+  if (pr_netaddr_get_family(&session.data_addr) == AF_UNSPEC) {
+    pr_log_debug(DEBUG6, "Client has not sent previous PORT/EPRT command, "
+      "defaulting to %s#%u for active transfer",
+      pr_netaddr_get_ipstr(session.c->remote_addr), session.c->remote_port);
+
+    pr_netaddr_set_family(&session.data_addr, pr_netaddr_get_family(session.c->remote_addr));
+    pr_netaddr_set_sockaddr(&session.data_addr, pr_netaddr_get_sockaddr(session.c->remote_addr));
+  }
 
   /* Set the "stalled" timer, if any, to prevent the connection
    * open from taking too long
@@ -365,11 +396,13 @@ static int data_active_open(char *reason, off_t size) {
 
   if (session.xfer.direction == PR_NETIO_IO_RD) {
     pr_inet_set_socket_opts(session.d->pool, session.d,
-      (main_server->tcp_rcvbuf_override ? main_server->tcp_rcvbuf_len : 0), 0);
+      (main_server->tcp_rcvbuf_override ? main_server->tcp_rcvbuf_len : 0), 0,
+      main_server->tcp_keepalive);
     
   } else {
     pr_inet_set_socket_opts(session.d->pool, session.d,
-      0, (main_server->tcp_sndbuf_override ? main_server->tcp_sndbuf_len : 0));
+      0, (main_server->tcp_sndbuf_override ? main_server->tcp_sndbuf_len : 0),
+      main_server->tcp_keepalive);
   }
 
   /* Make sure that the necessary socket options are set on the socket prior
@@ -382,8 +415,14 @@ static int data_active_open(char *reason, off_t size) {
 
   if (pr_inet_connect(session.d->pool, session.d, &session.data_addr,
       session.data_port) == -1) {
+    pr_log_debug(DEBUG6,
+      "Error connecting to %s#%u for active data transfer: %s",
+      pr_netaddr_get_ipstr(&session.data_addr), session.data_port,
+      strerror(session.d->xerrno));
     pr_response_add_err(R_425, _("Unable to build data connection: %s"),
       strerror(session.d->xerrno));
+    errno = session.d->xerrno;
+
     destroy_pool(session.d->pool);
     session.d = NULL;
     return -1;
@@ -401,12 +440,14 @@ static int data_active_open(char *reason, off_t size) {
       pr_netaddr_get_ipstr(session.d->remote_addr), session.d->remote_port);
 
     if (session.xfer.xfer_type != STOR_UNIQUE) {
-      if (size)
+      if (size) {
         pr_response_send(R_150, _("Opening %s mode data connection for %s "
           "(%" PR_LU " bytes)"), MODE_STRING, reason, (pr_off_t) size);
-      else
+
+      } else {
         pr_response_send(R_150, _("Opening %s mode data connection for %s"),
           MODE_STRING, reason);
+      }
 
     } else {
 
@@ -440,6 +481,8 @@ static int data_active_open(char *reason, off_t size) {
 
   pr_response_add_err(R_425, _("Unable to build data connection: %s"),
     strerror(session.d->xerrno));
+  errno = session.d->xerrno;
+
   destroy_pool(session.d->pool);
   session.d = NULL;
   return -1;
@@ -504,7 +547,7 @@ void pr_data_reset(void) {
   }
 
   session.d = NULL;
-  session.sf_flags &= (SF_ALL^(SF_ABORT|SF_XFER|SF_PASSIVE|SF_ASCII_OVERRIDE|SF_EPSV_ALL));
+  session.sf_flags &= (SF_ALL^(SF_ABORT|SF_POST_ABORT|SF_XFER|SF_PASSIVE|SF_ASCII_OVERRIDE|SF_EPSV_ALL));
 }
 
 void pr_data_init(char *filename, int direction) {
@@ -512,9 +555,10 @@ void pr_data_init(char *filename, int direction) {
     data_new_xfer(filename, direction);
 
   } else {
-    if (!(session.sf_flags & SF_PASSIVE))
+    if (!(session.sf_flags & SF_PASSIVE)) {
       pr_log_debug(DEBUG0, "data_init oddity: session.xfer exists in "
         "non-PASV mode.");
+    }
 
     session.xfer.direction = direction;
   }
@@ -524,7 +568,7 @@ int pr_data_open(char *filename, char *reason, int direction, off_t size) {
   int res = 0;
 
   /* Make sure that any abort flags have been cleared. */
-  session.sf_flags &= ~SF_ABORT;
+  session.sf_flags &= ~(SF_ABORT|SF_POST_ABORT);
 
   if (session.xfer.p == NULL) {
     data_new_xfer(filename, direction);
@@ -652,8 +696,9 @@ void pr_data_close(int quiet) {
   session.sf_flags &= (SF_ALL^(SF_ABORT|SF_XFER|SF_PASSIVE|SF_ASCII_OVERRIDE));
   pr_session_set_idle();
 
-  if (!quiet)
+  if (!quiet) {
     pr_response_add(R_226, _("Transfer complete"));
+  }
 }
 
 /* Note: true_abort may be false in real abort situations, because
@@ -690,11 +735,12 @@ void pr_data_abort(int err, int quiet) {
   nstrm = NULL;
 
   if (session.d) {
-    if (!true_abort)
+    if (true_abort == FALSE) {
       pr_inet_lingering_close(session.pool, session.d, timeout_linger);
 
-    else
+    } else {
       pr_inet_lingering_abort(session.pool, session.d, timeout_linger);
+    }
 
     session.d = NULL;
   }
@@ -714,13 +760,10 @@ void pr_data_abort(int err, int quiet) {
   /* Aborts no longer necessary */
   signal(SIGURG, SIG_IGN);
 
-  if (timeout_noxfer)
-    pr_timer_reset(PR_TIMER_NOXFER, ANY_MODULE);
-
   if (!quiet) {
-    char	*respcode = R_426;
-    char	*msg = NULL;
-    char	msgbuf[64];
+    char *respcode = R_426;
+    char *msg = NULL;
+    char msgbuf[64];
 
     switch (err) {
 
@@ -870,12 +913,14 @@ void pr_data_abort(int err, int quiet) {
     /* If we are aborting, then a 426 response has already been sent,
      * and we don't want to add another to the error queue.
      */
-    if (!true_abort)
+    if (true_abort == FALSE) {
       pr_response_add_err(respcode, _("Transfer aborted. %s"), msg ? msg : "");
+    }
   }
 
-  if (true_abort)
+  if (true_abort) {
     session.sf_flags |= SF_POST_ABORT;
+  }
 }
 
 /* From response.c.  XXX Need to provide these symbols another way. */
@@ -1086,8 +1131,24 @@ int pr_data_xfer(char *cl_buf, int cl_size) {
 
         len = pr_netio_read(session.d->instrm, buf + buflen,
           session.xfer.bufsize - buflen, 1);
-        if (len < 0)
+        while (len < 0) {
+          int xerrno = errno;
+ 
+          if (xerrno == EAGAIN) {
+            /* Since our socket is in non-blocking mode, read(2) can return
+             * EAGAIN if there is no data yet for us.  Handle this by
+             * delaying temporarily, then trying again.
+             */
+            errno = EINTR;
+            pr_signals_handle();
+            
+            len = pr_netio_read(session.d->instrm, buf + buflen,
+              session.xfer.bufsize - buflen, 1);
+            continue;
+          }
+
           return -1;
+        }
 
         /* Before we process the data read from the client, generate an event
          * for any listeners which may want to examine this data.
@@ -1168,31 +1229,50 @@ int pr_data_xfer(char *cl_buf, int cl_size) {
       /* Return how much data we actually copied into the client buffer. */
       len = buflen;
 
-    } else if ((len = pr_netio_read(session.d->instrm, cl_buf,
-        cl_size, 1)) > 0) {
+    } else {
+      len = pr_netio_read(session.d->instrm, cl_buf, cl_size, 1);
+      while (len < 0) {
+        int xerrno = errno;
 
-      /* Before we process the data read from the client, generate an event
-       * for any listeners which may want to examine this data.
-       */
+        if (xerrno == EAGAIN) {
+          /* Since our socket is in non-blocking mode, read(2) can return
+           * EAGAIN if there is no data yet for us.  Handle this by
+           * delaying temporarily, then trying again.
+           */
+          errno = EINTR;
+          pr_signals_handle();
+           
+          len = pr_netio_read(session.d->instrm, cl_buf, cl_size, 1);
+          continue;
+        }
 
-      pbuf = pcalloc(session.xfer.p, sizeof(pr_buffer_t));
-      pbuf->buf = buf;
-      pbuf->buflen = len;
-      pbuf->current = pbuf->buf;
-      pbuf->remaining = 0;
-
-      pr_event_generate("core.data-read", pbuf);
-
-      /* The event listeners may have changed the data to write out. */
-      buf = pbuf->buf;
-      len = pbuf->buflen - pbuf->remaining;
-
-      /* Non-ASCII mode doesn't need to use session.xfer.buf */
-      if (timeout_stalled) {
-        pr_timer_reset(PR_TIMER_STALLED, ANY_MODULE);
+        break;
       }
 
-      total += len;
+      if (len > 0) {
+        /* Before we process the data read from the client, generate an event
+         * for any listeners which may want to examine this data.
+         */
+
+        pbuf = pcalloc(session.xfer.p, sizeof(pr_buffer_t));
+        pbuf->buf = buf;
+        pbuf->buflen = len;
+        pbuf->current = pbuf->buf;
+        pbuf->remaining = 0;
+
+        pr_event_generate("core.data-read", pbuf);
+
+        /* The event listeners may have changed the data to write out. */
+        buf = pbuf->buf;
+        len = pbuf->buflen - pbuf->remaining;
+
+        /* Non-ASCII mode doesn't need to use session.xfer.buf */
+        if (timeout_stalled) {
+          pr_timer_reset(PR_TIMER_STALLED, ANY_MODULE);
+        }
+
+        total += len;
+      } 
     }
 
   } else { /* PR_NETIO_IO_WR */
@@ -1223,9 +1303,24 @@ int pr_data_xfer(char *cl_buf, int cl_size) {
       }
 
       bwrote = pr_netio_write(session.d->outstrm, session.xfer.buf, xferbuflen);
+      while (bwrote < 0) {
+        int xerrno = errno;
 
-      if (bwrote < 0)
+        if (xerrno == EAGAIN) {
+          /* Since our socket is in non-blocking mode, write(2) can return
+           * EAGAIN if there is not enough from for our data yet.  Handle
+           * this by delaying temporarily, then trying again.
+           */
+          errno = EINTR;
+          pr_signals_handle();
+             
+          bwrote = pr_netio_write(session.d->outstrm, session.xfer.buf,
+            xferbuflen);
+          continue;
+        }
+
         return -1;
+      }
 
       if (bwrote > 0) {
         if (timeout_stalled) {

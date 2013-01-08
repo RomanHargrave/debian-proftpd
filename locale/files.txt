@@ -4,10 +4,12 @@
 ../contrib/mod_deflate.c
 ../contrib/mod_dynmasq.c
 ../contrib/mod_exec.c
+../contrib/mod_geoip.c
 ../contrib/mod_ifsession.c
 ../contrib/mod_ifversion.c
 ../contrib/mod_ldap.c
 ../contrib/mod_load/getloadavg.c
+../contrib/mod_load/mod_load.c
 ../contrib/mod_qos.c
 ../contrib/mod_quotatab.c
 ../contrib/mod_quotatab_file.c
@@ -19,6 +21,8 @@
 ../contrib/mod_ratio.c
 ../contrib/mod_readme.c
 ../contrib/mod_rewrite.c
+../contrib/mod_sftp/agent.c
+../contrib/mod_sftp/agent.h
 ../contrib/mod_sftp/auth.c
 ../contrib/mod_sftp/auth.h
 ../contrib/mod_sftp/auth-hostbased.c
@@ -35,6 +39,8 @@
 ../contrib/mod_sftp/compress.h
 ../contrib/mod_sftp/crypto.c
 ../contrib/mod_sftp/crypto.h
+../contrib/mod_sftp/date.c
+../contrib/mod_sftp/date.h
 ../contrib/mod_sftp/disconnect.c
 ../contrib/mod_sftp/disconnect.h
 ../contrib/mod_sftp/display.c

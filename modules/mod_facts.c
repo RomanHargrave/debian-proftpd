@@ -1,7 +1,7 @@
 /*
  * ProFTPD: mod_facts -- a module for handling "facts" [RFC3659]
  *
- * Copyright (c) 2007-2011 The ProFTPD Project
+ * Copyright (c) 2007-2012 The ProFTPD Project
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -22,7 +22,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: mod_facts.c,v 1.45 2011/05/23 21:11:56 castaglia Exp $
+ * $Id: mod_facts.c,v 1.54 2012/12/28 23:20:59 castaglia Exp $
  */
 
 #include "conf.h"
@@ -46,7 +46,9 @@ static unsigned long facts_opts = 0;
 #define FACTS_OPT_SHOW_UNIX_MODE	0x00040
 #define FACTS_OPT_SHOW_UNIX_OWNER	0x00080
 
-#define FACTS_MLINFO_FL_SHOW_SYMLINKS	0x00001
+static unsigned long facts_mlinfo_opts = 0;
+#define FACTS_MLINFO_FL_SHOW_SYMLINKS			0x00001
+#define FACTS_MLINFO_FL_SHOW_SYMLINKS_USE_SLINK		0x00002
 
 struct mlinfo {
   pool *pool;
@@ -59,6 +61,7 @@ struct mlinfo {
 
 /* Necessary prototypes */
 static void facts_mlinfobuf_flush(void);
+static int facts_sess_init(void);
 
 /* Support functions
  */
@@ -85,73 +88,117 @@ static int facts_filters_allow_path(cmd_rec *cmd, const char *path) {
   return 0;
 }
 
-static time_t facts_mktime(unsigned int year, unsigned int month,
-    unsigned int mday, unsigned int hour, unsigned int min, unsigned int sec) {
-  struct tm tm;
-  time_t res;
-  char *env;
+#define FACTS_SECS_PER_MIN	(60)
+#define FACTS_SECS_PER_HOUR	(60 * FACTS_SECS_PER_MIN)
+#define FACTS_SECS_PER_DAY	(24 * FACTS_SECS_PER_HOUR)
+#define FACTS_EPOCH_YEAR	1970
 
-#ifdef HAVE_TZNAME
-  char *tzname_dup[2];
+/* How many days come before each month (0-12).  */
+static const unsigned short int facts_ydays_for_mon[2][13] = {
+  /* Normal years.  */
+  { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365 },
 
-  /* The mktime(3) function has a nasty habit of changing the tzname global
-   * variable as a side-effect.  This can cause problems, as when the process
-   * has become chrooted, and mktime(3) sets/changes tzname wrong.  (For more
-   * information on the tzname global variable, see the tzset(3) man page.)
-   *
-   * The best way to deal with this issue (which is especially prominent
-   * on systems running glibc-2.3 or later, which is particularly ill-behaved
-   * in a chrooted environment, as it assumes the ability to find system
-   * timezone files at paths which are no longer valid within the chroot)
-   * is to set the TZ environment variable explicitly, before starting
-   * proftpd.  You can also use the SetEnv configuration directive within
-   * the proftpd.conf to set the TZ environment variable, e.g.:
-   *
-   *  SetEnv TZ PST
-   *
-   * To try to help sites which fail to do this, the tzname global variable
-   * will be copied prior to the mktime(3) call, and the copy restored after
-   * the call.  (Note that calling the ctime(3) and localtime(3) functions also
-   * causes a similar overwriting/setting of the tzname environment variable.)
-   */
-  memcpy(&tzname_dup, tzname, sizeof(tzname_dup));
-#endif /* HAVE_TZNAME */
+  /* Leap years.  */
+  { 0, 31, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335, 366 }
+};
 
-  env = pr_env_get(session.pool, "TZ");
+static unsigned long facts_secs_per_min(unsigned int min) {
+  unsigned long nsecs;
 
-  /* Set the TZ environment to be GMT, so that mktime(3) treats the timestamp
-   * provided by the client as being in GMT/UTC.
-   */
-  if (pr_env_set(session.pool, "TZ", "GMT") < 0) {
-    pr_log_debug(DEBUG8, MOD_FACTS_VERSION
-      ": error setting TZ environment variable to 'GMT': %s", strerror(errno));
-  }
+  nsecs = (min * FACTS_SECS_PER_MIN);
+  return nsecs;
+}
 
-  tm.tm_sec = sec;
-  tm.tm_min = min;
-  tm.tm_hour = hour;
-  tm.tm_mday = mday;
-  tm.tm_mon = (month - 1);
-  tm.tm_year = (year - 1900);
-  tm.tm_wday = 0;
-  tm.tm_yday = 0;
-  tm.tm_isdst = -1;
+static unsigned long facts_secs_per_hour(unsigned int hour) {
+  unsigned long nsecs;
 
-  res = mktime(&tm);
+  nsecs = (hour * FACTS_SECS_PER_HOUR);
+  return nsecs;
+}
 
-  /* Restore the old TZ setting, if any. */
-  if (env) {
-    if (pr_env_set(session.pool, "TZ", env) < 0) {
-      pr_log_debug(DEBUG8, MOD_FACTS_VERSION
-        ": error setting TZ environment variable to '%s': %s", env,
-        strerror(errno));
+static unsigned long facts_secs_per_day(unsigned long ndays) {
+  unsigned long nsecs;
+
+  nsecs = (ndays * FACTS_SECS_PER_DAY);
+  return nsecs;
+}
+
+/* Every 4th year is a leap year, except for every 100th year, but including
+ * every 400th year.
+ */
+static int facts_leap_year(unsigned int year) {
+  int leap_year = 0;
+
+  if ((year % 4) == 0) {
+    leap_year = 1;
+
+    if ((year % 100) == 0) {
+      leap_year = 0;
+
+      if ((year % 400) == 0) {
+        leap_year = 1;
+      }
     }
   }
 
-#ifdef HAVE_TZNAME
-  /* Restore the old tzname values prior to returning. */
-  memcpy(tzname, tzname_dup, sizeof(tzname_dup));
-#endif /* HAVE_TZNAME */
+  return leap_year;
+}
+
+static unsigned long facts_secs_per_mon(unsigned int mon, unsigned int year) {
+  int leap_year;
+  static unsigned int ndays;
+  static unsigned long nsecs;
+
+  leap_year = facts_leap_year(year);
+  ndays = facts_ydays_for_mon[leap_year][mon-1];
+
+  nsecs = facts_secs_per_day(ndays);
+  return nsecs;
+}
+
+static unsigned long facts_secs_per_year(unsigned int year) {
+  unsigned long ndays, nsecs;
+
+  ndays = (year - FACTS_EPOCH_YEAR) * 365;
+
+  /* Compute the number of leap days between 1970 and the given year
+   * (exclusive).  There is a leap day every 4th year...
+   */
+  ndays += (((year - 1) / 4) - (FACTS_EPOCH_YEAR / 4));
+
+  /* ...except every 100th year...*/
+  ndays -= (((year - 1) / 100) - (FACTS_EPOCH_YEAR / 100));
+
+  /* ...but still every 400th year. */
+  ndays += (((year - 1) / 400) - (FACTS_EPOCH_YEAR / 400));
+
+  nsecs = facts_secs_per_day(ndays);
+  return nsecs;
+}
+
+static time_t facts_mktime(unsigned int year, unsigned int month,
+    unsigned int mday, unsigned int hour, unsigned int min, unsigned int sec) {
+  time_t res;
+
+  /* Rather than using the system mktime(3) function (which requires external
+   * files such as /etc/localtime and the timezone definition files, depending
+   * on the TZ environment value setting), we use a custom mktime collection
+   * of functions.
+   *
+   * Fortunately, our homegrown collection of time conversion functions
+   * ONLY needs to generate GMT seconds here, and so we don't have to worry
+   * about DST, timezones, etc (Bug#3790).
+   */
+
+  res = facts_secs_per_year(year) +
+        facts_secs_per_mon(month, year) +
+
+        /* Subtract one day to make the mday zero-based. */
+        facts_secs_per_day(mday - 1) +
+
+        facts_secs_per_hour(hour) +
+        facts_secs_per_min(min) +
+        sec;
 
   return res;
 }
@@ -302,8 +349,12 @@ static int facts_mlinfo_get(struct mlinfo *info, const char *path,
 
   res = pr_fsio_lstat(path, &(info->st));
   if (res < 0) {
+    int xerrno = errno;
+
     pr_log_debug(DEBUG4, MOD_FACTS_VERSION ": error lstat'ing '%s': %s",
-      path, strerror(errno));
+      path, strerror(xerrno));
+
+    errno = xerrno;
     return -1;
   }
 
@@ -339,7 +390,56 @@ static int facts_mlinfo_get(struct mlinfo *info, const char *path,
       info->st.st_ino = target_st.st_ino;
 
       if (flags & FACTS_MLINFO_FL_SHOW_SYMLINKS) {
-        info->type = "OS.unix=symlink";
+
+        /* Do we use the proper RFC 3659 syntax (i.e. following the BNF rules
+         * of RFC 3659), which would be:
+         *
+         *   type=OS.unix=symlink
+         *
+         * See:
+         *   http://www.rfc-editor.org/errata_search.php?rfc=3659
+         *
+         * and search for "OS.unix=slink".
+         *
+         * Or do we use the syntax in the _examples_ presented in RFC 3659,
+         * which is what clients such as FileZilla expect:
+         *
+         *   type=OS.unix=slink:<target>
+         *
+         * See:
+         *   http://trac.filezilla-project.org/ticket/4490
+         */
+
+        if (flags & FACTS_MLINFO_FL_SHOW_SYMLINKS_USE_SLINK) {
+          char target[PR_TUNABLE_PATH_MAX+1];
+          int targetlen;
+
+          targetlen = pr_fsio_readlink(path, target, sizeof(target)-1);
+          if (targetlen < 0) { 
+            int xerrno = errno;
+
+            pr_log_debug(DEBUG4, MOD_FACTS_VERSION
+              ": error reading symlink '%s': %s", path, strerror(xerrno));
+
+            errno = xerrno;
+            return -1;
+          }
+
+          if (targetlen >= sizeof(target)-1) {
+            targetlen = sizeof(target)-1;
+          }
+
+          target[targetlen] = '\0';
+
+          info->type = pstrcat(info->pool, "OS.unix=slink:",
+            dir_best_path(info->pool, target), NULL);
+
+        } else {
+          /* Use the proper syntax.  Too bad for the not-really-compliant
+           * FileZilla.
+           */
+          info->type = "OS.unix=symlink";
+        }
 
       } else {
         info->type = "file";
@@ -531,6 +631,13 @@ static int facts_modify_mtime(pool *p, const char *path, char *timestamp) {
   timestamp[4] = '\0';
   year = atoi(ptr);
   timestamp[4] = c;
+
+  if (year < FACTS_EPOCH_YEAR) {
+    pr_log_debug(DEBUG8, MOD_FACTS_VERSION
+      ": bad year value (%d) in timestamp '%s'", year, timestamp);
+    errno = EINVAL;
+    return -1;
+  }
 
   ptr = &(timestamp[4]);
   c = timestamp[6];
@@ -749,6 +856,11 @@ MODRET facts_mff(cmd_rec *cmd) {
    * find the FIRST space in cmd->arg; the path is everything past that space.
    */
   ptr = strchr(cmd->arg, ' ');
+  if (ptr == NULL) {
+    pr_response_add_err(R_501, _("Invalid command syntax"));
+    return PR_ERROR(cmd);
+  }
+
   path = pstrdup(cmd->tmp_pool, ptr + 1);
 
   decoded_path = pr_fs_decode_path(cmd->tmp_pool, path);
@@ -901,6 +1013,11 @@ MODRET facts_mfmt(cmd_rec *cmd) {
    * find the FIRST space in cmd->arg; the path is everything past that space.
    */
   ptr = strchr(cmd->arg, ' ');
+  if (ptr == NULL) {
+    pr_response_add_err(R_501, _("Invalid command syntax"));
+    return PR_ERROR(cmd);
+  }
+
   path = pstrdup(cmd->tmp_pool, ptr + 1);
 
   decoded_path = pr_fs_decode_path(cmd->tmp_pool, path);
@@ -1024,6 +1141,10 @@ MODRET facts_mlsd(cmd_rec *cmd) {
   if (ptr &&
       *ptr == TRUE) {
     flags |= FACTS_MLINFO_FL_SHOW_SYMLINKS;
+
+    if (facts_mlinfo_opts & FACTS_MLINFO_FL_SHOW_SYMLINKS_USE_SLINK) {
+      flags |= FACTS_MLINFO_FL_SHOW_SYMLINKS_USE_SLINK;
+    }
   }
 
   best_path = dir_best_path(cmd->tmp_pool, decoded_path);
@@ -1034,28 +1155,42 @@ MODRET facts_mlsd(cmd_rec *cmd) {
   c = find_config(get_dir_ctxt(cmd->tmp_pool, (char *) best_path), CONF_PARAM,
     "DirFakeUser", FALSE);
   if (c) {
-    const char *fake_user;
+    if (c->argc > 0) {
+      const char *fake_user = NULL;
 
-    fake_user = c->argv[0];
-    if (strncmp(fake_user, "~", 2) != 0) {
-      fake_uid = pr_auth_name2uid(cmd->tmp_pool, fake_user);
+      fake_user = c->argv[0];
+      if (fake_user != NULL &&
+          strncmp(fake_user, "~", 2) != 0) {
+        fake_uid = pr_auth_name2uid(cmd->tmp_pool, fake_user);
+
+      } else {
+        fake_uid = session.uid;
+      }
 
     } else {
-      fake_uid = session.uid;
+      /* Handle the "DirFakeUser off" case (Bug#3715). */
+      fake_uid = (uid_t) -1;
     }
   }
 
   c = find_config(get_dir_ctxt(cmd->tmp_pool, (char *) best_path), CONF_PARAM,
     "DirFakeGroup", FALSE);
   if (c) {
-    const char *fake_group;
+    if (c->argc > 0) {
+      const char *fake_group = NULL;
 
-    fake_group = c->argv[0];
-    if (strncmp(fake_group, "~", 2) != 0) {
-      fake_gid = pr_auth_name2gid(cmd->tmp_pool, fake_group);
+      fake_group = c->argv[0];
+      if (fake_group != NULL &&
+          strncmp(fake_group, "~", 2) != 0) {
+        fake_gid = pr_auth_name2gid(cmd->tmp_pool, fake_group);
+
+      } else {
+        fake_gid = session.gid;
+      }
 
     } else {
-      fake_gid = session.gid;
+      /* Handle the "DirFakeGroup off" case (Bug#3715). */
+      fake_gid = (gid_t) -1;
     }
   }
 
@@ -1069,15 +1204,17 @@ MODRET facts_mlsd(cmd_rec *cmd) {
       best_path, strerror(xerrno));
 
     pr_response_add_err(R_550, "%s: %s", path, strerror(xerrno));
+
+    errno = xerrno;
     return PR_ERROR(cmd);
   }
 
   /* Open data connection */
-  session.sf_flags |= SF_ASCII_OVERRIDE;
   if (pr_data_open(NULL, C_MLSD, PR_NETIO_IO_WR, 0) < 0) {
     pr_fsio_closedir(dirh);
     return PR_ERROR(cmd);
   }
+  session.sf_flags |= SF_ASCII_OVERRIDE;
 
   pr_fs_clear_cache();
   facts_mlinfobuf_init();
@@ -1097,8 +1234,9 @@ MODRET facts_mlsd(cmd_rec *cmd) {
       
     } else {
       abs_path = dir_canonical_path(cmd->tmp_pool, rel_path);
-      if (abs_path == NULL)
+      if (abs_path == NULL) {
         abs_path = rel_path;
+      }
 
       res = dir_check_canon(cmd->tmp_pool, cmd, cmd->group, abs_path, &hidden);
     }
@@ -1193,6 +1331,10 @@ MODRET facts_mlst(cmd_rec *cmd) {
   if (ptr &&
       *ptr == TRUE) {
     flags |= FACTS_MLINFO_FL_SHOW_SYMLINKS;
+
+    if (facts_mlinfo_opts & FACTS_MLINFO_FL_SHOW_SYMLINKS_USE_SLINK) {
+      flags |= FACTS_MLINFO_FL_SHOW_SYMLINKS_USE_SLINK;
+    }
   }
 
   fake_mode = get_param_ptr(get_dir_ctxt(cmd->tmp_pool, (char *) decoded_path),
@@ -1201,13 +1343,20 @@ MODRET facts_mlst(cmd_rec *cmd) {
   c = find_config(get_dir_ctxt(cmd->tmp_pool, (char *) decoded_path),
     CONF_PARAM, "DirFakeUser", FALSE);
   if (c) {
-    const char *fake_user;
+    if (c->argc > 0) {
+      const char *fake_user;
 
-    fake_user = c->argv[0];
-    if (strncmp(fake_user, "~", 2) != 0) {
-      fake_uid = pr_auth_name2uid(cmd->tmp_pool, fake_user);
+      fake_user = c->argv[0];
+      if (fake_user != NULL &&
+          strncmp(fake_user, "~", 2) != 0) {
+        fake_uid = pr_auth_name2uid(cmd->tmp_pool, fake_user);
+
+      } else {
+        fake_uid = session.uid;
+      }
 
     } else {
+      /* Handle the "DirFakeUser off" case (Bug#3715). */
       fake_uid = session.uid;
     }
   }
@@ -1215,13 +1364,20 @@ MODRET facts_mlst(cmd_rec *cmd) {
   c = find_config(get_dir_ctxt(cmd->tmp_pool, (char *) decoded_path),
     CONF_PARAM, "DirFakeGroup", FALSE);
   if (c) {
-    const char *fake_group;
+    if (c->argc > 0) {
+      const char *fake_group;
 
-    fake_group = c->argv[0];
-    if (strncmp(fake_group, "~", 2) != 0) {
-      fake_gid = pr_auth_name2gid(cmd->tmp_pool, fake_group);
+      fake_group = c->argv[0];
+      if (fake_group != NULL &&
+          strncmp(fake_group, "~", 2) != 0) {
+        fake_gid = pr_auth_name2gid(cmd->tmp_pool, fake_group);
+
+      } else {
+        fake_gid = session.gid;
+      }
 
     } else {
+      /* Handle the "DirFakeGroup off" case (Bug#3715). */
       fake_gid = session.gid;
     }
   }
@@ -1246,10 +1402,15 @@ MODRET facts_mlst(cmd_rec *cmd) {
   /* XXX What about chroots? */
 
   if (flags & FACTS_MLINFO_FL_SHOW_SYMLINKS) {
-    /* If we are supposed to symlinks, then use dir_best_path() to get the
-     * full path, including dereferencing the symlink.
-     */
-    info.path = dir_best_path(cmd->tmp_pool, path);
+    if (flags & FACTS_MLINFO_FL_SHOW_SYMLINKS_USE_SLINK) {
+      info.path = dir_canonical_path(cmd->tmp_pool, path);
+
+    } else {
+      /* If we are supposed to show symlinks, then use dir_best_path() to get
+       * the full path, including dereferencing the symlink.
+       */
+      info.path = dir_best_path(cmd->tmp_pool, path);
+    }
 
   } else {
     info.path = dir_canonical_path(cmd->tmp_pool, path);
@@ -1357,6 +1518,27 @@ MODRET facts_opts_mlst(cmd_rec *cmd) {
   return PR_HANDLED(cmd);
 }
 
+MODRET facts_post_host(cmd_rec *cmd) {
+
+  /* If the HOST command changed the main_server pointer, reinitialize
+   * ourselves.
+   */
+  if (session.prev_server != NULL) {
+    int res;
+
+    facts_opts = 0;
+    facts_mlinfo_opts = 0;
+
+    res = facts_sess_init();
+    if (res < 0) {
+      pr_session_disconnect(&facts_module,
+        PR_SESS_DISCONNECT_SESSION_INIT_FAILED, NULL);
+    }
+  }
+
+  return PR_DECLINED(cmd);
+}
+
 /* Configuration handlers
  */
 
@@ -1375,6 +1557,36 @@ MODRET set_factsadvertise(cmd_rec *cmd) {
   c = add_config_param(cmd->argv[0], 1, NULL);
   c->argv[0] = pcalloc(c->pool, sizeof(int));
   *((int *) c->argv[0]) = bool;
+
+  return PR_HANDLED(cmd);
+}
+
+/* usage: FactsOptions opt1 ... optN */
+MODRET set_factsoptions(cmd_rec *cmd) {
+  register unsigned int i;
+  config_rec *c;
+  unsigned long opts = 0UL;
+
+  if (cmd->argc-1 == 0) {
+    CONF_ERROR(cmd, "wrong number of parameters");
+  }
+
+  CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
+
+  c = add_config_param(cmd->argv[0], 1, NULL);
+
+  for (i = 1; i < cmd->argc; i++) {
+    if (strncmp(cmd->argv[i], "UseSlink", 9) == 0) {
+      opts |= FACTS_MLINFO_FL_SHOW_SYMLINKS_USE_SLINK;
+
+    } else {
+      CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, ": unknown FactsOption '",
+        cmd->argv[i], "'", NULL));
+    }
+  }
+
+  c->argv[0] = palloc(c->pool, sizeof(unsigned long));
+  *((unsigned long *) c->argv[0]) = opts;
 
   return PR_HANDLED(cmd);
 }
@@ -1398,8 +1610,21 @@ static int facts_sess_init(void) {
     advertise = *((int *) c->argv[0]);
   }
 
-  if (advertise == FALSE)
+  if (advertise == FALSE) {
     return 0;
+  }
+
+  c = find_config(main_server->conf, CONF_PARAM, "FactsOptions", FALSE);
+  while (c != NULL) {
+    unsigned long opts;
+
+    pr_signals_handle();
+  
+    opts = *((unsigned long *) c->argv[0]);
+    facts_mlinfo_opts |= opts;
+
+    c = find_config_next(c, c->next, CONF_PARAM, "FactsOptions", FALSE);
+  }
 
   facts_opts = FACTS_OPT_SHOW_MODIFY|FACTS_OPT_SHOW_PERM|FACTS_OPT_SHOW_SIZE|
     FACTS_OPT_SHOW_TYPE|FACTS_OPT_SHOW_UNIQUE|FACTS_OPT_SHOW_UNIX_GROUP|
@@ -1423,6 +1648,7 @@ static int facts_sess_init(void) {
 
 static conftable facts_conftab[] = {
   { "FactsAdvertise",	set_factsadvertise,	NULL },
+  { "FactsOptions",	set_factsoptions,	NULL },
   { NULL }
 };
 
@@ -1434,6 +1660,7 @@ static cmdtable facts_cmdtab[] = {
   { LOG_CMD_ERR,C_MLSD,		G_NONE,	facts_mlsd_cleanup, FALSE, FALSE },
   { CMD,	C_MLST,		G_DIRS,	facts_mlst, TRUE, FALSE, CL_DIRS },
   { CMD,	C_OPTS "_MLST", G_NONE, facts_opts_mlst, FALSE, FALSE },
+  { POST_CMD,	C_HOST,		G_NONE,	facts_post_host, FALSE, FALSE },
   { 0, NULL }
 };
 

@@ -1,7 +1,7 @@
 /*
  * ProFTPD: mod_exec -- a module for executing external scripts
  *
- * Copyright (c) 2002-2011 TJ Saunders
+ * Copyright (c) 2002-2012 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,7 +24,7 @@
  * This is mod_exec, contrib software for proftpd 1.3.x and above.
  * For more information contact TJ Saunders <tj@castaglia.org>.
  *
- * $Id: mod_exec.c,v 1.20 2011/09/24 06:44:36 castaglia Exp $
+ * $Id: mod_exec.c,v 1.27 2012/07/25 23:45:01 castaglia Exp $
  */
 
 #include "conf.h"
@@ -192,7 +192,7 @@ static int exec_openlog(void) {
 
   pr_signals_block();
   PRIVS_ROOT
-  res = pr_log_openfile(exec_logname, &exec_logfd, 0640);
+  res = pr_log_openfile(exec_logname, &exec_logfd, PR_LOG_SYSTEM_MODE);
   PRIVS_RELINQUISH
   pr_signals_unblock();
 
@@ -626,7 +626,7 @@ static int exec_ssystem(cmd_rec *cmd, config_rec *c, int flags) {
 
     (void) close(exec_stderr_pipe[1]);
     exec_stderr_pipe[1] = -1;
-   
+  
     if ((exec_opts & EXEC_OPT_LOG_STDOUT) ||
         (exec_opts & EXEC_OPT_LOG_STDERR) ||
         (exec_opts & EXEC_OPT_SEND_STDOUT) ||
@@ -636,7 +636,10 @@ static int exec_ssystem(cmd_rec *cmd, config_rec *c, int flags) {
       struct timeval tv;
       time_t start_time = time(NULL);
 
-      res = waitpid(pid, &status, WNOHANG);
+      /* We set the result value to zero initially, so that at least one
+       * pass through the stdout/stderr reading code happens.
+       */
+      res = 0;
       while (res <= 0) {
         if (res < 0) {
           if (errno != EINTR) {
@@ -651,23 +654,27 @@ static int exec_ssystem(cmd_rec *cmd, config_rec *c, int flags) {
           }
         }
 
-        /* Check the time elapsed since we started. */
-        if ((time(NULL) - start_time) > exec_timeout) {
+        if (exec_timeout > 0) {
+          /* Check the time elapsed since we started. */
+          if ((time(NULL) - start_time) > exec_timeout) {
 
-          /* Send TERM, the first time, to be polite. */
-          if (send_sigterm) {
-            send_sigterm = 0;
-            exec_log("'%s' has exceeded ExecTimeout (%lu seconds), sending "
-              "SIGTERM (signal %d)", (const char *) c->argv[2],
-              (unsigned long) exec_timeout, SIGTERM);
-            kill(pid, SIGTERM);
+            /* Send TERM, the first time, to be polite. */
+            if (send_sigterm) {
+              send_sigterm = 0;
+              exec_log("'%s' has exceeded ExecTimeout (%lu seconds), sending "
+                "SIGTERM (signal %d)", (const char *) c->argv[2],
+                (unsigned long) exec_timeout, SIGTERM);
+              kill(pid, SIGTERM);
 
-          } else {
-            /* The child is still around?  Terminate with extreme prejudice. */
-            exec_log("'%s' has exceeded ExecTimeout (%lu seconds), sending "
-              "SIGKILL (signal %d)", (const char *) c->argv[2],
-              (unsigned long) exec_timeout, SIGKILL);
-            kill(pid, SIGKILL);
+            } else {
+              /* The child is still around?  Terminate with extreme
+               * prejudice.
+               */
+              exec_log("'%s' has exceeded ExecTimeout (%lu seconds), sending "
+                "SIGKILL (signal %d)", (const char *) c->argv[2],
+                (unsigned long) exec_timeout, SIGKILL);
+              kill(pid, SIGKILL);
+            }
           }
         }
 
@@ -698,14 +705,13 @@ static int exec_ssystem(cmd_rec *cmd, config_rec *c, int flags) {
         tv.tv_usec = 0L;
 
         fds = select(maxfd + 1, &readfds, NULL, NULL, &tv);
-
         if (fds == -1 &&
             errno == EINTR) {
           pr_signals_handle();
         }
 
         if (fds >= 0) {
-          size_t buflen;
+          int buflen;
           char buf[PIPE_BUF];
 
           /* The child sent us something.  How thoughtful. */
@@ -896,7 +902,7 @@ static char *exec_subst_var(pool *tmp_pool, char *varstr, cmd_rec *cmd) {
   ptr = strstr(varstr, "%c");
   if (ptr != NULL) {
     varstr = sreplace(tmp_pool, varstr, "%c",
-      session.class ? session.class->cls_name : "", NULL);
+      session.conn_class ? session.conn_class->cls_name : "", NULL);
   }
 
   ptr = strstr(varstr, "%F");
@@ -1811,8 +1817,15 @@ static int exec_sess_init(void) {
   pr_event_register(&exec_module, "core.exit", exec_exit_ev, NULL);
 
   c = find_config(main_server->conf, CONF_PARAM, "ExecOptions", FALSE);
-  if (c) {
-    exec_opts = *((unsigned int *) c->argv[0]);
+  while (c != NULL) {
+    unsigned long opts;
+
+    pr_signals_handle();
+
+    opts = *((unsigned int *) c->argv[0]);
+    exec_opts |= opts;
+
+    c = find_config_next(c, c->next, CONF_PARAM, "ExecOptions", FALSE);
   }
 
   /* If we are handling an SSH2 session, then disable the sendStdout
@@ -1827,8 +1840,9 @@ static int exec_sess_init(void) {
   }
 
   c = find_config(main_server->conf, CONF_PARAM, "ExecTimeout", FALSE);
-  if (c)
+  if (c) {
     exec_timeout = *((time_t *) c->argv[0]);
+  }
 
   exec_closelog();
   exec_openlog();

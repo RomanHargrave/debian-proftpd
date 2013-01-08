@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server API testsuite
- * Copyright (c) 2008-2011 The ProFTPD Project team
+ * Copyright (c) 2008-2012 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -34,16 +34,17 @@ server_rec *main_server = NULL;
 module *static_modules[] = { NULL };
 module *loaded_modules = NULL;
 
+char *dir_realpath(pool *p, const char *path) {
+  return NULL;
+}
+
+struct passwd *pr_auth_getpwnam(pool *p, const char *name) {
+  errno = ENOENT;
+  return NULL;
+}
+
 int pr_ctrls_unregister(module *m, const char *action) {
   return 0;
-}
-
-char *pr_fs_decode_path(pool *p, const char *path) {
-  return (char *) path;
-}
-
-char *pr_fs_encode_path(pool *p, const char *path) {
-  return (char *) path;
 }
 
 void pr_log_debug(int level, const char *fmt, ...) {

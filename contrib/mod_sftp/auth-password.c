@@ -1,6 +1,6 @@
 /*
  * ProFTPD - mod_sftp 'password' user authentication
- * Copyright (c) 2008-2011 TJ Saunders
+ * Copyright (c) 2008-2012 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: auth-password.c,v 1.6 2011/08/04 21:15:19 castaglia Exp $
+ * $Id: auth-password.c,v 1.9 2012/07/10 00:52:20 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -33,8 +33,8 @@
 #include "utf8.h"
 
 int sftp_auth_password(struct ssh2_packet *pkt, cmd_rec *pass_cmd,
-    const char *orig_user, const char *user, const char *service, char **buf,
-    uint32_t *buflen, int *send_userauth_fail) {
+    const char *orig_user, const char *user, const char *service,
+    unsigned char **buf, uint32_t *buflen, int *send_userauth_fail) {
   const char *cipher_algo, *mac_algo;
   char *passwd;
   int have_new_passwd, res;
@@ -56,6 +56,11 @@ int sftp_auth_password(struct ssh2_packet *pkt, cmd_rec *pass_cmd,
 
   /* XXX We currently don't do anything with this. */
   have_new_passwd = sftp_msg_read_bool(pkt->pool, buf, buflen);
+  if (have_new_passwd) {
+    (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION, "%s",
+      "client says they have provided a new password; this functionality "
+      "is not currently supported");
+  }
 
   passwd = sftp_msg_read_string(pkt->pool, buf, buflen);
   passwd = sftp_utf8_decode_str(pkt->pool, passwd);
@@ -107,6 +112,7 @@ int sftp_auth_password(struct ssh2_packet *pkt, cmd_rec *pass_cmd,
       pr_log_auth(PR_LOG_NOTICE, "USER %s (Login failed): No such user found",
         user);
       *send_userauth_fail = TRUE;
+      errno = ENOENT;
       return 0;
 
     case PR_AUTH_BADPWD:
@@ -116,6 +122,7 @@ int sftp_auth_password(struct ssh2_packet *pkt, cmd_rec *pass_cmd,
       pr_log_auth(PR_LOG_NOTICE, "USER %s (Login failed): Incorrect password",
         user);
       *send_userauth_fail = TRUE;
+      errno = EINVAL;
       return 0;
 
     case PR_AUTH_AGEPWD:
@@ -125,6 +132,7 @@ int sftp_auth_password(struct ssh2_packet *pkt, cmd_rec *pass_cmd,
       pr_log_auth(PR_LOG_NOTICE, "USER %s (Login failed): Password expired",
         user);
       *send_userauth_fail = TRUE;
+      errno = EINVAL;
       return 0;
 
     case PR_AUTH_DISABLEDPWD:
@@ -134,12 +142,14 @@ int sftp_auth_password(struct ssh2_packet *pkt, cmd_rec *pass_cmd,
       pr_log_auth(PR_LOG_NOTICE, "USER %s (Login failed): Account disabled",
         user);
       *send_userauth_fail = TRUE;
+      errno = EINVAL;
       return 0;
 
     default:
       (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
         "unknown authentication value (%d), returning error", res);
       *send_userauth_fail = TRUE;
+      errno = EINVAL;
       return 0;
   }
 

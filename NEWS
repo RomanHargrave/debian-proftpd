@@ -1,4 +1,4 @@
-$Id: NEWS,v 1.1368.2.2 2011/11/11 17:25:12 castaglia Exp $
+$Id: NEWS,v 1.1468 2013/01/04 22:16:41 castaglia Exp $
 
 -----------------------------------------------------------------------------
   More details on the bugs listed below can be found by using the bug number
@@ -9,9 +9,153 @@ $Id: NEWS,v 1.1368.2.2 2011/11/11 17:25:12 castaglia Exp $
   where `N' is the bug number.
 -----------------------------------------------------------------------------
 
-1.3.4a - Released 11-Nov-2011
+1.3.5rc1 - Released 04-Jan-2013
 --------------------------------
 - Bug 3712 - mod_wrap2/mod_load build errors: missing config.h.
+- Bug 3713 - mod_tls cannot be compiled using Openssl 0.9.6.
+- Bug 3646 - Debug logging to stderr should include timestamps and PID.
+- Bug 3714 - ftpwho/ftptop are not showing command arguments (e.g. downloaded
+  file name).
+- Bug 3715 - MLSD/MLST fail when "DirFakeUser off" or "DirFakeGroup off" used.
+- Bug 3717 - proftpd fails to run with "Abort trap" error message.
+- Bug 3719 - LIST -R can loop endlessly if bad directory symlink exists.
+- Bug 3720 - Various module logfile permissions are 0600 instead of 0640.
+- Bug 3723 - mod_memcache segfault on server restart.
+- Bug 3721 - mod_rewrite does not replace characters if there are more than
+  8 occurrences.  To handle this situation, a new RewriteMaxReplace directive
+  has been added for configuring this limit.
+- Bug 3724 - Unloading mod_quotatab causes segfault.
+- Bug 3686 - Support SHA2 digests in mod_sftp.  See the SFTPDigests directive
+  documentation for more information.
+- Bug 3629 - Support <IfAuthenticated> conditional config section.
+- Bug 3682 - Configure does not detect libiconv under Gentoo FreeBSD.
+- Bug 3726 - mod_exec does not always capture stdout/stderr output from
+  executed command.
+- Bug 3727 - mod_wrap2 causes unexpected LogFormat %u expansion for SFTP
+  connections.
+- Bug 3729 - mod_ldap can segfault when LDAPUsers is used with no optional
+  filters.
+- Bug 3728 - Build failure in wtmp.c on Gentoo/FreeBSD on sparc.
+- Bug 3734 - DirFakeUser/DirFakeGroup off with name causes SIGSEGV for
+  MLSD/MLST commands.
+- Bug 3739 - Allow for configurable SSH version identifiers in mod_sftp.  The
+  SSH version identifier can now be configured for mod_sftp via the
+  ServerIdent directive.
+- Bug 3718 - ftptop fails to build on OpenSUSE.
+- Bug 3699 - ProFTPD crash on start up on Mac OSX Lion with NLS enabled.
+- Bug 3744 - Support ls(1) -1 option for LIST command.
+- Bug 3746 - Support applying ListOptions only to NLST or to LIST commands.
+- Bug 3747 - Support option for displaying symlinks via MLSD using syntax
+  preferred by FileZilla.  The new FactsOptions directive can be used for
+  this purpose.
+- Bug 3745 - Reject PASV command if no IPv4 address available.
+- Bug 3701 - Modify ScoreboardFile directive to support disabling scoreboarding.
+- Bug 3742 - Improper handling of self-signed certificate in client-sent cert
+  list when "TLSVerifyClient on" is used.
+- Bug 3749 - Compile of src/netacl.c fails on Tru64 UNIX (OSF/1) due to
+  conflict with system header.
+- Bug 3743 - Random stalls/segfaults seen when transferring large files
+  via SFTP.
+- Bug 3752 - proftpd process exit status is zero for "Failed binding to
+  address, port N: Address already in use" startup failure.
+- Bug 3751 - mod_ban does not close/reopen the BanLog/BanTable file descriptors
+  on restart, causing a file descriptor leak.
+- Bug 3707 - Add request/transfer ID to the logging of the initial and closing
+  commands for SFTP file transfers.  This can now be accomplished using a
+  LogFormat variable of '%{note:sftp.file-handle}'.
+- Bug 3757 - Support SFTPOption for ignoring requests to modify file ownership.
+- Bug 3756 - mod_ctrls no longer listens on ControlsSocket after restart.
+- Bug 3731 - Support active data transfers while RootRevoke is in effect.
+- Bug 3737 - Allow UTF8 when UseEncoding is used.
+- Bug 3573 - Support Elliptic Curve Cryptography (ECC) in SSH.
+- Bug 3758 - ProFTPD crashes when handling mod_gss authentication due to null
+  pointer.
+- Ability to load SSH host keys from an SSH agent, in addition to files on
+  disk.  See doc/contrib/mod_sftp.html#SFTPHostKey for more information.
+- Bug 3761 - SSH2 key exchange fails if client sends certain SSH message before
+  NEWKEYS.
+- Bug 3763 - Ensure that mod_sftp operates properly when OpenSSL FIPS mode is
+  enabled.
+- Bug 3764 - mod_sftp does not correctly handle a 'guess' KEX message when the
+  client guesses correctly.
+- Bug 3765 - mod_sftp should honor the GroupOwner directive for MKDIR requests.
+- Bug 3626 - Display variable %f off by a factor of 1024 on 64-bit platforms.
+- Bug 3673 - Support date/timestamp variables in mod_rewrite.
+- Bug 3754 - ProFTPD refuses to delete/rename a symlink pointing outside a
+  writable directory.
+- Bug 3766 - Support a QuotaDefault directive, for configuring default limits.
+- Bug 3767 - mod_rewrite segfault when handling SITE CHGRP without a parameter.
+- Bug 3768 - ExecTimeout 0 (zero) not treated as infinite.
+- Added new mod_geoip contrib module.
+- Bug 3769 - Ensure that encoded strings are NUL-terminated.
+- Bug 3732 - AIX build error: undefined symbol: .alloca.
+- Bug 3782 - SQLShowInfo does not work properly for error responses.
+- Bug 3780 - AIX gives "error setting listen fd IP_TOS: Invalid argument".
+- Bug 3736 - Trying to re-authenticate an existing FTP connection causes invalid
+  503 response.
+- Bug 3785 - Support resolution of tilde (~) within a chrooted session.
+- Bug 3787 - Read-only SFTP OPEN request permissions not properly ignored.
+- Bug 3740 - Overwrite permission denied when reloading multiple times and
+  multiple <VirtualHost> sections in proftpd.conf.
+- Bug 3791 - Invalid handling of SCP control messages fragmented over multiple
+  SSH packets.
+- Bug 3794 - Cygwin build failure in lib/tpl.c due to wrong include of mman.h.
+- Bug 3795 - ProFTPD needs to use -pthread linker option if linking against
+  OpenSSL with thread support.
+- Bug 3790 - Logfile timestamps change to GMT after MFMT command.
+- Bug 3798 - Downloading nonexistent file via SCP results in timeout rather
+  than error.
+- Bug 3800 - Multiple *Options directives should be handled properly.
+- Bug 3801 - mod_tls should have directive like Apache mod_ssl's
+  SSLHonorCipherOrder.  The mod_tls module now supports a
+  TLSServerCipherPreference directive.
+- Bug 3804 - ioctl(RPROTDIS) code no longer needed on Solaris 11.
+- Bug 3808 - Segfault in mod_tls when mod_tls_shmcache used.
+- Bug 3809 - Segfaults in mod_radius when configured with RadiusGroupInfo.
+- Bug 3811 - ExtendedLog entries not written if MaxClients limit reached.
+- Bug 3814 - Support "configtest" command for contrib init.d script.
+- Bug 3816 - Installation of ftpasswd does not honor DESTDIR environment
+  variable.
+- Bug 3813 - Ability to use CreateHome to create parent directories as
+  non-root user, for better interoperability with NFS.
+- Bug 3806 - Support reverse DNS resolution for IPv6 addresses when
+  gethostbyname2(3) is not available.
+- Bug 3820 - Support device/interface names in <VirtualHost>, MasqueradeAddress,
+  and DefaultAddress.
+- Bug 3822 - Resolving %U/%u LogFormat variables inconsistent between
+  mod_log/mod_sql in certain cases.
+- Bug 3824 - Use RFC compliant address/port for data transfer if FTP client has
+  not sent PORT/PASV/EPRT/EPSV commands.
+- Bug 3825 - Handle RFC 1918 IP addresses in PORT/EPRT commands.
+- Bug 3827 - Use non-filesystem based SFTP handle generator instead of
+  mktemp(3).
+- Bug 3828 - Certain sequences of FTP data transfer commands lead to NULL
+  pointer dereferences in mod_deflate.
+- Bug 3830 - MFF/MFMT command segfaults due to insufficient parameter checks.
+- Bug 3829 - RNFR without following RNTO can lead to NULL pointer dereference.
+- Bug 3832 - Support disabling of system logging on per-connection basis.
+- Bug 3792 - Recursive SCP uploads using preserve-time (-p) option may not work.
+- Bug 3831 - Sporadic "451 Insufficient memory or file locked" failure when
+  downloading.
+- Bug 3833 - Enable TCP keepalive by default, with configurable SocketOption.
+- Bug 3837 - mod_tls unable to read certificate files after SIGHUP.
+- Bug 3842 - Incorrect handling of REALPATH requests for symlink paths in
+  mod_sftp.
+- Bug 3843 - ProFTPD should not fail when starting up due to loading same
+  module multiple times.
+- Bug 3845 - mod_sftp does not provide response codes for %s LogFormat variable
+  for AUTH ExtendedLog.
+- Bug 3846 - Avoid scanning ScoreboardFile needlessly on login if limits are
+  not configured.
+- Bug 3850 - ftpasswd should support generating SHA-256, SHA-512 hashes where
+  possible.
+- Bug 3851 - SFTPPassPhraseProvider fails due to incorrect pointer.
+- Bug 3852 - Support directive for ignoring symlink DefaultRoot directories.
+  See the new AllowChrootSymlinks directive.
+- Bug 3839 - Enhance mod_cap to support dropping root privs entirely.
+- Bug 3841 - Possible symlink race when applying UserOwner to newly created
+  directory.
+- Bug 3855 - Restarting proftpd may cause Include files not to be parsed.
 
 1.3.4 - Released 09-Nov-2011
 --------------------------------
@@ -110,7 +254,7 @@ $Id: NEWS,v 1.1368.2.2 2011/11/11 17:25:12 castaglia Exp $
   appending them.  APPE is now denied if HiddenStores is in effect.
 - Bug 3565 - Support a MaxCommandRate, for detecting and throttling clients
   which are sending commands too quickly.
-- Bug 3599 - ExtendedLog should support EXIT command, for logging when a
+- Bug 3559 - ExtendedLog should support EXIT command, for logging when a
   session ends.
 - Bug 3538 - WrapAllowMsg directive broken due to Bug#3423.
 - Bug 3604 - Support DirFakeUser, DirFakeGroup and DirFakeMode for MLSD/MLST

@@ -1,4 +1,4 @@
-<!-- $Id: mod_tls.html,v 1.32 2011/10/10 21:02:09 castaglia Exp $ -->
+<!-- $Id: mod_tls.html,v 1.36 2012/12/29 02:49:35 castaglia Exp $ -->
 <!-- $Source: /cvsroot/proftp/proftpd/doc/contrib/mod_tls.html,v $ -->
 
 <html>
@@ -15,7 +15,7 @@
 <hr><br>
 
 This module is contained in the <code>mod_tls.c</code> file for ProFTPD
-1.2.<i>x</i>/1.3.<i>x</i>, and is not compiled by default.  Installation
+1.3.<i>x</i>, and is not compiled by default.  Installation
 instructions are discussed <a href="#Installation">here</a>.
 
 <p>
@@ -66,6 +66,7 @@ is based.  His module can be found here:
   <li><a href="#TLSRequired">TLSRequired</a>
   <li><a href="#TLSRSACertificateFile">TLSRSACertificateFile</a>
   <li><a href="#TLSRSACertificateKeyFile">TLSRSACertificateKeyFile</a>
+  <li><a href="#TLSServerCipherPreference">TLSServerCipherPreference</a>
   <li><a href="#TLSSessionCache">TLSSessionCache</a>
   <li><a href="#TLSTimeoutHandshake">TLSTimeoutHandshake</a>
   <li><a href="#TLSVerifyClient">TLSVerifyClient</a>
@@ -277,13 +278,13 @@ does not request that the client send a certificate to be verified.
 <hr>
 <h2><a name="TLSCipherSuite">TLSCipherSuite</a></h2>
 <strong>Syntax:</strong> TLSCipherSuite <em>cipher-list</em><br>
-<strong>Default:</strong> ALL:!ADH<br>
+<strong>Default:</strong> DEFAULT:!EXPORT:!DES<br>
 <strong>Context:</strong> server config, <code>&lt;VirtualHost&gt;</code>, <code>&lt;Global&gt;</code><br>
 <strong>Module:</strong> mod_tls<br>
 <strong>Compatibility:</strong> 1.2.7rc1 and later
 
 <p>
-Default cipher list is &quot;ALL:!ADH&quot;.
+Default cipher list is &quot;DEFAULT:!EXPORT:!DES&quot;.
 
 <p>
 How to put together a <em>cipher list</em> parameter:
@@ -684,7 +685,7 @@ The currently implemented options are:
     <p>
     In order to prevent certain attacks (<i>e.g.</i> the so-called
     <a href="http://www.kb.cert.org/vuls/id/864643">&quotBEAST&quot;
-    attack</a>), the <code>mod_tls/code> module was changed to use OpenSSL's
+    attack</a>), the <code>mod_tls</code> module was changed to use OpenSSL's
     builtin countermeasure of inserting <a href="http://www.openssl.org/~bodo/tls-cbc.txt">empty fragments</a>.  However, some browsers/clients may not handle
     such empty fragments well.  Use this <code>NoEmptyFragaments</code>
     TLSOption in order to interoperate with such clients, with risk of losing
@@ -1034,6 +1035,17 @@ The allowed protocols are:
     <td><code>TLSv1</code></td>
     <td>Allow only TLSv1</td>
   </tr>
+
+  <tr>
+    <td><code>TLSv1.1</code></td>
+    <td>Allow only TLSv1.1</td>
+  </tr>
+
+  <tr>
+    <td><code>TLSv1.2</code></td>
+    <td>Allow only TLSv1.2</td>
+  </tr>
+
 </table>
 To support both SSLv3 and TLSv1, simply list both parameters for the
 <code>TLSProtocol</code> directive, <i>e.g.</i>:
@@ -1274,6 +1286,27 @@ is restarted.
 Example:             
 <pre>
   TLSRSACertificateKeyFile /etc/ftpd/server-rsa-key.pem
+</pre>
+
+<p>
+<hr>
+<h2><a name="TLSServerCipherPreference">TLSServerCipherPreference</a></h2>
+<strong>Syntax:</strong> TLSServerCipherPreference <em>on|off</em><br>
+<strong>Default:</strong> Off<br>
+<strong>Context:</strong> server config, <code>&lt;VirtualHost&gt;</code>, <code>&lt;Global&gt;</code><br>
+<strong>Module:</strong> mod_tls<br>
+<strong>Compatibility:</strong> 1.3.5rc1 and later
+
+<p>
+When choosing a cipher during an SSLv3 or TLSv1 handshake, normally the
+<i>client's</i> ciphersuite preference is used.  If the
+<code>TLSServerCipherPreference</code> directive is enabled, then the
+<i>server's</i> ciphersuite preference will be used instead.
+
+<p>
+For example:
+<pre>
+  TLSServerCipherPreference on
 </pre>
 
 <p>
@@ -1588,11 +1621,11 @@ in your <code>configure</i> command, <i>e.g.</i>:
 <p>
 <hr><br>
 Author: <i>$Author: castaglia $</i><br>
-Last Updated: <i>$Date: 2011/10/10 21:02:09 $</i><br>
+Last Updated: <i>$Date: 2012/12/29 02:49:35 $</i><br>
 
 <hr>
 <font size=2><b><i>
-&copy; Copyright 2002-2011 TJ Saunders<br>
+&copy; Copyright 2002-2012 TJ Saunders<br>
  All Rights Reserved<br>
 </i></b></font>
 

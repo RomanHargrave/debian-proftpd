@@ -2,7 +2,7 @@
  * ProFTPD: mod_auth_file - file-based authentication module that supports
  *                          restrictions on the file contents
  *
- * Copyright (c) 2002-2011 The ProFTPD Project team
+ * Copyright (c) 2002-2012 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@
  * distribute the resulting executable, without including the source code for
  * OpenSSL in the source distribution.
  *
- * $Id: mod_auth_file.c,v 1.40 2011/05/23 21:11:56 castaglia Exp $
+ * $Id: mod_auth_file.c,v 1.44 2012/12/07 03:21:02 castaglia Exp $
  */
 
 #include "conf.h"
@@ -84,8 +84,14 @@ typedef struct file_rec {
 static authfile_file_t *af_user_file = NULL;
 static authfile_file_t *af_group_file = NULL;
 
+static int handle_empty_salt = FALSE;
+
+static int authfile_sess_init(void);
+
 static int af_setpwent(void);
 static int af_setgrent(void);
+
+static const char *trace_channel = "authfile";
 
 /* Support routines.  Move the passwd/group functions out of lib/ into here.
  */
@@ -109,7 +115,7 @@ static struct passwd *af_getpasswd(const char *buf) {
   buffer = pwdbuf;
   pwd = &pwent;
 
-  strncpy(buffer, buf, BUFSIZ-1);
+  sstrncpy(buffer, buf, BUFSIZ-1);
   buffer[BUFSIZ-1] = '\0';
 
   for (cp = buffer, i = 0; i < NPWDFIELDS && cp; i++) {
@@ -383,8 +389,9 @@ static struct group *af_getgrent(void) {
 static struct group *af_getgrnam(const char *name) {
   struct group *grp = NULL;
 
-  if (af_setgrent() < 0)
+  if (af_setgrent() < 0) {
     return NULL;
+  }
 
   while ((grp = af_getgrent()) != NULL) {
     if (strcmp(name, grp->gr_name) == 0) {
@@ -400,8 +407,9 @@ static struct group *af_getgrnam(const char *name) {
 static struct group *af_getgrgid(gid_t gid) {
   struct group *grp = NULL;
 
-  if (af_setgrent() < 0)
+  if (af_setgrent() < 0) {
     return NULL;
+  }
 
   while ((grp = af_getgrent()) != NULL) {
     if (grp->gr_gid == gid) {
@@ -416,8 +424,8 @@ static struct group *af_getgrgid(gid_t gid) {
 
 static int af_setgrent(void) {
 
-  if (af_group_file) {
-    if (af_group_file->af_file) {
+  if (af_group_file != NULL) {
+    if (af_group_file->af_file != NULL) {
       /* If already opened, rewind */
       rewind(af_group_file->af_file);
       return 0;
@@ -425,8 +433,12 @@ static int af_setgrent(void) {
     } else {
       af_group_file->af_file = fopen(af_group_file->af_path, "r");
       if (af_group_file->af_file == NULL) {
+        int xerrno = errno;
+
         pr_log_pri(PR_LOG_ERR, "error: unable to open group file '%s': %s",
-          af_group_file->af_path, strerror(errno));
+          af_group_file->af_path, strerror(xerrno));
+
+        errno = xerrno;
         return -1;
       }
 
@@ -436,6 +448,7 @@ static int af_setgrent(void) {
     }
   }
 
+  pr_trace_msg(trace_channel, 8, "no AuthGroupFile configured");
   errno = EPERM;
   return -1;
 }
@@ -576,8 +589,9 @@ static struct passwd *af_getpwent(void) {
 static struct passwd *af_getpwnam(const char *name) {
   struct passwd *pwd = NULL;
 
-  if (af_setpwent() < 0)
+  if (af_setpwent() < 0) {
     return NULL;
+  }
 
   while ((pwd = af_getpwent()) != NULL) {
     pr_signals_handle();
@@ -600,8 +614,9 @@ static char *af_getpwpass(const char *name) {
 static struct passwd *af_getpwuid(uid_t uid) {
   struct passwd *pwd = NULL;
 
-  if (af_setpwent() < 0)
+  if (af_setpwent() < 0) {
     return NULL;
+  }
 
   while ((pwd = af_getpwent()) != NULL) {
     if (pwd->pw_uid == uid) {
@@ -616,8 +631,8 @@ static struct passwd *af_getpwuid(uid_t uid) {
 
 static int af_setpwent(void) {
 
-  if (af_user_file) {
-    if (af_user_file->af_file) {
+  if (af_user_file != NULL) {
+    if (af_user_file->af_file != NULL) {
       /* If already opened, rewind */
       rewind(af_user_file->af_file);
       return 0;
@@ -625,8 +640,11 @@ static int af_setpwent(void) {
     } else {
       af_user_file->af_file = fopen(af_user_file->af_path, "r");
       if (af_user_file->af_file == NULL) {
+        int xerrno = errno;
+
         pr_log_pri(PR_LOG_ERR, "error: unable to open passwd file '%s': %s",
-          af_user_file->af_path, strerror(errno));
+          af_user_file->af_path, strerror(xerrno));
+        errno = xerrno;
         return -1;
       }
 
@@ -636,6 +654,7 @@ static int af_setpwent(void) {
     }
   }
 
+  pr_trace_msg(trace_channel, 8, "no AuthUserFile configured");
   errno = EPERM;
   return -1;
 }
@@ -660,8 +679,9 @@ MODRET authfile_getpwnam(cmd_rec *cmd) {
   struct passwd *pwd = NULL;
   const char *name = cmd->argv[0];
 
-  if (af_setpwent() < 0)
+  if (af_setpwent() < 0) {
     return PR_DECLINED(cmd);
+  }
 
   /* Ugly -- we iterate through the file.  Time-consuming. */
   while ((pwd = af_getpwent()) != NULL) {
@@ -679,8 +699,9 @@ MODRET authfile_getpwuid(cmd_rec *cmd) {
   struct passwd *pwd = NULL;
   uid_t uid = *((uid_t *) cmd->argv[0]);
 
-  if (af_setpwent() < 0)
+  if (af_setpwent() < 0) {
     return PR_DECLINED(cmd);
+  }
 
   pwd = af_getpwuid(uid);
 
@@ -690,8 +711,9 @@ MODRET authfile_getpwuid(cmd_rec *cmd) {
 MODRET authfile_name2uid(cmd_rec *cmd) {
   struct passwd *pwd = NULL;
 
-  if (af_setpwent() < 0)
+  if (af_setpwent() < 0) {
     return PR_DECLINED(cmd);
+  }
 
   pwd = af_getpwnam(cmd->argv[0]);
 
@@ -699,8 +721,9 @@ MODRET authfile_name2uid(cmd_rec *cmd) {
 }
 
 MODRET authfile_setpwent(cmd_rec *cmd) {
-  if (af_setpwent() == 0)
+  if (af_setpwent() == 0) {
     return PR_DECLINED(cmd);
+  }
 
   return PR_DECLINED(cmd);
 }
@@ -708,8 +731,9 @@ MODRET authfile_setpwent(cmd_rec *cmd) {
 MODRET authfile_uid2name(cmd_rec *cmd) {
   struct passwd *pwd = NULL;
 
-  if (af_setpwent() < 0)
+  if (af_setpwent() < 0) {
     return PR_DECLINED(cmd);
+  }
 
   pwd = af_getpwuid(*((uid_t *) cmd->argv[0]));
 
@@ -733,8 +757,9 @@ MODRET authfile_getgrgid(cmd_rec *cmd) {
   struct group *grp = NULL;
   gid_t gid = *((gid_t *) cmd->argv[0]);
 
-  if (af_setgrent() < 0)
+  if (af_setgrent() < 0) {
     return PR_DECLINED(cmd);
+  }
 
   grp = af_getgrgid(gid);
 
@@ -745,8 +770,9 @@ MODRET authfile_getgrnam(cmd_rec *cmd) {
   struct group *grp = NULL;
   const char *name = cmd->argv[0];
 
-  if (af_setgrent() < 0)
+  if (af_setgrent() < 0) {
     return PR_DECLINED(cmd);
+  }
 
   while ((grp = af_getgrent()) != NULL) {
     if (strcmp(name, grp->gr_name) == 0) {
@@ -840,8 +866,9 @@ MODRET authfile_getgroups(cmd_rec *cmd) {
 MODRET authfile_gid2name(cmd_rec *cmd) {
   struct group *grp = NULL;
 
-  if (af_setgrent() < 0)
+  if (af_setgrent() < 0) {
     return PR_DECLINED(cmd);
+  }
 
   grp = af_getgrgid(*((gid_t *) cmd->argv[0]));
 
@@ -851,8 +878,9 @@ MODRET authfile_gid2name(cmd_rec *cmd) {
 MODRET authfile_name2gid(cmd_rec *cmd) {
   struct group *grp = NULL;
 
-  if (af_setgrent() < 0)
+  if (af_setgrent() < 0) {
     return PR_DECLINED(cmd);
+  }
 
   grp = af_getgrnam(cmd->argv[0]);
 
@@ -860,8 +888,9 @@ MODRET authfile_name2gid(cmd_rec *cmd) {
 }
 
 MODRET authfile_setgrent(cmd_rec *cmd) {
-  if (af_setgrent() == 0)
+  if (af_setgrent() == 0) {
     return PR_DECLINED(cmd);
+  }
 
   return PR_DECLINED(cmd);
 }
@@ -870,8 +899,9 @@ MODRET authfile_auth(cmd_rec *cmd) {
   char *tmp = NULL, *cleartxt_pass = NULL;
   const char *name = cmd->argv[0];
 
-  if (af_setpwent() < 0)
+  if (af_setpwent() < 0) {
     return PR_DECLINED(cmd);
+  }
 
   /* Lookup the cleartxt password for this user. */
   tmp = af_getpwpass(name);
@@ -927,7 +957,12 @@ MODRET authfile_chkpass(cmd_rec *cmd) {
     return PR_DECLINED(cmd);
 
   crypted_pass = crypt(cleartxt_pass, ciphertxt_pass);
-  if (!crypted_pass) {
+  if (handle_empty_salt == TRUE &&
+      strlen(ciphertxt_pass) == 0) {
+    crypted_pass = "";
+  }
+
+  if (crypted_pass == NULL) {
     pr_log_debug(DEBUG0, MOD_AUTH_FILE_VERSION
       ": error using crypt(3): %s", strerror(errno));
     return PR_DECLINED(cmd);
@@ -1046,6 +1081,33 @@ MODRET set_authgroupfile(cmd_rec *cmd) {
 
   return PR_HANDLED(cmd);
 }
+
+/* Command handlers
+ */
+
+MODRET authfile_post_host(cmd_rec *cmd) {
+
+  /* If the HOST command changed the main_server pointer, reinitialize
+   * ourselves.
+   */
+  if (session.prev_server != NULL) {
+    int res;
+
+    af_user_file = NULL;
+    af_group_file = NULL;
+
+    res = authfile_sess_init();
+    if (res < 0) {
+      pr_session_disconnect(&auth_file_module,
+        PR_SESS_DISCONNECT_SESSION_INIT_FAILED, NULL);
+    }
+  }
+
+  return PR_DECLINED(cmd);
+}
+
+/* Configuration handlers
+ */
 
 /* usage: AuthUserFile path [home <regexp>] [id <min-max>] [name <regex>] */
 MODRET set_authuserfile(cmd_rec *cmd) {
@@ -1181,6 +1243,36 @@ MODRET set_authuserfile(cmd_rec *cmd) {
 /* Initialization routines
  */
 
+static int authfile_init(void) {
+  const char *key, *salt, *hash;
+
+  /* On some Unix platforms, giving crypt(3) an empty string for the salt,
+   * no matter what the input key, results in an empty string being returned.
+   * (The salt string is what is obtained from the AuthUserFile that has been
+   * configured.)
+   *
+   * On other platforms, given crypt(3) a real key and an empty string for
+   * the salt returns in a real string.  (I'm looking at you, Mac OSX.)
+   *
+   * Thus in order to handle the edge case of an AuthUserFile with a passwd
+   * field being empty the same on such differing platforms, we perform a
+   * runtime check (at startup), to see how crypt(3) behaves -- and then
+   * preserve the principle of least surprise appropriately.
+   */
+
+  key = "key";
+  salt = "";
+  hash = crypt(key, salt);
+  if (hash != NULL) {
+    if (strcmp(hash, "") != 0) {
+      /* We're probably on a Mac OSX or similar platform. */
+      handle_empty_salt = TRUE;
+    }
+  }
+
+  return 0;
+}
+
 static int authfile_sess_init(void) {
   config_rec *c = NULL;
 
@@ -1204,6 +1296,11 @@ static conftable authfile_conftab[] = {
   { "AuthGroupFile",	set_authgroupfile,	NULL },
   { "AuthUserFile",	set_authuserfile,	NULL },
   { NULL }
+};
+
+static cmdtable authfile_cmdtab[] = {
+  { POST_CMD,	C_HOST,	G_NONE,	authfile_post_host,	FALSE, FALSE },
+  { 0, NULL }
 };
 
 static authtable authfile_authtab[] = {
@@ -1248,13 +1345,13 @@ module auth_file_module = {
   authfile_conftab,
 
   /* Module command handler table */
-  NULL,
+  authfile_cmdtab,
 
   /* Module authentication handler table */
   authfile_authtab,
 
   /* Module initialization function */
-  NULL,
+  authfile_init,
 
   /* Session initialization function */
   authfile_sess_init,

@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2004-2011 The ProFTPD Project team
+ * Copyright (c) 2004-2012 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@
  */
 
 /* Configuration parser
- * $Id: parser.c,v 1.25 2011/05/23 21:22:24 castaglia Exp $
+ * $Id: parser.c,v 1.31 2012/10/14 03:52:08 castaglia Exp $
  */
 
 #include "conf.h"
@@ -96,13 +96,16 @@ static struct config_src *add_config_source(pr_fh_t *fh) {
 }
 
 static char *get_config_word(pool *p, char *word) {
+  size_t wordlen;
 
   /* Should this word be replaced with a value from the environment?
    * If so, tmp will contain the expanded value, otherwise tmp will
    * contain a string duped from the given pool.
    */
 
-  if (strlen(word) > 7) {
+  wordlen = strlen(word);
+
+  if (wordlen > 7) {
     char *ptr = NULL;
 
     /* Does the given word use the environment syntax?
@@ -113,10 +116,10 @@ static char *get_config_word(pool *p, char *word) {
      */
 
     if (strncmp(word, "%{env:", 6) == 0 &&
-        word[strlen(word)-1] == '}') {
+        word[wordlen-1] == '}') {
       char *env;
 
-      word[strlen(word)-1] = '\0';
+      word[wordlen-1] = '\0';
 
       env = pr_env_get(p, word + 6);
 
@@ -276,7 +279,7 @@ config_rec *pr_parser_config_ctxt_open(const char *name) {
    * parent server.  This keeps <Global> config recs from being freed
    * prematurely, and helps to avoid memory leaks.
    */
-  if (strncmp(name, "<Global>", 9) == 0) {
+  if (strncasecmp(name, "<Global>", 9) == 0) {
     if (!global_config_pool) {
       global_config_pool = make_sub_pool(permanent_pool);
       pr_pool_tag(global_config_pool, "<Global> Pool");
@@ -392,14 +395,16 @@ int pr_parser_parse_file(pool *p, const char *path, config_rec *start,
                 MODRET_ERRMSG(mr), cs->cs_lineno, report_path);
               exit(1);
 
-            } else
+            } else {
               pr_log_pri(PR_LOG_WARNING, "warning: %s on line %u of '%s'",
                 MODRET_ERRMSG(mr), cs->cs_lineno, report_path);
+            }
           }
         }
 
-        if (!MODRET_ISDECLINED(mr))
+        if (!MODRET_ISDECLINED(mr)) {
           found = TRUE;
+        }
 
         conftab = pr_stash_get_symbol(PR_SYM_CONF, cmd->argv[0], conftab,
           &cmd->stash_index);
@@ -416,10 +421,11 @@ int pr_parser_parse_file(pool *p, const char *path, config_rec *start,
             report_path);
           exit(1);
 
-        } else 
+        } else {
           pr_log_pri(PR_LOG_WARNING, "warning: unknown configuration directive "
             "'%s' on line %u of '%s'", cmd->argv[0], cs->cs_lineno,
             report_path);
+        }
       }
     }
 
@@ -541,11 +547,12 @@ int pr_parser_prepare(pool *p, xaset_t **parsed_servers) {
     p = parser_pool;
   }
 
-  if (!parsed_servers)
+  if (parsed_servers == NULL) {
     parser_server_list = &server_list;
 
-  else
+  } else {
     parser_server_list = parsed_servers;
+  }
 
   parser_servstack = make_array(p, 1, sizeof(server_rec *));
   parser_curr_server = (server_rec **) push_array(parser_servstack);
@@ -674,6 +681,14 @@ server_rec *pr_parser_server_ctxt_open(const char *addrstr) {
   s->pool = p;
   s->config_type = CONF_VIRTUAL;
   s->sid = ++parser_sid;
+  s->notes = pr_table_nalloc(p, 0, 8);
+
+  /* TCP KeepAlive is enabled by default, with the system defaults. */
+  s->tcp_keepalive = palloc(s->pool, sizeof(struct tcp_keepalive));
+  s->tcp_keepalive->keepalive_enabled = TRUE;
+  s->tcp_keepalive->keepalive_idle = -1;
+  s->tcp_keepalive->keepalive_count = -1;
+  s->tcp_keepalive->keepalive_intvl = -1;
 
   /* Have to make sure it ends up on the end of the chain, otherwise
    * main_server becomes useless.

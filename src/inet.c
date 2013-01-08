@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2011 The ProFTPD Project team
+ * Copyright (c) 2001-2012 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,12 +25,13 @@
  */
 
 /* Inet support functions, many wrappers for netdb functions
- * $Id: inet.c,v 1.135 2011/09/21 05:03:05 castaglia Exp $
+ * $Id: inet.c,v 1.149 2012/10/03 16:22:52 castaglia Exp $
  */
 
 #include "conf.h"
 #include "privs.h"
 
+extern unsigned char is_master;
 extern server_rec *main_server;
 
 /* A private work pool for all pr_inet_* functions to use. */
@@ -193,11 +194,12 @@ static conn_t *init_conn(pool *p, int fd, pr_netaddr_t *bind_addr,
      * support is enabled), otherwise use IPv4.
      */
 #ifdef PR_USE_IPV6
-    if (pr_netaddr_use_ipv6())
+    if (pr_netaddr_use_ipv6()) {
       addr_family = AF_INET6;
 
-    else
+    } else {
       addr_family = AF_INET;
+    }
 #else
     addr_family = AF_INET;
 #endif /* PR_USE_IPV6 */
@@ -219,6 +221,7 @@ static conn_t *init_conn(pool *p, int fd, pr_netaddr_t *bind_addr,
      * to _all_ BSDs.)
      */
 
+    if (port != INPORT_ANY) {
 #if defined(SOLARIS2) || defined(FREEBSD2) || defined(FREEBSD3) || \
     defined(FREEBSD4) || defined(FREEBSD5) || defined(FREEBSD6) || \
     defined(FREEBSD7) || defined(FREEBSD8) || defined(FREEBSD9) || \
@@ -228,17 +231,20 @@ static conn_t *init_conn(pool *p, int fd, pr_netaddr_t *bind_addr,
     defined(SCO3) || defined(CYGWIN) || defined(SYSV4_2MP) || \
     defined(SYSV5SCO_SV6) || defined(SYSV5UNIXWARE7)
 # ifdef SOLARIS2
-    if (port != INPORT_ANY && port < 1024) {
+      if (port < 1024) {
 # endif
-      pr_signals_block();
-      PRIVS_ROOT
+        pr_signals_block();
+        PRIVS_ROOT
 # ifdef SOLARIS2
-    }
+      }
 # endif
 #endif
+    }
 
     fd = socket(addr_family, SOCK_STREAM, tcp_proto);
+    inet_errno = errno;
 
+    if (port != INPORT_ANY) {
 #if defined(SOLARIS2) || defined(FREEBSD2) || defined(FREEBSD3) || \
     defined(FREEBSD4) || defined(FREEBSD5) || defined(FREEBSD6) || \
     defined(FREEBSD7) || defined(FREEBSD8) || defined(FREEBSD9) || \
@@ -248,37 +254,42 @@ static conn_t *init_conn(pool *p, int fd, pr_netaddr_t *bind_addr,
     defined(SCO3) || defined(CYGWIN) || defined(SYSV4_2MP) || \
     defined(SYSV5SCO_SV6) || defined(SYSV5UNIXWARE7)
 # ifdef SOLARIS2
-    if (port != INPORT_ANY && port < 1024) {
+      if (port < 1024) {
 # endif
-      PRIVS_RELINQUISH
-      pr_signals_unblock();
+        PRIVS_RELINQUISH
+        pr_signals_unblock();
 # ifdef SOLARIS2
-    }
+      }
 # endif
 #endif
+    }
 
     if (fd == -1) {
 
       /* On failure, destroy the connection and return NULL. */
-      inet_errno = errno;
-      if (reporting)
+      if (reporting) {
         pr_log_pri(PR_LOG_ERR, "socket() failed in connection initialization: "
           "%s", strerror(inet_errno));
+      }
+
       destroy_pool(c->pool);
+      errno = inet_errno;
       return NULL;
     }
 
     /* Allow address reuse. */
     if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (void *) &one,
-        sizeof(one)) < 0)
+        sizeof(one)) < 0) {
       pr_log_pri(PR_LOG_NOTICE, "error setting SO_REUSEADDR: %s",
         strerror(errno));
+    }
 
     /* Allow socket keep-alive messages. */
     if (setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (void *) &one,
-        sizeof(one)) < 0)
+        sizeof(one)) < 0) {
       pr_log_pri(PR_LOG_NOTICE, "error setting SO_KEEPALIVE: %s",
         strerror(errno));
+    }
 
     memset(&na, 0, sizeof(na));
     pr_netaddr_set_family(&na, addr_family);
@@ -347,6 +358,11 @@ static conn_t *init_conn(pool *p, int fd, pr_netaddr_t *bind_addr,
       PRIVS_ROOT
     }
 
+    if (fcntl(fd, F_SETFD, FD_CLOEXEC) < 0) {
+      pr_log_pri(PR_LOG_WARNING, "unable to set CLOEXEC on socket fd %d: %s",
+        fd, strerror(errno));
+    }
+
     /* According to one expert, the very nature of the FTP protocol, and it's
      * multiple data-connections creates problems with "rapid-fire" connections
      * (transfering lots of files) causing an eventual "Address already in use"
@@ -359,16 +375,17 @@ static conn_t *init_conn(pool *p, int fd, pr_netaddr_t *bind_addr,
       hold_errno = errno;
 
       if (res == -1 &&
-          errno == EINTR) {
+          hold_errno == EINTR) {
         pr_signals_handle();
-	i++;
-	continue;
+        i++;
+        continue;
       }
 
       if (res != -1 ||
-          errno != EADDRINUSE ||
-	  (port != INPORT_ANY && !retry_bind))
+          hold_errno != EADDRINUSE ||
+          (port != INPORT_ANY && !retry_bind)) {
         break;
+      }
 
       if (port != INPORT_ANY &&
           port < 1024) {
@@ -396,12 +413,17 @@ static conn_t *init_conn(pool *p, int fd, pr_netaddr_t *bind_addr,
         pr_log_pri(PR_LOG_ERR, "Failed binding to %s, port %d: %s",
           pr_netaddr_get_ipstr(&na), port, strerror(hold_errno));
         pr_log_pri(PR_LOG_ERR, "Check the ServerType directive to ensure "
-          "you are configured correctly.");
+          "you are configured correctly");
+        pr_log_pri(PR_LOG_ERR, "Check to see if inetd/xinetd, or another "
+          "proftpd instance, is already using %s, port %d",
+          pr_netaddr_get_ipstr(&na), port);
       }
 
       inet_errno = hold_errno;
       destroy_pool(c->pool);
-      close(fd);
+      (void) close(fd);
+
+      errno = inet_errno;
       return NULL;
     }
 
@@ -417,8 +439,9 @@ static conn_t *init_conn(pool *p, int fd, pr_netaddr_t *bind_addr,
 
     salen = pr_netaddr_get_sockaddr_len(&na);
     if (getsockname(fd, pr_netaddr_get_sockaddr(&na), &salen) == 0) {
-      if (!c->local_addr)
+      if (c->local_addr == NULL) {
         c->local_addr = pr_netaddr_alloc(c->pool);
+      }
 
       pr_netaddr_set_family(c->local_addr, pr_netaddr_get_family(&na));
       pr_netaddr_set_sockaddr(c->local_addr, pr_netaddr_get_sockaddr(&na));
@@ -431,15 +454,16 @@ static conn_t *init_conn(pool *p, int fd, pr_netaddr_t *bind_addr,
 
   } else {
     /* Make sure the netaddr has its address family set. */
-    if (pr_netaddr_get_family(&na) == 0)
+    if (pr_netaddr_get_family(&na) == 0) {
       pr_netaddr_set_family(&na, addr_family);
+    }
   }
 
   c->listen_fd = fd;
   register_cleanup(c->pool, (void *) c, conn_cleanup_cb, conn_cleanup_cb);
 
   pr_trace_msg("binding", 4, "bound address %s, port %d to socket fd %d",
-    pr_netaddr_get_ipstr(&na), port, fd);
+    pr_netaddr_get_ipstr(&na), c->local_port, fd);
 
   return c;
 }
@@ -450,14 +474,16 @@ conn_t *pr_inet_create_conn(pool *p, int fd, pr_netaddr_t *bind_addr,
 
   c = init_conn(p, fd, bind_addr, port, retry_bind, TRUE);
 
-  /* This code is somewhat of a kludge, because error handling should
-   * NOT occur in inet.c, it should be handled by the caller.
-   */
-
-  if (c == NULL) {
-    pr_session_disconnect(NULL, PR_SESS_DISCONNECT_BY_APPLICATION, NULL);
+  if (!is_master) {
+    /* This code is somewhat of a kludge, because error handling should
+     * NOT occur in inet.c, it should be handled by the caller.
+     */
+    if (c == NULL) {
+      pr_session_disconnect(NULL, PR_SESS_DISCONNECT_BY_APPLICATION, NULL);
+    }
   }
 
+  errno = inet_errno;
   return c;
 }
 
@@ -678,9 +704,7 @@ int pr_inet_set_proto_opts(pool *p, conn_t *c, int mss, int nodelay,
 #endif /* TCP_MAXSEG */
 
 #ifdef IP_TOS
-  /* Only set TOS flags on IPv4 sockets; IPv6 sockets don't seem to support
-   * them.
-   */
+  /* Only set TOS flags on IPv4 sockets; IPv6 sockets use TCLASS. */
   if (pr_netaddr_get_family(c->local_addr) == AF_INET) {
     if (c->listen_fd != -1) {
       if (setsockopt(c->listen_fd, ip_level, IP_TOS, (void *) &tos,
@@ -692,23 +716,34 @@ int pr_inet_set_proto_opts(pool *p, conn_t *c, int mss, int nodelay,
   }
 #endif /* IP_TOS */
 
-#ifdef TCP_NOPUSH
-  /* XXX Note: for backward compatibility, we only call set_proto_cork() for
-   * BSD systems.  This condition can be removed in 1.3.5rc1.
-   */
+#ifdef IPV6_TCLASS
+  if (pr_netaddr_use_ipv6()) {
+    /* Only set TCLASS flags on IPv6 sockets; IPv4 sockets use TOS. */
+    if (pr_netaddr_get_family(c->local_addr) == AF_INET6) {
+      if (c->listen_fd != -1) {
+        if (setsockopt(c->listen_fd, ip_level, IPV6_TCLASS, (void *) &tos,
+            sizeof(tos)) < 0) {
+          pr_log_pri(PR_LOG_NOTICE, "error setting listen fd IPV6_TCLASS: %s",
+            strerror(errno));
+        }
+      }
+    }
+  }
+#endif /* IPV6_TCLASS */
+
   if (c->listen_fd != -1) {
     if (pr_inet_set_proto_cork(c->listen_fd, nopush) < 0) {
       pr_log_pri(PR_LOG_NOTICE, "error corking listen fd %d: %s", c->listen_fd,
         strerror(errno));
     }
   }
-#endif /* TCP_NOPUSH */
 
   return 0;
 }
 
 /* Set socket options on a connection.  */
-int pr_inet_set_socket_opts(pool *p, conn_t *c, int rcvbuf, int sndbuf) {
+int pr_inet_set_socket_opts(pool *p, conn_t *c, int rcvbuf, int sndbuf,
+    struct tcp_keepalive *tcp_keepalive) {
 
   /* Linux and "most" newer networking OSes probably use a highly adaptive
    * window size system, which generally wouldn't require user-space
@@ -718,14 +753,86 @@ int pr_inet_set_socket_opts(pool *p, conn_t *c, int rcvbuf, int sndbuf) {
    */
 
   if (c->listen_fd != -1) {
-    int keepalive = 0;
+    int keepalive = 1;
     int crcvbuf = 0, csndbuf = 0;
     socklen_t len;
+
+    if (tcp_keepalive != NULL) {
+      keepalive = tcp_keepalive->keepalive_enabled;
+    }
 
     if (setsockopt(c->listen_fd, SOL_SOCKET, SO_KEEPALIVE, (void *)
         &keepalive, sizeof(int)) < 0) {
       pr_log_pri(PR_LOG_NOTICE, "error setting listen fd SO_KEEPALIVE: %s",
         strerror(errno));
+
+    } else {
+      /* We only try to set the TCP keepalive specifics if SO_KEEPALIVE was
+       * set successfully.
+       */
+      pr_trace_msg(trace_channel, 15,
+        "enabled SO_KEEPALIVE on socket fd %d", c->listen_fd);
+
+      if (tcp_keepalive != NULL) {
+        int val = 0;
+
+#ifdef TCP_KEEPIDLE
+        val = tcp_keepalive->keepalive_idle;
+        if (val != -1) {
+# ifdef __DragonFly__
+          /* DragonFly BSD uses millsecs as the KEEPIDLE unit. */
+          val *= 1000;
+# endif /* DragonFly BSD */
+          if (setsockopt(c->listen_fd, SOL_SOCKET, TCP_KEEPIDLE, (void *)
+              &val, sizeof(int)) < 0) {
+            pr_log_pri(PR_LOG_NOTICE,
+              "error setting TCP_KEEPIDLE %d on fd %d: %s", val, c->listen_fd,
+              strerror(errno));
+
+          } else {
+            pr_trace_msg(trace_channel, 15,
+              "enabled TCP_KEEPIDLE %d on socket fd %d", val, c->listen_fd);
+          }
+        }
+#endif /* TCP_KEEPIDLE */
+
+#ifdef TCP_KEEPCNT
+        val = tcp_keepalive->keepalive_count;
+        if (val != -1) {
+          if (setsockopt(c->listen_fd, SOL_SOCKET, TCP_KEEPCNT, (void *)
+              &val, sizeof(int)) < 0) {
+            pr_log_pri(PR_LOG_NOTICE,
+              "error setting TCP_KEEPCNT %d on fd %d: %s", val, c->listen_fd,
+              strerror(errno));
+
+          } else {
+            pr_trace_msg(trace_channel, 15,
+              "enabled TCP_KEEPCNT %d on socket fd %d", val, c->listen_fd);
+          }
+        }
+#endif /* TCP_KEEPCNT */
+
+#ifdef TCP_KEEPINTVL
+        val = tcp_keepalive->keepalive_intvl;
+        if (val != -1) {
+# ifdef __DragonFly__
+          /* DragonFly BSD uses millsecs as the KEEPINTVL unit. */
+          val *= 1000;
+# endif /* DragonFly BSD */
+          if (setsockopt(c->listen_fd, SOL_SOCKET, TCP_KEEPINTVL, (void *)
+              &val, sizeof(int)) < 0) {
+            pr_log_pri(PR_LOG_NOTICE,
+              "error setting TCP_KEEPINTVL %d on fd %d: %s", val, c->listen_fd,
+              strerror(errno));
+
+          } else {
+            pr_trace_msg(trace_channel, 15,
+              "enabled TCP_KEEPINTVL %d on socket fd %d", val, c->listen_fd);
+          }
+        }
+#endif /* TCP_KEEPINTVL */
+      }
+
     }
 
     if (sndbuf > 0) {
@@ -834,7 +941,8 @@ int pr_inet_set_nonblock(pool *p, conn_t *c) {
 
   errno = EBADF;		/* Default */
 
-  if (c->mode == CM_LISTEN) {
+  if (c->mode == CM_LISTEN ||
+      c->mode == CM_CONNECT) {
     flags = fcntl(c->listen_fd, F_GETFL);
     res = fcntl(c->listen_fd, F_SETFL, flags|O_NONBLOCK);
 
@@ -859,7 +967,8 @@ int pr_inet_set_block(pool *p, conn_t *c) {
 
   errno = EBADF;		/* Default */
 
-  if (c->mode == CM_LISTEN) {
+  if (c->mode == CM_LISTEN ||
+      c->mode == CM_CONNECT) {
     flags = fcntl(c->listen_fd, F_GETFL);
     res = fcntl(c->listen_fd, F_SETFL, flags & (U32BITS ^ O_NONBLOCK));
 
@@ -925,7 +1034,12 @@ int pr_inet_connect(pool *p, conn_t *c, pr_netaddr_t *addr, int port) {
   pr_netaddr_t remote_na;
   int res = 0;
 
-  pr_inet_set_block(p, c);
+  c->mode = CM_CONNECT;
+  if (pr_inet_set_block(p, c) < 0) {
+    c->mode = CM_ERROR;
+    c->xerrno = errno;
+    return -1;
+  }
 
   /* No need to initialize the remote_na netaddr here, as we're directly
    * copying the data from the given netaddr into that memory area.
@@ -933,8 +1047,6 @@ int pr_inet_connect(pool *p, conn_t *c, pr_netaddr_t *addr, int port) {
 
   memcpy(&remote_na, addr, sizeof(remote_na));
   pr_netaddr_set_port(&remote_na, htons(port));
-
-  c->mode = CM_CONNECT;
 
   while (TRUE) {
     if ((res = connect(c->listen_fd, pr_netaddr_get_sockaddr(&remote_na),
@@ -955,6 +1067,7 @@ int pr_inet_connect(pool *p, conn_t *c, pr_netaddr_t *addr, int port) {
   c->mode = CM_OPEN;
 
   if (pr_inet_get_conn_info(c, c->listen_fd) < 0) {
+    c->mode = CM_ERROR;
     c->xerrno = errno;
     return -1;
   }
@@ -970,7 +1083,12 @@ int pr_inet_connect(pool *p, conn_t *c, pr_netaddr_t *addr, int port) {
 int pr_inet_connect_nowait(pool *p, conn_t *c, pr_netaddr_t *addr, int port) {
   pr_netaddr_t remote_na;
 
-  pr_inet_set_nonblock(p, c);
+  c->mode = CM_CONNECT;
+  if (pr_inet_set_nonblock(p, c) < 0) {
+    c->mode = CM_ERROR;
+    c->xerrno = errno;
+    return -1;
+  }
 
   /* No need to initialize the remote_na netaddr here, as we're directly
    * copying the data from the given netaddr into that memory area.
@@ -979,12 +1097,15 @@ int pr_inet_connect_nowait(pool *p, conn_t *c, pr_netaddr_t *addr, int port) {
   memcpy(&remote_na, addr, sizeof(remote_na));
   pr_netaddr_set_port(&remote_na, htons(port));
 
-  c->mode = CM_CONNECT;
   if (connect(c->listen_fd, pr_netaddr_get_sockaddr(&remote_na),
       pr_netaddr_get_sockaddr_len(&remote_na)) == -1) {
     if (errno != EINPROGRESS && errno != EALREADY) {
       c->mode = CM_ERROR;
       c->xerrno = errno;
+
+      pr_inet_set_block(c->pool, c);
+
+      errno = c->xerrno;
       return -1;
     }
 
@@ -995,6 +1116,9 @@ int pr_inet_connect_nowait(pool *p, conn_t *c, pr_netaddr_t *addr, int port) {
 
   if (pr_inet_get_conn_info(c, c->listen_fd) < 0) {
     c->xerrno = errno;
+
+    pr_inet_set_block(c->pool, c);
+    errno = c->xerrno;
     return -1;
   }
 
@@ -1011,8 +1135,11 @@ int pr_inet_connect_nowait(pool *p, conn_t *c, pr_netaddr_t *addr, int port) {
 int pr_inet_accept_nowait(pool *p, conn_t *c) {
   int fd;
 
-  if (c->mode == CM_LISTEN)
-    pr_inet_set_nonblock(c->pool, c);
+  if (c->mode == CM_LISTEN) {
+    if (pr_inet_set_nonblock(c->pool, c) < 0) {
+      return -1;
+    }
+  }
 
   /* A directive could enforce only IPv4 or IPv6 connections here, by
    * actually using a sockaddr argument to accept(2), and checking the
@@ -1271,15 +1398,16 @@ conn_t *pr_inet_openrw(pool *p, conn_t *c, pr_netaddr_t *addr, int strm_type,
   res->outstrm = pr_netio_open(res->pool, strm_type, res->wfd, PR_NETIO_IO_WR);
 
   /* Set options on the sockets. */
-  pr_inet_set_socket_opts(res->pool, res, 0, 0);
+  pr_inet_set_socket_opts(res->pool, res, 0, 0, NULL);
   pr_inet_set_block(res->pool, res);
 
   res->mode = CM_OPEN;
 
 #if defined(HAVE_STROPTS_H) && defined(I_SRDOPT) && defined(RPROTDIS) && \
-    defined(SOLARIS2)
+    (defined(SOLARIS2_9) || defined(SOLARIS2_10))
   /* This is needed to work around control messages in STREAMS devices
-   * (as on Solaris 9/NFS).
+   * (as on Solaris 9/NFS).  The underlying issue is reported to be fixed
+   * in Solaris 11.
    */
   while (ioctl(res->rfd, I_SRDOPT, RPROTDIS) < 0) {
     if (errno == EINTR) {
@@ -1327,26 +1455,41 @@ void init_inet(void) {
   setprotoent(FALSE);
 #endif
 
+  /* AIX ships with a broken /etc/protocols file; the entry for 'ip' in that
+   * file defines a value of 252, which is unacceptable to the AIX
+   * setsockopt(2) system call (Bug#3780).
+   *
+   * To work around this, do not perform the /etc/protocols lookup for AIX;
+   * instead, keep the default IP_PROTO value defined in its other system
+   * headers.
+   */
+#ifndef _AIX
   pr = getprotobyname("ip"); 
-  if (pr != NULL)
+  if (pr != NULL) {
     ip_proto = pr->p_proto;
+  }
+#endif /* AIX */
 
 #ifdef PR_USE_IPV6
   pr = getprotobyname("ipv6"); 
-  if (pr != NULL)
+  if (pr != NULL) {
     ipv6_proto = pr->p_proto;
+  }
 #endif /* PR_USE_IPV6 */
 
   pr = getprotobyname("tcp");
-  if (pr != NULL)
+  if (pr != NULL) {
     tcp_proto = pr->p_proto;
+  }
 
 #ifdef HAVE_ENDPROTOENT
   endprotoent();
 #endif
 
-  if (inet_pool)
+  if (inet_pool) {
     destroy_pool(inet_pool);
+  }
+
   inet_pool = make_sub_pool(permanent_pool);
   pr_pool_tag(inet_pool, "Inet Pool");
 }

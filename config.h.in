@@ -321,6 +321,9 @@
 /* Define if you have the gethostname function.  */
 #undef HAVE_GETHOSTNAME
 
+/* Define if you have the getifaddrs function.  */
+#undef HAVE_GETIFADDRS
+
 /* Define if you have the getnameinfo function.  */
 #undef HAVE_GETNAMEINFO
 
@@ -375,6 +378,9 @@
 /* Define if you have the mkdir function.  */
 #undef HAVE_MKDIR
 
+/* Define if you have the mkdtemp function.  */
+#undef HAVE_MKDTEMP
+
 /* Define if you have the mkstemp function.  */
 #undef HAVE_MKSTEMP
 
@@ -392,6 +398,9 @@
 
 /* Define if you have the MySQL make_scrambled_password_323 function.  */
 #undef HAVE_MYSQL_MAKE_SCRAMBLED_PASSWORD_323
+
+/* Define if you have the MySQL my_make_scrambled_password function.  */
+#undef HAVE_MYSQL_MY_MAKE_SCRAMBLED_PASSWORD
 
 /* Define if you have the nl_langinfo function.  */
 #undef HAVE_NL_LANGINFO
@@ -471,6 +480,12 @@
 /* Define if you have the strerror function.  */
 #undef HAVE_STRERROR
 
+/* Define if you have the strlcat function.  */
+#undef HAVE_STRLCAT
+
+/* Define if you have the strlcpy function.  */
+#undef HAVE_STRLCPY
+
 /* Define if you have the strsep function.  */
 #undef HAVE_STRSEP
 
@@ -543,6 +558,9 @@
 /* Define if you have the <iconv.h> header file.  */
 #undef HAVE_ICONV_H
 
+/* Define if you have the <ifaddrs.h> header file.  */
+#undef HAVE_IFADDRS_H
+
 /* Define if you have the <inttypes.h> header file.  */
 #undef HAVE_INTTYPES_H
 
@@ -584,6 +602,9 @@
 
 /* Define if you have the <netdb.h> header file.  */
 #undef HAVE_NETDB_H
+
+/* Define if you have the <net/if.h> header file.  */
+#undef HAVE_NET_IF_H
 
 /* Define if you have the <netinet/in.h> header file.  */
 #undef HAVE_NETINET_IN_H
@@ -659,6 +680,9 @@
 
 /* Define if you have the <sys/param.h> header file.  */
 #undef HAVE_SYS_PARAM_H
+
+/* Define if you have the <sys/prctl.h> header file.  */
+#undef HAVE_SYS_PRCTL_H
 
 /* Define if you have the <sys/pstat.h> header file.  */
 #undef HAVE_SYS_PSTAT_H
@@ -785,6 +809,9 @@
 
 /* Define if you have the security library (-lsecurity).  */
 #undef HAVE_LIBSECURITY
+
+/* Define if you have the libtinfo library (-ltinfo).  */
+#undef HAVE_LIBTINFO
 
 /* Define if you have the addrinfo struct.  */
 #undef HAVE_STRUCT_ADDRINFO
@@ -920,6 +947,11 @@
 
 /* Define if OpenSSL support, if available, should be used.  */
 #undef PR_USE_OPENSSL
+
+/* Define if OpenSSL Elliptic Curve Cryptography (ECC) support, if available,
+ * should be used.
+ */
+#undef PR_USE_OPENSSL_ECC
 
 /* Define if OpenSSL support (with FIPS enabled), if available, should be
  * used.

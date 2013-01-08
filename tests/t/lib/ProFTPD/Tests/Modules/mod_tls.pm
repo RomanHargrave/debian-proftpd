@@ -4,6 +4,7 @@ use lib qw(t/lib);
 use base qw(ProFTPD::TestSuite::Child);
 use strict;
 
+use File::Copy;
 use File::Path qw(mkpath);
 use File::Spec;
 use IO::Handle;
@@ -16,7 +17,12 @@ $| = 1;
 my $order = 0;
 
 my $TESTS = {
-  tls_login_ok => {
+  tls_login_rsa => {
+    order => ++$order,
+    test_class => [qw(forking)],
+  },
+
+  tls_login_dsa => {
     order => ++$order,
     test_class => [qw(forking)],
   },
@@ -26,7 +32,7 @@ my $TESTS = {
     test_class => [qw(bug forking)],
   },
 
-  tls_pkcs12_login_ok => {
+  tls_login_pkcs12 => {
     order => ++$order,
     test_class => [qw(forking)],
   },
@@ -218,7 +224,7 @@ my $TESTS = {
     test_class => [qw(bug forking)],
   },
 
-  tls_getpassphraseprovider => {
+  tls_passphraseprovider => {
     order => ++$order,
     test_class => [qw(forking)],
   },
@@ -239,6 +245,31 @@ my $TESTS = {
   tls_verify_order_ocsp_https => {
     order => ++$order,
     test_class => [qw(bug forking inprogress)],
+  },
+
+  tls_client_cert_verify_failed_selfsigned_cert_only_bug3742 => {
+    order => ++$order,
+    test_class => [qw(bug forking)],
+  },
+
+  tls_client_cert_verify_failed_selfsigned_cert_in_chain_bug3742 => {
+    order => ++$order,
+    test_class => [qw(bug forking)],
+  },
+
+  tls_client_cert_verify_ok_server_selfsigned_cert_in_chain_bug3742 => {
+    order => ++$order,
+    test_class => [qw(bug forking)],
+  },
+
+  tls_opts_allow_dot_login => {
+    order => ++$order,
+    test_class => [qw(forking)],
+  },
+
+  tls_opts_multiple_lines_bug3800 => {
+    order => ++$order,
+    test_class => [qw(bug forking)],
   },
 
 };
@@ -276,7 +307,7 @@ sub list_tests {
   return testsuite_get_runnable_tests($TESTS);
 }
 
-sub tls_login_ok {
+sub tls_login_rsa {
   my $self = shift;
   my $tmpdir = $self->{tmpdir};
 
@@ -284,13 +315,14 @@ sub tls_login_ok {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -309,7 +341,7 @@ sub tls_login_ok {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $cert_file = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
   my $ca_file = File::Spec->rel2abs('t/etc/modules/mod_tls/ca-cert.pem');
@@ -397,13 +429,16 @@ sub tls_login_ok {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
   unlink($log_file);
 }
 
-sub tls_double_auth {
+sub tls_login_dsa {
   my $self = shift;
   my $tmpdir = $self->{tmpdir};
 
@@ -411,13 +446,14 @@ sub tls_double_auth {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -436,7 +472,138 @@ sub tls_double_auth {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
+
+  my $cert_file = File::Spec->rel2abs('t/etc/modules/mod_tls/dsa-server-cert.pem');
+  my $ca_file = File::Spec->rel2abs('t/etc/modules/mod_tls/dsa-ca.pem');
+
+  my $config = {
+    PidFile => $pid_file,
+    ScoreboardFile => $scoreboard_file,
+    SystemLog => $log_file,
+
+    AuthUserFile => $auth_user_file,
+    AuthGroupFile => $auth_group_file,
+
+    IfModules => {
+      'mod_delay.c' => {
+        DelayEngine => 'off',
+      },
+
+      'mod_tls.c' => {
+        TLSEngine => 'on',
+        TLSLog => $log_file,
+        TLSProtocol => 'SSLv3 TLSv1',
+        TLSRequired => 'on',
+        TLSDSACertificateFile => $cert_file,
+        TLSCACertificateFile => $ca_file,
+      },
+    },
+  };
+
+  my ($port, $config_user, $config_group) = config_write($config_file, $config);
+
+  # Open pipes, for use between the parent and child processes.  Specifically,
+  # the child will indicate when it's done with its test by writing a message
+  # to the parent.
+  my ($rfh, $wfh);
+  unless (pipe($rfh, $wfh)) {
+    die("Can't open pipe: $!");
+  }
+
+  require Net::FTPSSL;
+
+  my $ex;
+
+  # Fork child
+  $self->handle_sigchld();
+  defined(my $pid = fork()) or die("Can't fork: $!");
+  if ($pid) {
+    eval {
+      # Give the server a chance to start up
+      sleep(2);
+
+      my $client = Net::FTPSSL->new('127.0.0.1',
+        Encryption => 'E',
+        Port => $port,
+      );
+
+      unless ($client) {
+        die("Can't connect to FTPS server: " . IO::Socket::SSL::errstr());
+      }
+
+      unless ($client->login($user, $passwd)) {
+        die("Can't login: " . $client->last_message());
+      }
+    };
+
+    if ($@) {
+      $ex = $@;
+    }
+
+    $wfh->print("done\n");
+    $wfh->flush();
+
+  } else {
+    eval { server_wait($config_file, $rfh) };
+    if ($@) {
+      warn($@);
+      exit 1;
+    }
+
+    exit 0;
+  }
+
+  # Stop server
+  server_stop($pid_file);
+
+  $self->assert_child_ok($pid);
+
+  if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
+    die($ex);
+  }
+
+  unlink($log_file);
+}
+
+sub tls_double_auth {
+  my $self = shift;
+  my $tmpdir = $self->{tmpdir};
+
+  my $config_file = "$tmpdir/tls.conf";
+  my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
+  my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
+
+  my $log_file = test_get_logfile();
+
+  my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
+  my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
+
+  my $user = 'proftpd';
+  my $passwd = 'test';
+  my $group = 'ftpd';
+  my $home_dir = File::Spec->rel2abs($tmpdir);
+  my $uid = 500;
+  my $gid = 500;
+
+  # Make sure that, if we're running as root, that the home directory has
+  # permissions/privs set for the account we create
+  if ($< == 0) {
+    unless (chmod(0755, $home_dir)) {
+      die("Can't set perms on $home_dir to 0755: $!");
+    }
+
+    unless (chown($uid, $gid, $home_dir)) {
+      die("Can't set owner of $home_dir to $uid/$gid: $!");
+    }
+  }
+
+  auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
+    '/bin/bash');
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $cert_file = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
   my $ca_file = File::Spec->rel2abs('t/etc/modules/mod_tls/ca-cert.pem');
@@ -530,13 +697,16 @@ sub tls_double_auth {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
   unlink($log_file);
 }
 
-sub tls_pkcs12_login_ok {
+sub tls_login_pkcs12 {
   my $self = shift;
   my $tmpdir = $self->{tmpdir};
 
@@ -544,13 +714,14 @@ sub tls_pkcs12_login_ok {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -569,7 +740,7 @@ sub tls_pkcs12_login_ok {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $pkcs12_file = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.p12');
   my $ca_file = File::Spec->rel2abs('t/etc/modules/mod_tls/ca-cert.pem');
@@ -657,6 +828,9 @@ sub tls_pkcs12_login_ok {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -671,13 +845,14 @@ sub tls_crl_file_ok {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -696,7 +871,7 @@ sub tls_crl_file_ok {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $server_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/crl-server-cert.pem');
   my $client_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/crl-client-cert.pem');
@@ -807,6 +982,9 @@ sub tls_crl_file_ok {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -821,13 +999,14 @@ sub tls_list_no_session_reuse {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -846,7 +1025,7 @@ sub tls_list_no_session_reuse {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $cert_file = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
   my $ca_file = File::Spec->rel2abs('t/etc/modules/mod_tls/ca-cert.pem');
@@ -950,6 +1129,9 @@ sub tls_list_no_session_reuse {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -964,13 +1146,14 @@ sub tls_list_with_no_session_reuse_required_opt {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -989,7 +1172,7 @@ sub tls_list_with_no_session_reuse_required_opt {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $cert_file = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
   my $ca_file = File::Spec->rel2abs('t/etc/modules/mod_tls/ca-cert.pem');
@@ -1084,6 +1267,9 @@ sub tls_list_with_no_session_reuse_required_opt {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -1098,13 +1284,14 @@ sub tls_list_fails_tls_required_by_dir_bug2178 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -1123,7 +1310,7 @@ sub tls_list_fails_tls_required_by_dir_bug2178 {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $server_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
   my $client_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/client-cert.pem');
@@ -1240,6 +1427,9 @@ sub tls_list_fails_tls_required_by_dir_bug2178 {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -1254,13 +1444,14 @@ sub tls_list_ok_tls_required_by_dir_bug2178 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -1279,7 +1470,7 @@ sub tls_list_ok_tls_required_by_dir_bug2178 {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $server_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
   my $client_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/client-cert.pem');
@@ -1395,6 +1586,9 @@ sub tls_list_ok_tls_required_by_dir_bug2178 {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -1409,13 +1603,14 @@ sub tls_list_fails_tls_required_by_ftpaccess_bug2178 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -1434,7 +1629,7 @@ sub tls_list_fails_tls_required_by_ftpaccess_bug2178 {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $server_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
   my $client_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/client-cert.pem');
@@ -1563,6 +1758,9 @@ sub tls_list_fails_tls_required_by_ftpaccess_bug2178 {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -1577,13 +1775,14 @@ sub tls_list_ok_tls_required_by_ftpaccess_bug2178 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -1602,7 +1801,7 @@ sub tls_list_ok_tls_required_by_ftpaccess_bug2178 {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $server_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
   my $client_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/client-cert.pem');
@@ -1728,6 +1927,9 @@ sub tls_list_ok_tls_required_by_ftpaccess_bug2178 {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -1742,7 +1944,7 @@ sub tls_incompatible_config_bug3247 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $server_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
   my $client_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/client-cert.pem');
@@ -1772,8 +1974,11 @@ sub tls_incompatible_config_bug3247 {
 
   my ($port, $config_user, $config_group) = config_write($config_file, $config);
 
-  eval { server_start($config_file, undef, $pid_file) };
+  eval { server_start($config_file, $pid_file) };
   unless ($@) {
+    test_append_logfile($log_file, "server started unexpectedly");
+    unlink($log_file);
+
     die("server started unexpectedly");
   }
 
@@ -1788,13 +1993,14 @@ sub tls_implicit_ssl_bug3266 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -1813,7 +2019,7 @@ sub tls_implicit_ssl_bug3266 {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $cert_file = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
   my $ca_file = File::Spec->rel2abs('t/etc/modules/mod_tls/ca-cert.pem');
@@ -1916,6 +2122,9 @@ sub tls_implicit_ssl_bug3266 {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -1930,13 +2139,14 @@ sub tls_client_cert_verify_failed_embedded_nul_bug3275 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -1955,7 +2165,7 @@ sub tls_client_cert_verify_failed_embedded_nul_bug3275 {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $server_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
 #  my $ca_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/ca-cert.pem');
@@ -2121,13 +2331,14 @@ sub tls_opts_std_env_vars {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -2146,7 +2357,7 @@ sub tls_opts_std_env_vars {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $ext_log = File::Spec->rel2abs("$tmpdir/custom.log");
 
@@ -2302,13 +2513,14 @@ sub tls_opts_std_env_vars_client_vars {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -2327,7 +2539,7 @@ sub tls_opts_std_env_vars_client_vars {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $ext_log = File::Spec->rel2abs("$tmpdir/custom.log");
 
@@ -2481,13 +2693,14 @@ sub tls_opts_ipaddr_required {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -2506,7 +2719,7 @@ sub tls_opts_ipaddr_required {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $client_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/client-cert.pem');
   my $cert_file = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
@@ -2617,6 +2830,9 @@ sub tls_opts_ipaddr_required {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -2631,13 +2847,14 @@ sub tls_opts_allow_per_user_tlsrequired_on_anon_login_bug3325 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -2656,7 +2873,7 @@ sub tls_opts_allow_per_user_tlsrequired_on_anon_login_bug3325 {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $client_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/client-cert.pem');
   my $cert_file = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
@@ -2771,6 +2988,9 @@ EOC
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -2785,13 +3005,14 @@ sub tls_opts_allow_per_user_tlsrequired_on_user_login_bug3325 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -2810,7 +3031,7 @@ sub tls_opts_allow_per_user_tlsrequired_on_user_login_bug3325 {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $client_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/client-cert.pem');
   my $cert_file = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
@@ -2928,6 +3149,9 @@ EOC
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -2942,13 +3166,14 @@ sub tls_opts_allow_per_user_tlsrequired_auth_user_login_bug3325 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -2967,7 +3192,7 @@ sub tls_opts_allow_per_user_tlsrequired_auth_user_login_bug3325 {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $client_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/client-cert.pem');
   my $cert_file = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
@@ -3085,6 +3310,9 @@ EOC
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -3099,13 +3327,14 @@ sub tls_opts_allow_per_user_tlsrequired_ctrl_user_login_bug3325 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -3124,7 +3353,7 @@ sub tls_opts_allow_per_user_tlsrequired_ctrl_user_login_bug3325 {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $client_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/client-cert.pem');
   my $cert_file = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
@@ -3242,6 +3471,9 @@ EOC
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -3256,13 +3488,14 @@ sub tls_opts_allow_per_user_tlsrequired_data_user_login_bug3325 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -3281,7 +3514,7 @@ sub tls_opts_allow_per_user_tlsrequired_data_user_login_bug3325 {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $client_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/client-cert.pem');
   my $cert_file = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
@@ -3393,6 +3626,9 @@ EOC
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -3407,13 +3643,14 @@ sub tls_opts_allow_per_user_tlsrequired_on_ifsess_login_bug3325 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -3432,7 +3669,7 @@ sub tls_opts_allow_per_user_tlsrequired_on_ifsess_login_bug3325 {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $client_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/client-cert.pem');
   my $cert_file = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
@@ -3542,6 +3779,9 @@ EOC
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -3556,13 +3796,14 @@ sub tls_rest_2gb_last_byte {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -3581,7 +3822,7 @@ sub tls_rest_2gb_last_byte {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $client_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/client-cert.pem');
   my $cert_file = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
@@ -3741,6 +3982,9 @@ sub tls_rest_2gb_last_byte {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -3755,13 +3999,14 @@ sub tls_rest_4gb_last_byte {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -3780,7 +4025,7 @@ sub tls_rest_4gb_last_byte {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $client_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/client-cert.pem');
   my $cert_file = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
@@ -3940,6 +4185,9 @@ sub tls_rest_4gb_last_byte {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -3954,13 +4202,14 @@ sub tls_stor_empty_file {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -3979,7 +4228,7 @@ sub tls_stor_empty_file {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $cert_file = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
   my $ca_file = File::Spec->rel2abs('t/etc/modules/mod_tls/ca-cert.pem');
@@ -4098,6 +4347,9 @@ sub tls_stor_empty_file {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -4112,13 +4364,14 @@ sub tls_retr_empty_file {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -4137,7 +4390,7 @@ sub tls_retr_empty_file {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $cert_file = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
   my $ca_file = File::Spec->rel2abs('t/etc/modules/mod_tls/ca-cert.pem');
@@ -4256,6 +4509,9 @@ sub tls_retr_empty_file {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -4270,13 +4526,14 @@ sub tls_required_on_feat_allowed_bug3420 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -4295,7 +4552,7 @@ sub tls_required_on_feat_allowed_bug3420 {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $cert_file = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
   my $ca_file = File::Spec->rel2abs('t/etc/modules/mod_tls/ca-cert.pem');
@@ -4381,6 +4638,9 @@ sub tls_required_on_feat_allowed_bug3420 {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -4395,13 +4655,14 @@ sub tls_implicit_ssl_bug3437 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -4420,7 +4681,7 @@ sub tls_implicit_ssl_bug3437 {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $cert_file = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
   my $ca_file = File::Spec->rel2abs('t/etc/modules/mod_tls/ca-cert.pem');
@@ -4529,6 +4790,9 @@ sub tls_implicit_ssl_bug3437 {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -4543,13 +4807,14 @@ sub tls_ccc_list_bug3465 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -4568,7 +4833,7 @@ sub tls_ccc_list_bug3465 {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $cert_file = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
   my $ca_file = File::Spec->rel2abs('t/etc/modules/mod_tls/ca-cert.pem');
@@ -4676,6 +4941,9 @@ sub tls_ccc_list_bug3465 {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -4690,13 +4958,14 @@ sub tls_opts_commonname_required_bug3512 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -4715,7 +4984,7 @@ sub tls_opts_commonname_required_bug3512 {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $bad_client_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/client-cert.pem');
   my $good_client_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/client-cert-localhost.pem');
@@ -4838,6 +5107,9 @@ sub tls_opts_commonname_required_bug3512 {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -4852,13 +5124,14 @@ sub tls_opts_dns_name_required {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -4877,7 +5150,7 @@ sub tls_opts_dns_name_required {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $bad_client_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/client-cert.pem');
   my $good_client_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/client-cert-localhost.pem');
@@ -5000,6 +5273,9 @@ sub tls_opts_dns_name_required {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -5014,13 +5290,14 @@ sub tls_opts_ip_addr_dns_name_cn_required {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -5039,7 +5316,7 @@ sub tls_opts_ip_addr_dns_name_cn_required {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $bad_client_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/client-cert.pem');
   my $good_client_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/client-cert-localhost.pem');
@@ -5162,6 +5439,9 @@ sub tls_opts_ip_addr_dns_name_cn_required {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -5176,7 +5456,7 @@ sub tls_site_chmod_ok {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
@@ -5318,6 +5598,9 @@ sub tls_site_chmod_ok {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -5332,13 +5615,14 @@ sub tls_default_tlsrequired {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -5357,7 +5641,7 @@ sub tls_default_tlsrequired {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $cert_file = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
   my $ca_file = File::Spec->rel2abs('t/etc/modules/mod_tls/ca-cert.pem');
@@ -5452,6 +5736,9 @@ sub tls_default_tlsrequired {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -5466,7 +5753,7 @@ sub tls_protocols_default {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
@@ -5586,6 +5873,9 @@ sub tls_protocols_default {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -5600,7 +5890,7 @@ sub tls_protocols_with_ftps {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
@@ -5722,6 +6012,9 @@ sub tls_protocols_with_ftps {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -5736,7 +6029,7 @@ sub tls_protocols_without_ftps {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
@@ -5858,6 +6151,9 @@ sub tls_protocols_without_ftps {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -5872,7 +6168,7 @@ sub tls_ifsess_protocols_with_ftps {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
@@ -6013,6 +6309,9 @@ EOC
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -6027,7 +6326,7 @@ sub tls_ifsess_protocols_without_ftps {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
@@ -6168,6 +6467,9 @@ EOC
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -6182,7 +6484,7 @@ sub tls_sess_cache_internal_bug3580 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
@@ -6298,13 +6600,16 @@ sub tls_sess_cache_internal_bug3580 {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
   unlink($log_file);
 }
 
-sub tls_getpassphraseprovider {
+sub tls_passphraseprovider {
   my $self = shift;
   my $tmpdir = $self->{tmpdir};
 
@@ -6312,7 +6617,7 @@ sub tls_getpassphraseprovider {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
@@ -6431,6 +6736,9 @@ sub tls_getpassphraseprovider {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -6445,13 +6753,14 @@ sub tls_verify_order_crl_bug3658 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -6470,7 +6779,7 @@ sub tls_verify_order_crl_bug3658 {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $server_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/crl-server-cert.pem');
   my $client_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/crl-client-cert.pem');
@@ -6582,6 +6891,9 @@ sub tls_verify_order_crl_bug3658 {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -6596,7 +6908,7 @@ sub tls_verify_order_ocsp {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
@@ -6749,6 +7061,9 @@ sub tls_verify_order_ocsp {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -6763,7 +7078,7 @@ sub tls_verify_order_ocsp_https {
   my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
@@ -6916,10 +7231,856 @@ sub tls_verify_order_ocsp_https {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
-#  unlink($log_file);
+  unlink($log_file);
+}
+
+sub tls_client_cert_verify_failed_selfsigned_cert_only_bug3742 {
+  my $self = shift;
+  my $tmpdir = $self->{tmpdir};
+
+  my $config_file = "$tmpdir/tls.conf";
+  my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
+  my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
+
+  my $log_file = test_get_logfile();
+
+  my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
+  my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
+
+  my $user = 'proftpd';
+  my $passwd = 'test';
+  my $group = 'ftpd';
+  my $home_dir = File::Spec->rel2abs($tmpdir);
+  my $uid = 500;
+  my $gid = 500;
+
+  # Make sure that, if we're running as root, that the home directory has
+  # permissions/privs set for the account we create
+  if ($< == 0) {
+    unless (chmod(0755, $home_dir)) {
+      die("Can't set perms on $home_dir to 0755: $!");
+    }
+
+    unless (chown($uid, $gid, $home_dir)) {
+      die("Can't set owner of $home_dir to $uid/$gid: $!");
+    }
+  }
+
+  auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
+    '/bin/bash');
+  auth_group_write($auth_group_file, $group, $gid, $user);
+
+  my $server_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
+  my $ca_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/ca-cert.pem');
+
+  # Deliberately use the bug3742-ca.pem, which is self-signed CA cert, as the
+  # client cert.  And we deliberately use a different self-signed CA than
+  # the one in ca-cert.pem, since that ca-cert.pem is also used by the
+  # server.
+  my $client_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/bug3742-ca.pem');
+  my $client_key = File::Spec->rel2abs('t/etc/modules/mod_tls/bug3742-ca.pem');
+
+  my $config = {
+    PidFile => $pid_file,
+    ScoreboardFile => $scoreboard_file,
+    SystemLog => $log_file,
+
+    AuthUserFile => $auth_user_file,
+    AuthGroupFile => $auth_group_file,
+
+    IfModules => {
+      'mod_delay.c' => {
+        DelayEngine => 'off',
+      },
+
+      'mod_tls.c' => {
+        TLSEngine => 'on',
+        TLSLog => $log_file,
+        TLSProtocol => 'SSLv3 TLSv1',
+        TLSRequired => 'on',
+        TLSRSACertificateFile => $server_cert,
+        TLSCACertificateFile => $ca_cert,
+        TLSVerifyClient => 'on',
+      },
+    },
+  };
+
+  my ($port, $config_user, $config_group) = config_write($config_file, $config);
+
+  # Open pipes, for use between the parent and child processes.  Specifically,
+  # the child will indicate when it's done with its test by writing a message
+  # to the parent.
+  my ($rfh, $wfh);
+  unless (pipe($rfh, $wfh)) {
+    die("Can't open pipe: $!");
+  }
+
+  require Net::FTPSSL;
+
+  my $ex;
+
+  # Fork child
+  $self->handle_sigchld();
+  defined(my $pid = fork()) or die("Can't fork: $!");
+  if ($pid) {
+    eval {
+      # Give the server a chance to start up
+      sleep(2);
+
+      my $client;
+
+      eval {
+        # IO::Socket::SSL options
+        my $ssl_opts = {
+          SSL_use_cert => 1,
+          SSL_cert_file => $client_cert,
+          SSL_key_file => $client_key,
+        };
+
+        eval {
+          $client = Net::FTPSSL->new('127.0.0.1',
+            Croak => 1,
+            Encryption => 'E',
+            Port => $port,
+            SSL_Client_Certificate => $ssl_opts,
+          );
+        };
+
+        # This should die of an exception like:
+        #
+        #  error:14094418:SSL routines:SSL3_READ_BYTES:tlsv1 alert unknown ca
+
+        unless ($@) { 
+          die("Successfully connected to FTPS server unexpectedly");
+        }
+
+      };
+
+      if ($@) {
+        die($@);
+      }
+    };
+
+    if ($@) {
+      $ex = $@;
+    }
+
+    $wfh->print("done\n");
+    $wfh->flush();
+
+  } else {
+    eval { server_wait($config_file, $rfh) };
+    if ($@) {
+      warn($@);
+      exit 1;
+    }
+
+    exit 0;
+  }
+
+  # Stop server
+  server_stop($pid_file);
+
+  $self->assert_child_ok($pid);
+
+  if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
+    die($ex);
+  }
+
+  unlink($log_file);
+}
+
+sub tls_client_cert_verify_failed_selfsigned_cert_in_chain_bug3742 {
+  my $self = shift;
+  my $tmpdir = $self->{tmpdir};
+
+  my $config_file = "$tmpdir/tls.conf";
+  my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
+  my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
+
+  my $log_file = test_get_logfile();
+
+  my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
+  my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
+
+  my $user = 'proftpd';
+  my $passwd = 'test';
+  my $group = 'ftpd';
+  my $home_dir = File::Spec->rel2abs($tmpdir);
+  my $uid = 500;
+  my $gid = 500;
+
+  # Make sure that, if we're running as root, that the home directory has
+  # permissions/privs set for the account we create
+  if ($< == 0) {
+    unless (chmod(0755, $home_dir)) {
+      die("Can't set perms on $home_dir to 0755: $!");
+    }
+
+    unless (chown($uid, $gid, $home_dir)) {
+      die("Can't set owner of $home_dir to $uid/$gid: $!");
+    }
+  }
+
+  auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
+    '/bin/bash');
+  auth_group_write($auth_group_file, $group, $gid, $user);
+
+  my $server_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
+  my $ca_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/ca-cert.pem');
+
+  # To get the client to send a list of certs (including a self-signed CA)
+  # to the server, we use a cert file which contains a list of certs
+  # (including the client cert).  Easy.
+
+  my $client_cert = File::Spec->rel2abs("$tmpdir/client-cert-chain.pem");
+  if (open(my $outfh, "> $client_cert")) {
+    # First the client cert
+    my $cert = File::Spec->rel2abs('t/etc/modules/mod_tls/bug3742-client.pem');
+
+    if (open(my $infh, "< $cert")) {
+      # Slurp in all of the data at once.  Just easier that way.
+      local $/;
+
+      my $data = <$infh>;
+      close($infh);
+
+      print $outfh $data;
+
+    } else {
+      die("Can't read $cert: $!");
+    }
+
+    # Next the client CA
+    $cert = File::Spec->rel2abs('t/etc/modules/mod_tls/bug3742-ca.pem');
+
+    if (open(my $infh, "< $cert")) {
+      # Slurp in all of the data at once.  Just easier that way.
+      local $/;
+
+      my $data = <$infh>;
+      close($infh);
+
+      print $outfh $data;
+    
+    } else {
+      die("Can't read $cert: $!");
+    }
+
+    unless (close($outfh)) {
+      die("Can't write $client_cert: $!");
+    }
+
+  } else {
+    die("Can't open $client_cert: $!");
+  }
+
+  my $client_key = File::Spec->rel2abs('t/etc/modules/mod_tls/bug3742-client.pem');
+
+  my $config = {
+    PidFile => $pid_file,
+    ScoreboardFile => $scoreboard_file,
+    SystemLog => $log_file,
+
+    AuthUserFile => $auth_user_file,
+    AuthGroupFile => $auth_group_file,
+
+    IfModules => {
+      'mod_delay.c' => {
+        DelayEngine => 'off',
+      },
+
+      'mod_tls.c' => {
+        TLSEngine => 'on',
+        TLSLog => $log_file,
+        TLSProtocol => 'SSLv3 TLSv1',
+        TLSRequired => 'on',
+        TLSRSACertificateFile => $server_cert,
+        TLSCACertificateFile => $ca_cert,
+        TLSVerifyClient => 'on',
+      },
+    },
+  };
+
+  my ($port, $config_user, $config_group) = config_write($config_file, $config);
+
+  # Open pipes, for use between the parent and child processes.  Specifically,
+  # the child will indicate when it's done with its test by writing a message
+  # to the parent.
+  my ($rfh, $wfh);
+  unless (pipe($rfh, $wfh)) {
+    die("Can't open pipe: $!");
+  }
+
+  require Net::FTPSSL;
+
+  my $ex;
+
+  # Fork child
+  $self->handle_sigchld();
+  defined(my $pid = fork()) or die("Can't fork: $!");
+  if ($pid) {
+    eval {
+      # Give the server a chance to start up
+      sleep(2);
+
+      my $client;
+
+      eval {
+        # IO::Socket::SSL options
+        my $ssl_opts = {
+          SSL_use_cert => 1,
+          SSL_cert_file => $client_cert,
+          SSL_key_file => $client_key,
+        };
+
+        eval {
+          $client = Net::FTPSSL->new('127.0.0.1',
+            Croak => 1,
+            Encryption => 'E',
+            Port => $port,
+            SSL_Client_Certificate => $ssl_opts,
+          );
+        };
+
+        # This should die of an exception like:
+        #
+        #  error:14094418:SSL routines:SSL3_READ_BYTES:tlsv1 alert unknown ca
+
+        unless ($@) { 
+          die("Successfully connected to FTPS server unexpectedly");
+        }
+
+      };
+
+      if ($@) {
+        die($@);
+      }
+    };
+
+    if ($@) {
+      $ex = $@;
+    }
+
+    $wfh->print("done\n");
+    $wfh->flush();
+
+  } else {
+    eval { server_wait($config_file, $rfh) };
+    if ($@) {
+      warn($@);
+      exit 1;
+    }
+
+    exit 0;
+  }
+
+  # Stop server
+  server_stop($pid_file);
+
+  $self->assert_child_ok($pid);
+
+  if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
+    die($ex);
+  }
+
+  unlink($log_file);
+}
+
+sub tls_client_cert_verify_ok_server_selfsigned_cert_in_chain_bug3742 {
+  my $self = shift;
+  my $tmpdir = $self->{tmpdir};
+
+  my $config_file = "$tmpdir/tls.conf";
+  my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
+  my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
+
+  my $log_file = test_get_logfile();
+
+  my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
+  my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
+
+  my $user = 'proftpd';
+  my $passwd = 'test';
+  my $group = 'ftpd';
+  my $home_dir = File::Spec->rel2abs($tmpdir);
+  my $uid = 500;
+  my $gid = 500;
+
+  # Make sure that, if we're running as root, that the home directory has
+  # permissions/privs set for the account we create
+  if ($< == 0) {
+    unless (chmod(0755, $home_dir)) {
+      die("Can't set perms on $home_dir to 0755: $!");
+    }
+
+    unless (chown($uid, $gid, $home_dir)) {
+      die("Can't set owner of $home_dir to $uid/$gid: $!");
+    }
+  }
+
+  auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
+    '/bin/bash');
+  auth_group_write($auth_group_file, $group, $gid, $user);
+
+  my $server_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
+  my $ca_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/ca-cert.pem');
+
+  # To get the client to send a list of certs (including a self-signed CA)
+  # to the server, we use a cert file which contains a list of certs
+  # (including the client cert).  Easy.
+
+  my $client_cert = File::Spec->rel2abs("$tmpdir/client-cert-chain.pem");
+  if (open(my $outfh, "> $client_cert")) {
+    # First the client cert
+    my $cert = File::Spec->rel2abs('t/etc/modules/mod_tls/client-cert.pem');
+
+    if (open(my $infh, "< $cert")) {
+      # Slurp in all of the data at once.  Just easier that way.
+      local $/;
+
+      my $data = <$infh>;
+      close($infh);
+
+      print $outfh $data;
+
+    } else {
+      die("Can't read $cert: $!");
+    }
+
+    # Next the client CA.  This time, use the same CA that the server is
+    # using (and trusting).
+    $cert = File::Spec->rel2abs('t/etc/modules/mod_tls/ca-cert.pem');
+
+    if (open(my $infh, "< $cert")) {
+      # Slurp in all of the data at once.  Just easier that way.
+      local $/;
+
+      my $data = <$infh>;
+      close($infh);
+
+      print $outfh $data;
+    
+    } else {
+      die("Can't read $cert: $!");
+    }
+
+    unless (close($outfh)) {
+      die("Can't write $client_cert: $!");
+    }
+
+  } else {
+    die("Can't open $client_cert: $!");
+  }
+
+  my $client_key = File::Spec->rel2abs('t/etc/modules/mod_tls/client-cert.pem');
+
+  my $config = {
+    PidFile => $pid_file,
+    ScoreboardFile => $scoreboard_file,
+    SystemLog => $log_file,
+
+    AuthUserFile => $auth_user_file,
+    AuthGroupFile => $auth_group_file,
+
+    IfModules => {
+      'mod_delay.c' => {
+        DelayEngine => 'off',
+      },
+
+      'mod_tls.c' => {
+        TLSEngine => 'on',
+        TLSLog => $log_file,
+        TLSProtocol => 'SSLv3 TLSv1',
+        TLSRequired => 'on',
+        TLSRSACertificateFile => $server_cert,
+        TLSCACertificateFile => $ca_cert,
+        TLSVerifyClient => 'on',
+      },
+    },
+  };
+
+  my ($port, $config_user, $config_group) = config_write($config_file, $config);
+
+  # Open pipes, for use between the parent and child processes.  Specifically,
+  # the child will indicate when it's done with its test by writing a message
+  # to the parent.
+  my ($rfh, $wfh);
+  unless (pipe($rfh, $wfh)) {
+    die("Can't open pipe: $!");
+  }
+
+  require Net::FTPSSL;
+
+  my $ex;
+
+  # Fork child
+  $self->handle_sigchld();
+  defined(my $pid = fork()) or die("Can't fork: $!");
+  if ($pid) {
+    eval {
+      # Give the server a chance to start up
+      sleep(2);
+
+      my $client;
+
+      eval {
+        # IO::Socket::SSL options
+        my $ssl_opts = {
+          SSL_use_cert => 1,
+          SSL_cert_file => $client_cert,
+          SSL_key_file => $client_key,
+        };
+
+        $client = Net::FTPSSL->new('127.0.0.1',
+          Croak => 1,
+          Encryption => 'E',
+          Port => $port,
+          SSL_Client_Certificate => $ssl_opts,
+        );
+
+        # If no exception was thrown at this point, we have succeeded.
+      };
+
+      if ($@) {
+        die($@);
+      }
+    };
+
+    if ($@) {
+      $ex = $@;
+    }
+
+    $wfh->print("done\n");
+    $wfh->flush();
+
+  } else {
+    eval { server_wait($config_file, $rfh) };
+    if ($@) {
+      warn($@);
+      exit 1;
+    }
+
+    exit 0;
+  }
+
+  # Stop server
+  server_stop($pid_file);
+
+  $self->assert_child_ok($pid);
+
+  if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
+    die($ex);
+  }
+
+  unlink($log_file);
+}
+
+sub tls_opts_allow_dot_login {
+  my $self = shift;
+  my $tmpdir = $self->{tmpdir};
+
+  my $config_file = "$tmpdir/tls.conf";
+  my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
+  my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
+
+  my $log_file = test_get_logfile();
+
+  my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
+  my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
+
+  my $user = 'proftpd';
+  my $passwd = 'test';
+  my $group = 'ftpd';
+  my $home_dir = File::Spec->rel2abs($tmpdir);
+  my $uid = 500;
+  my $gid = 500;
+
+  # Make sure that, if we're running as root, that the home directory has
+  # permissions/privs set for the account we create
+  if ($< == 0) {
+    unless (chmod(0755, $home_dir)) {
+      die("Can't set perms on $home_dir to 0755: $!");
+    }
+
+    unless (chown($uid, $gid, $home_dir)) {
+      die("Can't set owner of $home_dir to $uid/$gid: $!");
+    }
+  }
+
+  auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
+    '/bin/bash');
+  auth_group_write($auth_group_file, $group, $gid, $user);
+
+  my $server_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
+  my $client_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/client-cert.pem');
+  my $ca_cert = File::Spec->rel2abs('t/etc/modules/mod_tls/ca-cert.pem');
+
+  my $tlslogin_file = File::Spec->rel2abs("$tmpdir/.tlslogin");
+  unless (copy($client_cert, $tlslogin_file)) {
+    die("Can't copy $client_cert to $tlslogin_file: $!");
+  }
+
+  my $config = {
+    PidFile => $pid_file,
+    ScoreboardFile => $scoreboard_file,
+    SystemLog => $log_file,
+
+    AuthUserFile => $auth_user_file,
+    AuthGroupFile => $auth_group_file,
+
+    IfModules => {
+      'mod_delay.c' => {
+        DelayEngine => 'off',
+      },
+
+      'mod_tls.c' => {
+        TLSEngine => 'on',
+        TLSLog => $log_file,
+        TLSProtocol => 'SSLv3 TLSv1',
+        TLSRequired => 'on',
+        TLSRSACertificateFile => $server_cert,
+        TLSCACertificateFile => $ca_cert,
+
+        TLSOptions => 'AllowDotLogin',
+      },
+    },
+  };
+
+  my ($port, $config_user, $config_group) = config_write($config_file, $config);
+
+  # Open pipes, for use between the parent and child processes.  Specifically,
+  # the child will indicate when it's done with its test by writing a message
+  # to the parent.
+  my ($rfh, $wfh);
+  unless (pipe($rfh, $wfh)) {
+    die("Can't open pipe: $!");
+  }
+
+  require Net::FTPSSL;
+
+  my $ex;
+
+  # Fork child
+  $self->handle_sigchld();
+  defined(my $pid = fork()) or die("Can't fork: $!");
+  if ($pid) {
+    eval {
+      # Give the server a chance to start up
+      sleep(2);
+
+      # IO::Socket::SSL options
+      my $ssl_opts = {
+        SSL_use_cert => 1,
+        SSL_cert_file => $client_cert,
+        SSL_key_file => $client_cert,
+      };
+
+      my $client = Net::FTPSSL->new('127.0.0.1',
+        Croak => 1,
+        Encryption => 'E',
+        Port => $port,
+        SSL_Client_Certificate => $ssl_opts,
+      );
+
+      unless ($client) {
+        die("Can't connect to FTPS server: " . IO::Socket::SSL::errstr());
+      }
+
+      unless ($client->_user($user)) {
+        die("USER error: " . $client->last_message());
+      }
+
+      my $expected = "232 User $user logged in";
+      my $resp = $client->last_message();
+      $self->assert($expected eq $resp,
+        test_msg("Expected response '$expected', got '$resp'"));
+    };
+
+    if ($@) {
+      $ex = $@;
+    }
+
+    $wfh->print("done\n");
+    $wfh->flush();
+
+  } else {
+    eval { server_wait($config_file, $rfh) };
+    if ($@) {
+      warn($@);
+      exit 1;
+    }
+
+    exit 0;
+  }
+
+  # Stop server
+  server_stop($pid_file);
+
+  $self->assert_child_ok($pid);
+
+  if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
+    die($ex);
+  }
+
+  unlink($log_file);
+}
+
+sub tls_opts_multiple_lines_bug3800 {
+  my $self = shift;
+  my $tmpdir = $self->{tmpdir};
+
+  my $config_file = "$tmpdir/tls.conf";
+  my $pid_file = File::Spec->rel2abs("$tmpdir/tls.pid");
+  my $scoreboard_file = File::Spec->rel2abs("$tmpdir/tls.scoreboard");
+
+  my $log_file = test_get_logfile();
+
+  my $auth_user_file = File::Spec->rel2abs("$tmpdir/tls.passwd");
+  my $auth_group_file = File::Spec->rel2abs("$tmpdir/tls.group");
+
+  my $user = 'proftpd';
+  my $passwd = 'test';
+  my $group = 'ftpd';
+  my $home_dir = File::Spec->rel2abs($tmpdir);
+  my $uid = 500;
+  my $gid = 500;
+
+  # Make sure that, if we're running as root, that the home directory has
+  # permissions/privs set for the account we create
+  if ($< == 0) {
+    unless (chmod(0755, $home_dir)) {
+      die("Can't set perms on $home_dir to 0755: $!");
+    }
+
+    unless (chown($uid, $gid, $home_dir)) {
+      die("Can't set owner of $home_dir to $uid/$gid: $!");
+    }
+  }
+
+  auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
+    '/bin/bash');
+  auth_group_write($auth_group_file, $group, $gid, $user);
+
+  my $cert_file = File::Spec->rel2abs('t/etc/modules/mod_tls/server-cert.pem');
+  my $ca_file = File::Spec->rel2abs('t/etc/modules/mod_tls/ca-cert.pem');
+
+  my $config = {
+    PidFile => $pid_file,
+    ScoreboardFile => $scoreboard_file,
+    SystemLog => $log_file,
+
+    AuthUserFile => $auth_user_file,
+    AuthGroupFile => $auth_group_file,
+
+    IfModules => {
+      'mod_delay.c' => {
+        DelayEngine => 'off',
+      },
+
+      'mod_tls.c' => [
+        "TLSEngine on",
+        "TLSLog $log_file",
+        "TLSProtocol SSLv3 TLSv1",
+        "TLSRequired on",
+        "TLSRSACertificateFile $cert_file",
+        "TLSCACertificateFile $ca_file",
+
+        "TLSOptions StdEnvVars",
+        "TLSOptions NoSessionReuseRequired",
+      ],
+    },
+  };
+
+  my ($port, $config_user, $config_group) = config_write($config_file, $config);
+
+  # Open pipes, for use between the parent and child processes.  Specifically,
+  # the child will indicate when it's done with its test by writing a message
+  # to the parent.
+  my ($rfh, $wfh);
+  unless (pipe($rfh, $wfh)) {
+    die("Can't open pipe: $!");
+  }
+
+  require Net::FTPSSL;
+
+  my $ex;
+
+  # Fork child
+  $self->handle_sigchld();
+  defined(my $pid = fork()) or die("Can't fork: $!");
+  if ($pid) {
+    eval {
+      # Give the server a chance to start up
+      sleep(2);
+
+      my $client = Net::FTPSSL->new('127.0.0.1',
+        Encryption => 'E',
+        Port => $port,
+        Croak => 1,
+      );
+
+      unless ($client->login($user, $passwd)) {
+        die("Can't login: " . $client->last_message());
+      }
+
+      # Since we are NOT requiring SSL session resuse for data transfers,
+      # and this client is not using SSL session resumption, I expect
+      # this data transfer to succeed.
+      my $res = $client->list('.');
+      unless ($res) {
+        die("LIST failed unexpectedly: " . $client->message());
+      }
+    };
+
+    if ($@) {
+      $ex = $@;
+    }
+
+    $wfh->print("done\n");
+    $wfh->flush();
+
+  } else {
+    eval { server_wait($config_file, $rfh) };
+    if ($@) {
+      warn($@);
+      exit 1;
+    }
+
+    exit 0;
+  }
+
+  # Stop server
+  server_stop($pid_file);
+
+  $self->assert_child_ok($pid);
+
+  if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
+    die($ex);
+  }
+
+  unlink($log_file);
 }
 
 1;

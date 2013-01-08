@@ -1,4 +1,4 @@
-<!-- $Id: mod_sftp.html,v 1.57 2011/10/18 14:52:24 castaglia Exp $ -->
+<!-- $Id: mod_sftp.html,v 1.67 2012/09/25 23:21:35 castaglia Exp $ -->
 <!-- $Source: /cvsroot/proftp/proftpd/doc/contrib/mod_sftp.html,v $ -->
 
 <html>
@@ -65,6 +65,7 @@ For those wishing to learn more about the SSH2 and SFTP protocols, see:
   <li><a href="http://www.faqs.org/rfcs/rfc4716.html">SSH Public Key File Format (RFC4716)</a>
   <li><a href="http://www.vandyke.com/technology/draft-ietf-secsh-filexfer.txt">SFTP Draft</a>
   <li><a href="http://tools.ietf.org/html/draft-ietf-secsh-filexfer-extensions-00">SFTP Extensions Draft</a>
+  <li><a href="http://www.faqs.org/rfcs/rfc5656.html">SSH Elliptic Curve Algorithms (RFC5656)</a>
 </ul>
 
 <p>
@@ -95,7 +96,7 @@ The <code>mod_sftp</code> module does <b>not</b> currently support:
 <ul>
   <li><code>&lt;Anonymous&gt;</code>
   <li><code>ListOptions</code>
-  <li><code>MaxRetrieveFileSize/MaxStoreFileSize</code>
+  <li><code>MaxRetrieveFileSize</code>
 </ul>
 
 <p>
@@ -558,6 +559,8 @@ The <code>SFTPDigests</code> directive is used to specify the list of
 MAC digest algorithms that <code>mod_sftp</code> should use.  The current list
 of supported MAC algorithms is:
 <ul>
+  <li>hmac-sha2-256
+  <li>hmac-sha2-512
   <li>hmac-sha1
   <li>hmac-sha1-96
   <li>hmac-md5
@@ -565,7 +568,9 @@ of supported MAC algorithms is:
   <li>hmac-ripemd160
 </ul>
 By default, all of the above MAC algorithms are presented to the client,
-in the above order, during the key exchange.
+in the above order, during the key exchange.  <b>Note</b> that some algorithms
+(<i>e.g.</i> the SHA256 and SHA512 algorithms) may not be supported by
+the version of OpenSSL used; this will be automatically detected.
 
 <p>
 The "none" MAC (<i>i.e.</i> no MAC) will <b>not</b> be presented to the client
@@ -577,10 +582,13 @@ In general, there is no need to use this directive unless only one specific
 MAC algorithm must be used.
 
 <p>
-For comparison, the MAC algorithms used by OpenSSH by default are:
+For comparison, the MAC algorithms used by OpenSSH (depending on the version)
+by default are:
 <ul>
   <li>hmac-md5
   <li>hmac-sha1
+  <li>hmac-sha2-256
+  <li>hmac-sha2-512
   <li>hmac-ripemd160
   <li>hmac-sha1-96
   <li>hmac-md5-96
@@ -589,7 +597,8 @@ Thus if you wanted to configure <code>mod_sftp</code> to present the same
 MAC algorithms as OpenSSH, you would use:
 <pre>
   # Make mod_sftp present the MAC ciphers as OpenSSH
-  SFTPDigests hmac-md5 hmac-sha1 hmac-ripemd160 hmac-sha1-96 hmac-md5-96
+  SFTPDigests hmac-md5 hmac-sha1 hmac-sha2-256 hmac-sha2-512 \
+    hmac-ripemd160 hmac-sha1-96 hmac-md5-96
 </pre>
 
 <p>
@@ -658,7 +667,7 @@ to disable the extension, use a '-' (minus) character prefix.  For example:
 <p>
 <hr>
 <h2><a name="SFTPHostKey">SFTPHostKey</a></h2>
-<strong>Syntax:</strong> SFTPHostKey <em>file</em><br>
+<strong>Syntax:</strong> SFTPHostKey <em>file</em>|agent:<em>/path</em><br>
 <strong>Default:</strong> <em>None</em><br>
 <strong>Context:</strong> &quot;server config&quot;, &lt;VirtualHost&gt;, &lt;Global&gt;<br>
 <strong>Module:</strong> mod_sftp<br>
@@ -671,11 +680,12 @@ the SSH2 key exchange process.
 
 <p>
 Note that the <code>SFTPHostKey</code> directive is <b>required</b>.  You
-can use either an RSA key, a DSA key, or both.  These should be the <b>exact
-same host key files as used by your SSH2 server</b>, <i>e.g.</i>:
+can use either an RSA key, a DSA key, and/or ECDSA keys.  These should be the
+<b>exact same host key files as used by your SSH2 server</b>, <i>e.g.</i>:
 <pre>
   SFTPHostKey /etc/ssh_host_dsa_key
   SFTPHostKey /etc/ssh_host_rsa_key
+  SFTPHostKey /etc/ssh_host_ecdsa_key
 </pre>
 or the equivalents in the <code>/usr/local/etc/</code> directory.  Using
 different host keys between your SSH2 server and <code>mod_sftp</code> will
@@ -685,6 +695,18 @@ it is the same <i>host</i> (even the same port), just different services.
 Thus having different host keys for an SSH2 server and <code>mod_sftp</code>
 will cause clients to constantly switch the host keys they record for the
 same host (and cause confusion for users).
+
+<p>
+The <code>SFTPHostKey</code> directive, as of <code>proftpd-1.3.5rc1</code>
+and later, can also be used to load host keys from an SSH agent such as
+OpenSSH's <code>ssh-agent</code>.  For example:
+<pre>
+  # Load all of the keys from the ssh-agent configured for server use
+  SFTPHostKey agent:%{env:SSH_AUTH_SOCK}
+</pre>
+Using an SSH agent for storing host keys allows for configurations where
+the host keys are not stored on files on the server system, <i>e.g.</i>
+the keys can be loaded into the SSH agent from a PKCS#11 token.
 
 <p>
 <hr>
@@ -733,6 +755,9 @@ The <code>SFTPKeyExchanges</code> directive is used to specify the list of
 key exchange algorithms that <code>mod_sftp</code> should use.  The current list
 of supported key exchange algorithms is:
 <ul>
+  <li>ecdh-sha2-nistp256
+  <li>ecdh-sha2-nistp384
+  <li>ecdh-sha2-nistp521
   <li>diffie-hellman-group-exchange-sha256
   <li>diffie-hellman-group-exchange-sha1
   <li>diffie-hellman-group14-sha1
@@ -809,11 +834,24 @@ For example:
 <p>
 The currently implemented options are:
 <ul>
+  <li><code>IgnoreSFTPSetOwners</code><br>
+    <p>
+    Use this option to have <code>mod_sftp</code> silently ignore any
+    ownership changes sent by SFTP clients via the <code>SETSTAT</code> or
+    <code>FSETSTAT</code> SFTP requests; these are equivalent to
+    an FTP <code>SITE CHGRP</code> command.
+
+    <p>
+    <b>Note</b> that this option first appeared in
+    <code>proftpd-1.3.5rc1</code>.
+  </li>
+
+  <p>
   <li><code>IgnoreSFTPSetPerms</code><br>
     <p>
     Use this option to have <code>mod_sftp</code> silently ignore any
     permissions sent by SFTP clients via the <code>SETSTAT</code> or
-    <code>FSETSTAT</code> SFTP requests; these are equivlant to
+    <code>FSETSTAT</code> SFTP requests; these are equivalent to
     an FTP <code>SITE CHMOD</code> command.
 
     <p>
@@ -826,7 +864,7 @@ The currently implemented options are:
     <p>
     Use this option to have <code>mod_sftp</code> silently ignore any
     timestamps sent by SFTP clients via the <code>SETSTAT</code> or
-    <code>FSETSTAT</code> SFTP requests; these are equivlant to
+    <code>FSETSTAT</code> SFTP requests; these are equivalent to
     an FTP <code>SITE UTIMES</code> command.
 
     <p>
@@ -1072,6 +1110,20 @@ of policies; the chances columns list the probability that
 The default <code>SFTPTrafficPolicy</code> setting is "none".
 
 <p>
+<b>However</b>, <i>if</i> a client negotiates the use of a CBC cipher, then a
+defensive traffic policy will <b>automatically</b> be used.
+<a href="http://www.faqs.org/rfcs/rfc4251.html">RFC 4251</a>, Section 9.3.1,
+specifically mentions the insertion of <code>SSH_MSG_IGNORE</code> messages as
+a way of mitigating the "Rogaway" attack on CBC ciphers.  In order to disable
+this automatic mitigation behavior, you must <i>explicitly</i> configure
+a <code>SFTPTrafficPolicy</code> setting in your configuration, <i>e.g.</i>
+<pre>
+  # Disable any automatic protection when CBC ciphers are used
+  SFTPTrafficPolicy none
+</pre>
+<b>Note that this is not recommended</b>!
+
+<p>
 <hr>
 <h2><a name="Installation">Installation</a></h2>
 To install <code>mod_sftp</code>, go to the third-party module area in
@@ -1170,6 +1222,12 @@ sessions) which are honored by <code>mod_sftp</code>:
   <p>
   <li><code>&lt;Limit STOR&gt;</code><br>
     Applies to the <code>WRITE</code> SFTP request
+  </li>
+
+  <p>
+  <li><code>&lt;Limit SITE_CHGRP&gt;</code><br>
+    Applies to the <code>SETSTAT</code> and <code>FSETSTAT</code> SFTP
+    requests when they change file ownership
   </li>
 
   <p>
@@ -1431,6 +1489,24 @@ you will see the following when <code>proftpd</code> starts up:
 </pre>
 
 <p>
+When <code>mod_sftp</code> detects that OpenSSL has been configured for FIPS
+mode, it will refuse to advertise support for the following cipher algorithms:
+<ul>
+  <li><code>arcfour128</code>
+  <li><code>arcfour256</code>
+  <li><code>blowfish-cbc</code>
+  <li><code>blowfish-ctr</code>
+  <li><code>cast128-cbc</code>
+</ul>
+and for the following digest algorithms:
+</ul>
+  <li><code>hmac-md5</code>
+  <li><code>hmac-md5-96</code>
+  <li><code>hmac-ripemd160</code>
+</ul>
+as these algorithms are not compliant with the FIPS specification.
+
+<p>
 For additional reading on OpenSSL and FIPS, see:
 <pre>
   <a href="http://www.openssl.org/docs/fips/SecurityPolicy-1.1.1.pdf">http://www.openssl.org/docs/fips/SecurityPolicy-1.1.1.pdf</a>
@@ -1455,10 +1531,11 @@ multiple <code>&lt;VirtualHost&gt;</code> sections for the same <i>address</i>
       # Configure the server to listen on the normal SSH2 port, port 22
       Port 22
 
-      # Configure both the RSA and DSA host keys, using the same host key
+      # Configure the RSA, DSA, and ECDSA host keys, using the same host key
       # files that OpenSSH uses. 
       SFTPHostKey /etc/ssh_host_rsa_key
       SFTPHostKey /etc/ssh_host_dsa_key
+      SFTPHostKey /etc/ssh_host_ecdsa_key
 
       # Configure the file used for comparing authorized public keys of users.
       SFTPAuthorizedUserKeys file:~/.sftp/authorized_keys
@@ -1499,8 +1576,8 @@ according to need, demand, inclination, and time:
 <ul>
   <li>Look up authorized public keys from LDAP directories
   <li>Honor the <code>MaxTransferPerHost</code>,
-     <code>MaxTransfersPerUser</code>, <code>MaxRetrieveFileSize</code>,
-     <code>MaxStoreFileSize</code> directives
+     <code>MaxTransfersPerUser</code>, <code>MaxRetrieveFileSize</code>
+     directives
 </ul>
 
 <p><a name="FAQ">
@@ -1863,16 +1940,64 @@ If you see the above message, it is not a <i>requirement</i> that you recompile
 OpenSSL libraries.  However, the version discrepancy <em>is</em> a possible
 source of trouble.  
 
+<p><a name="SFTPVersionId">
+<font color=red>Question</font>: When a client first connects to
+<code>mod_sftp</code> and starts the SSH handshake, the client sees that
+<code>mod_sftp</code> provides an SSH version identifier like "SSH-2.0-mod_sftp/0.9.8".  Is there any way I can tell <code>mod_sftp</code> to hide/change
+that version?<br>
+<font color=blue>Answer</font>: Yes.  As of <code>proftpd-1.3.5rc1</code>,
+the <code>mod_sftp</code> module will honor the <a href="../modules/mod_core.html#ServerIdent"><code>ServerIdent</code></a> directive.
+
+<p>
+For example, to see just "SSH-2.0-mod_sftp", without any <code>mod_sftp</code>
+version suffix, use the following within your <code>mod_sftp</code> <code>&lt;VirtualHost&gt;</code>:
+<pre>
+  # Tell mod_sftp to not reveal its module version in the SSH version
+  # identification
+  ServerIdent off
+</pre>
+You can also use <code>ServerIdent</code> to make <code>mod_sftp</code> say
+it is something else completely, like this:
+<pre>
+  # Tell mod_sftp to advertise itself as an OpenSSH server
+  ServerIdent on "OpenSSH_5.6p1"
+</pre>
+
+<p><a name="SFTPTrafficPolicyNetworkPerformance">
+<font color=red>Question</font>: I notice that when I use some SFTP clients
+(<i>e.g.</i> DreamWeaver) with <code>mod_sftp</code>, the network performance
+is 5-6 times slower than with other SFTP clients.  Using the same SFTP client
+against OpenSSH doesn't show the same slowdown.  Network tools such as
+Wireshark show that <code>mod_sftp</code> is sending 2 TCP packets for each
+SFTP request, whereas OpenSSH only sends 1 TCP packet for each SFTP request.
+Why is <code>mod_sftp</code> so much slower than OpenSSH, but only for some
+SFTP clients?<br>
+<font color=blue>Answer</font>: Investigations into this <code>mod_sftp</code>
+behavior have shown it to be caused by the
+<a href="#SFTPTrafficPolicy"><code>SFTPTrafficPolicy</code></a> behavior,
+particularly when the SFTP client negotiates the use of a CBC cipher.
+
+<p>
+The recommended action to take is to disable the use of CBC ciphers,
+which will cause the <code>SFTPTrafficPolicy</code> mitigation to not go
+into effect, which keeps the number of SSH messages lower, thus improving
+network latency.   Thus the change to make for your <code>mod_sftp</code>
+configuration is:
+<pre>
+  # Remove the CBC ciphers from the ciphers we advertise
+  SFTPCiphers aes256-ctr aes192-ctr aes128-ctr blowfish-ctr arcfour256 arcfour128 3des-ctr
+</pre>
+
 <p>
 <hr><br>
 
 Author: <i>$Author: castaglia $</i><br>
-Last Updated: <i>$Date: 2011/10/18 14:52:24 $</i><br>
+Last Updated: <i>$Date: 2012/09/25 23:21:35 $</i><br>
 
 <br><hr>
 
 <font size=2><b><i>
-&copy; Copyright 2008-2011 TJ Saunders<br>
+&copy; Copyright 2008-2012 TJ Saunders<br>
  All Rights Reserved<br>
 </i></b></font>
 

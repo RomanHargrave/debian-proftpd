@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2011 The ProFTPD Project team
+ * Copyright (c) 2001-2012 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* Configuration structure, server, command and associated prototypes.
- * $Id: dirtree.h,v 1.81 2011/05/23 20:35:35 castaglia Exp $
+ * $Id: dirtree.h,v 1.85 2012/10/03 16:22:52 castaglia Exp $
  */
 
 #ifndef PR_DIRTREE_H
@@ -39,10 +39,17 @@ typedef struct config_struc config_rec;
 
 struct conn_struc;
 
+struct tcp_keepalive {
+  int keepalive_enabled;
+  int keepalive_idle;
+  int keepalive_count;
+  int keepalive_intvl;
+};
+
 typedef struct server_struc {
   struct server_struc *next, *prev;
 
-  pool *pool;			/* Memory pool for this server */
+  struct pool_rec *pool;	/* Memory pool for this server */
   xaset_t *set;			/* Set holding all servers */
 
   /* The label/name for this server configuration. */
@@ -58,8 +65,11 @@ typedef struct server_struc {
    */
   unsigned int ServerPort;
 
-  /* TCP settings: max segment size, receive/send buffer sizes.
+  /* TCP settings: keepalive, max segment size, receive/send buffer sizes.
    */
+
+  struct tcp_keepalive *tcp_keepalive;
+
   int tcp_mss_len;
 
   /* If the tcp_rcvbuf_override/tcp_sndbuf_override flags are true, then
@@ -93,13 +103,16 @@ typedef struct server_struc {
   /* Internal server ID, automatically assigned */
   unsigned int sid;
 
+  /* Private data for passing among modules for this vhost. */
+  pr_table_t *notes;
+
 } server_rec;
 
 typedef struct cmd_struc {
-  pool *pool;
+  struct pool_rec *pool;
   server_rec *server;
   config_rec *config;
-  pool *tmp_pool;		/* Temporary pool which only exists
+  struct pool_rec *tmp_pool;	/* Temporary pool which only exists
 				 * while the cmd's handler is running
 				 */
   int argc;
@@ -108,7 +121,7 @@ typedef struct cmd_struc {
   char **argv;
   char *group;			/* Command grouping */
 
-  int  class;			/* The command class */
+  int  cmd_class;		/* The command class */
   int  stash_index;		/* hack to speed up symbol hashing in modules.c */
   pr_table_t *notes;		/* Private data for passing/retaining between handlers */
 
@@ -121,7 +134,7 @@ struct config_struc {
   int config_type;
   unsigned int config_id;
 
-  pool *pool;			/* memory pool for this object */
+  struct pool_rec *pool;	/* Memory pool for this object */
   xaset_t *set;			/* The set we are stored in */
   char *name;
   int argc;

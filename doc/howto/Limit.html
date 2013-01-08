@@ -1,4 +1,4 @@
-<!-- $Id: Limit.html,v 1.20 2010/11/09 19:30:28 castaglia Exp $ -->
+<!-- $Id: Limit.html,v 1.22 2012/10/10 20:27:28 castaglia Exp $ -->
 <!-- $Source: /cvsroot/proftp/proftpd/doc/howto/Limit.html,v $ -->
 
 <html>
@@ -37,7 +37,7 @@ often missing from a thorough <code>&lt;Limit&gt;</code> configuration.
 The FTP command groups are:
 <ul>
   <li>ALL<br>
-    <i>Covering</i>: all FTP commands
+    <i>Covering</i>: all FTP commands (but <b>not</b> <code>LOGIN</code>)
 
   <p>
   <li>DIRS<br>
@@ -159,7 +159,7 @@ First, a common configuration: an upload-only directory.
       DenyAll
     &lt;/Limit&gt;
 
-    &lt;Limit CDUP CWD XCWD XCUP&gt;
+    &lt;Limit CDUP CWD PWD XCWD XCUP&gt;
       AllowAll
     &lt;/Limit&gt;
 
@@ -385,7 +385,7 @@ ensuring that it cannot be deleted?  Simply include the <code>RNFR</code> and
 
 <p>
 <hr>
-Last Updated: <i>$Date: 2010/11/09 19:30:28 $</i><br>
+Last Updated: <i>$Date: 2012/10/10 20:27:28 $</i><br>
 <hr>
 
 </body>

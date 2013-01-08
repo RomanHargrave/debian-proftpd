@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2011 The ProFTPD Project team
+ * Copyright (c) 2001-2012 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* Flexible logging module for proftpd
- * $Id: mod_log.c,v 1.124 2011/09/26 15:00:12 castaglia Exp $
+ * $Id: mod_log.c,v 1.141 2013/01/03 20:20:03 castaglia Exp $
  */
 
 #include "conf.h"
@@ -106,6 +106,9 @@ struct logfile_struc {
 #define META_RAW_BYTES_OUT	34
 #define META_EOS_REASON		35
 #define META_VHOST_IP		36
+#define META_NOTE_VAR		37
+#define META_XFER_STATUS	38
+#define META_XFER_FAILURE	39
 
 /* For tracking the size of deleted files. */
 static off_t log_dele_filesz = 0;
@@ -153,8 +156,13 @@ static xaset_t			*log_set = NULL;
    %{protocol}          - Current protocol (e.g. "ftp", "sftp", etc)
    %{uid}               - UID of logged-in user
    %{gid}               - Primary GID of logged-in user
+   %{transfer-status}   - "success", "failed", "cancelled", "timeout", or "-"
+   %{transfer-failure}  - reason, or "-"
    %{version}           - ProFTPD version
 */
+
+/* Necessary prototypes */
+static int log_sess_init(void);
 
 static void add_meta(unsigned char **s, unsigned char meta, int args, ...) {
   int arglen;
@@ -237,10 +245,44 @@ static void logformat(char *nickname, char *fmts) {
           continue;
         }
 
+        if (strncmp(tmp, "{transfer-failure}", 18) == 0) {
+          add_meta(&outs, META_XFER_FAILURE, 0);
+          tmp += 18;
+          continue;
+        }
+
+        if (strncmp(tmp, "{transfer-status}", 17) == 0) {
+          add_meta(&outs, META_XFER_STATUS, 0);
+          tmp += 17;
+          continue;
+        }
+
         if (strncmp(tmp, "{version}", 9) == 0) {
           add_meta(&outs, META_VERSION, 0);
           tmp += 9;
           continue;
+        }
+
+        if (strncmp(tmp, "{note:", 6) == 0) {
+          char *ptr;
+
+          ptr = strchr(tmp + 6, '}');
+          if (ptr != NULL) {
+            char *note;
+            size_t notelen;
+
+            note = tmp + 6;
+            notelen = (ptr - note);
+
+            add_meta(&outs, META_NOTE_VAR, 0);
+            add_meta(&outs, META_ARG, 1, (int) notelen, note);
+
+            /* Advance 6 for the leading '{note:', and one more for the
+             * trailing '}' character.
+             */
+            tmp += (notelen + 6 + 1);
+            continue;
+          }
         }
 
         switch (*tmp) {
@@ -565,51 +607,10 @@ MODRET set_serverlog(cmd_rec *cmd) {
 
 /* Syntax: SystemLog <filename> */
 MODRET set_systemlog(cmd_rec *cmd) {
-  char *syslogfn = NULL;
-  int res, xerrno = 0;
-
   CHECK_ARGS(cmd, 1);
   CHECK_CONF(cmd, CONF_ROOT);
 
-  log_closesyslog();
-
-  syslogfn = cmd->argv[1];
-
-  if (strcasecmp(syslogfn, "NONE") == 0) {
-    log_discard();
-    return PR_HANDLED(cmd);
-  }
-
-  if (*syslogfn != '/')
-    syslogfn = dir_canonical_path(cmd->tmp_pool,syslogfn);
-
-  pr_signals_block();
-
-  PRIVS_ROOT
-  res = log_opensyslog(syslogfn);
-  if (res < 0) {
-    xerrno = errno;
-  }
-  PRIVS_RELINQUISH
-
-  if (res < 0) {
-    pr_signals_unblock();
-
-    if (res == PR_LOG_WRITABLE_DIR) {
-      CONF_ERROR(cmd,
-        "you are attempting to log to a world writable directory");
-
-    } else if (res == PR_LOG_SYMLINK) {
-      CONF_ERROR(cmd, "you are attempting to log to a symbolic link");
-
-    } else {
-      CONF_ERROR(cmd, pstrcat(cmd->tmp_pool,
-        "unable to redirect logging to '", syslogfn, "': ",
-        strerror(xerrno), NULL));
-    }
-  }
-
-  pr_signals_unblock();
+  (void) add_config_param_str(cmd->argv[0], 1, cmd->argv[1]); 
   return PR_HANDLED(cmd);
 }
 
@@ -681,7 +682,7 @@ static char *get_next_meta(pool *p, cmd_rec *cmd, unsigned char **f) {
 
     case META_CLASS:
       argp = arg;
-      sstrncpy(argp, session.class ? session.class->cls_name : "-",
+      sstrncpy(argp, session.conn_class ? session.conn_class->cls_name : "-",
         sizeof(arg));
       m++;
       break;
@@ -777,6 +778,19 @@ static char *get_next_meta(pool *p, cmd_rec *cmd, unsigned char **f) {
         sstrncpy(argp, dir_abs_path(p, pr_fs_decode_path(p, cmd->arg), TRUE),
           sizeof(arg));
 
+      } else if (pr_cmd_cmp(cmd, PR_CMD_RETR_ID) == 0) {
+        char *path;
+
+        path = pr_table_get(cmd->notes, "mod_xfer.retr-path", NULL);
+        sstrncpy(arg, dir_abs_path(p, path, TRUE), sizeof(arg));
+
+      } else if (pr_cmd_cmp(cmd, PR_CMD_APPE_ID) == 0 ||
+                 pr_cmd_cmp(cmd, PR_CMD_STOR_ID) == 0) {
+        char *path;
+      
+        path = pr_table_get(cmd->notes, "mod_xfer.store-path", NULL);
+        sstrncpy(arg, dir_abs_path(p, path, TRUE), sizeof(arg));
+
       } else if (session.xfer.p &&
                  session.xfer.path) {
         sstrncpy(argp, dir_abs_path(p, session.xfer.path, TRUE), sizeof(arg));
@@ -871,6 +885,31 @@ static char *get_next_meta(pool *p, cmd_rec *cmd, unsigned char **f) {
 
       break;
 
+    case META_NOTE_VAR:
+      argp = arg;
+      m++;
+
+      if (*m == META_START &&
+          *(m+1) == META_ARG) {
+        char *key = get_next_meta(p, cmd, &m);
+        if (key) {
+          char *note = NULL;
+
+          /* Check in the cmd->notes table first. */
+          note = pr_table_get(cmd->notes, key, NULL);
+          if (note == NULL) {
+            /* If not there, check the session.notes table. */
+            note = pr_table_get(session.notes, key, NULL);
+          }
+ 
+          if (note) {
+            sstrncpy(argp, note, sizeof(arg));
+          }
+        }
+      }
+
+      break;
+
     case META_REMOTE_HOST:
       argp = arg;
       sstrncpy(argp, pr_netaddr_get_sess_remote_name(), sizeof(arg));
@@ -948,13 +987,15 @@ static char *get_next_meta(pool *p, cmd_rec *cmd, unsigned char **f) {
 
     case META_LOCAL_IP:
       argp = arg;
-      sstrncpy(argp, pr_netaddr_get_ipstr(session.c->local_addr), sizeof(arg));
+      sstrncpy(argp, pr_netaddr_get_ipstr(pr_netaddr_get_sess_local_addr()),
+        sizeof(arg));
       m++;
       break;
 
     case META_LOCAL_FQDN:
       argp = arg;
-      sstrncpy(argp, pr_netaddr_get_dnsstr(session.c->local_addr), sizeof(arg));
+      sstrncpy(argp, pr_netaddr_get_dnsstr(pr_netaddr_get_sess_local_addr()),
+        sizeof(arg));
       m++;
       break;
 
@@ -1074,16 +1115,11 @@ static char *get_next_meta(pool *p, cmd_rec *cmd, unsigned char **f) {
     case META_USER:
       argp = arg;
 
-      if (session.user == NULL) {
-        char *u = get_param_ptr(cmd->server->conf, "UserName", FALSE);
-        if (u == NULL) {
-          u = "root";
-        }
-
-        sstrncpy(argp, u, sizeof(arg));
+      if (session.user != NULL) {
+        sstrncpy(argp, session.user, sizeof(arg));
 
       } else {
-        sstrncpy(argp, session.user, sizeof(arg));
+        sstrncpy(argp, "-", sizeof(arg));
       }
 
       m++;
@@ -1099,7 +1135,7 @@ static char *get_next_meta(pool *p, cmd_rec *cmd, unsigned char **f) {
         sstrncpy(argp, login_user, sizeof(arg));
 
       } else {
-        sstrncpy(argp, "(none)", sizeof(arg));
+        sstrncpy(argp, "-", sizeof(arg));
       }
 
       m++;
@@ -1166,6 +1202,161 @@ static char *get_next_meta(pool *p, cmd_rec *cmd, unsigned char **f) {
       m++;
       break;
 
+    case META_XFER_FAILURE: {
+      argp = arg;
+
+      /* If the current command is one that incurs a data transfer, then we
+       * need to do more work.  If not, it's an easy substitution.
+       */
+      if (session.curr_cmd_id == PR_CMD_APPE_ID ||
+          session.curr_cmd_id == PR_CMD_LIST_ID ||
+          session.curr_cmd_id == PR_CMD_MLSD_ID ||
+          session.curr_cmd_id == PR_CMD_NLST_ID ||
+          session.curr_cmd_id == PR_CMD_RETR_ID ||
+          session.curr_cmd_id == PR_CMD_STOR_ID ||
+          session.curr_cmd_id == PR_CMD_STOU_ID) {
+        const char *proto;
+
+        proto = pr_session_get_protocol(0);
+
+        if (strncmp(proto, "ftp", 4) == 0 ||
+            strncmp(proto, "ftps", 5) == 0) {
+
+          if (XFER_ABORTED) {
+            sstrncpy(argp, "-", sizeof(arg));
+
+          } else {
+            int res;
+            char *resp_code = NULL, *resp_msg = NULL;
+
+            /* Get the last response code/message.  We use heuristics here to
+             * determine when to use "failed" versus "success".
+             */
+            res = pr_response_get_last(cmd->tmp_pool, &resp_code, &resp_msg);
+            if (res == 0) {
+              if (*resp_code != '2' &&
+                  *resp_code != '1') {
+                char *ptr;
+
+                /* Parse out/prettify the resp_msg here */
+                ptr = strchr(resp_msg, '.');
+                if (ptr != NULL) {
+                  sstrncpy(argp, ptr + 2, sizeof(arg));
+
+                } else {
+                  sstrncpy(argp, resp_msg, sizeof(arg));
+                }
+
+              } else {
+                sstrncpy(argp, "-", sizeof(arg));
+              }
+
+            } else {
+              sstrncpy(argp, "-", sizeof(arg));
+            }
+          }
+
+        } else {
+          /* Currently, for failed SFTP/SCP transfers, we can't properly
+           * populate the failure reason.  Maybe in the future.
+           */
+          sstrncpy(argp, "-", sizeof(arg));
+        }
+
+      } else {
+        sstrncpy(argp, "-", sizeof(arg));
+      }
+
+      m++;
+      break;
+    }
+
+    case META_XFER_STATUS: {
+      argp = arg;
+
+      /* If the current command is one that incurs a data transfer, then we
+       * need to do more work.  If not, it's an easy substitution.
+       */
+      if (session.curr_cmd_id == PR_CMD_ABOR_ID ||
+          session.curr_cmd_id == PR_CMD_APPE_ID ||
+          session.curr_cmd_id == PR_CMD_LIST_ID ||
+          session.curr_cmd_id == PR_CMD_MLSD_ID ||
+          session.curr_cmd_id == PR_CMD_NLST_ID ||
+          session.curr_cmd_id == PR_CMD_RETR_ID ||
+          session.curr_cmd_id == PR_CMD_STOR_ID ||
+          session.curr_cmd_id == PR_CMD_STOU_ID) {
+        const char *proto;
+
+        proto = pr_session_get_protocol(0);
+
+        if (strncmp(proto, "ftp", 4) == 0 ||
+            strncmp(proto, "ftps", 5) == 0) {
+
+          if (!(XFER_ABORTED)) {
+            int res;
+            char *resp_code = NULL, *resp_msg = NULL;
+
+            /* Get the last response code/message.  We use heuristics here to
+             * determine when to use "failed" versus "success".
+             */
+            res = pr_response_get_last(cmd->tmp_pool, &resp_code, &resp_msg);
+            if (res == 0) {
+              if (*resp_code == '2') {
+
+                if (pr_cmd_cmp(cmd, PR_CMD_ABOR_ID) != 0) {
+                  sstrncpy(argp, "success", sizeof(arg));
+
+                } else {
+                  /* We're handling the ABOR command, so obviously the value
+                   * should be 'cancelled'.
+                   */
+                  sstrncpy(argp, "cancelled", sizeof(arg));
+                }
+
+              } else if (*resp_code == '1') {
+                /* If the first digit of the response code is 1, then the
+                 * response code (for a data transfer command) is probably 150,
+                 * which means that the transfer was still in progress (didn't
+                 * complete with a 2xx/4xx response code) when we are called
+                 * here, which in turn means a timeout kicked in.
+                 */
+                sstrncpy(argp, "timeout", sizeof(arg));
+
+              } else {
+                sstrncpy(argp, "failed", sizeof(arg));
+              }
+
+            } else {
+              sstrncpy(argp, "success", sizeof(arg));
+            }
+
+          } else {
+            sstrncpy(argp, "cancelled", sizeof(arg));
+          }
+
+        } else {
+          /* mod_sftp stashes a note for us in the command notes if the
+           * transfer failed.
+           */
+          char *status;
+
+          status = pr_table_get(cmd->notes, "mod_sftp.file-status", NULL);
+          if (status == NULL) {
+            sstrncpy(argp, "success", sizeof(arg));
+
+          } else {
+            sstrncpy(argp, "failed", sizeof(arg));
+          }
+        }
+
+      } else {
+        sstrncpy(argp, "-", sizeof(arg));
+      }
+
+      m++;
+      break;
+    }
+
     case META_VERSION:
       argp = arg;
       sstrncpy(argp, PROFTPD_VERSION_TEXT, sizeof(arg));
@@ -1206,7 +1397,6 @@ static char *get_next_meta(pool *p, cmd_rec *cmd, unsigned char **f) {
       sstrncpy(argp, cmd->server->ServerAddress, sizeof(arg));
       m++;
       break;
-
   }
  
   *f = m;
@@ -1285,13 +1475,13 @@ MODRET log_any(cmd_rec *cmd) {
         /* If the logging class of this command is one of the classes
          * configured for this ExtendedLog...
          */ 
-        ((cmd->class & lf->lf_classes) ||
+        ((cmd->cmd_class & lf->lf_classes) ||
 
          /* ...or if the logging class of this command is unknown (defaults to
           * zero), and this ExtendedLog is configured to log ALL commands, then
           * log it.
           */
-         (cmd->class == 0 && lf->lf_classes == CL_ALL))) {
+         (cmd->cmd_class == 0 && lf->lf_classes == CL_ALL))) {
 
       if (!session.anon_config &&
           lf->lf_conf &&
@@ -1312,9 +1502,62 @@ static void log_exit_ev(const void *event_data, void *user_data) {
   cmd_rec *cmd;
 
   cmd = pr_cmd_alloc(session.pool, 1, "EXIT");
-  cmd->class |= CL_EXIT;
+  cmd->cmd_class |= CL_EXIT;
 
   (void) log_any(cmd);
+}
+
+static void log_postparse_ev(const void *event_data, void *user_data) {
+  config_rec *c;
+
+  c = find_config(main_server->conf, CONF_PARAM, "SystemLog", FALSE);
+  if (c != NULL) {
+    char *path;
+
+    path = c->argv[0];
+    log_closesyslog();
+
+    if (strncasecmp(path, "none", 5) != 0) {
+      int res, xerrno;
+
+      path = dir_canonical_path(main_server->pool, path);
+
+      pr_signals_block();
+      PRIVS_ROOT
+      res = log_opensyslog(path);
+      xerrno = errno;
+      PRIVS_RELINQUISH
+      pr_signals_unblock();
+
+      if (res < 0) {
+        if (res == PR_LOG_WRITABLE_DIR) {
+          pr_log_pri(PR_LOG_ERR,
+            "unable to open SystemLog '%s': %s is a world-writable directory",
+            path, path);
+
+        } else if (res == PR_LOG_SYMLINK) {
+          pr_log_pri(PR_LOG_ERR,
+            "unable to open SystemLog '%s': %s is a symbolic link", path, path);
+
+        } else {
+          if (xerrno != ENXIO) {
+            pr_log_pri(PR_LOG_ERR,
+              "unable to open SystemLog '%s': %s", path, strerror(xerrno));
+
+          } else {
+            pr_log_pri(PR_LOG_ERR,
+              "unable to open SystemLog '%s': "
+              "FIFO reader process must be running first", path);
+          }
+        }
+
+        exit(1);
+      }
+
+    } else {
+      log_discard();
+    }
+  }
 }
 
 static void log_restart_ev(const void *event_data, void *user_data) {
@@ -1329,7 +1572,6 @@ static void log_restart_ev(const void *event_data, void *user_data) {
   pr_pool_tag(log_pool, "mod_log pool");
 
   logformat("", "%h %l %u %t \"%r\" %s %b");
-
   return;
 }
 
@@ -1353,6 +1595,7 @@ static int log_init(void) {
   /* Add the "default" extendedlog format */
   logformat("", "%h %l %u %t \"%r\" %s %b");
 
+  pr_event_register(&log_module, "core.postparse", log_postparse_ev, NULL);
   pr_event_register(&log_module, "core.restart", log_restart_ev, NULL);
   return 0;
 }
@@ -1456,6 +1699,43 @@ MODRET log_pre_dele(cmd_rec *cmd) {
   return PR_DECLINED(cmd);
 }
 
+MODRET log_post_host(cmd_rec *cmd) {
+
+  /* If the HOST command changed the main_server pointer, reinitialize
+   * ourselves.
+   */
+  if (session.prev_server != NULL) {
+    int res;
+    logfile_t *lf = NULL;
+
+    pr_event_unregister(&log_module, "core.exit", log_exit_ev);
+    pr_event_unregister(&log_module, "core.timeout-stalled",
+      log_xfer_stalled_ev);
+
+    /* XXX If ServerLog configured, close/reopen syslog? */
+
+    /* XXX Close all ExtendedLog files, to prevent duplicate fds. */
+    for (lf = logs; lf; lf = lf->next) {
+      if (lf->lf_fd > -1) {
+        /* No need to close the special EXTENDED_LOG_SYSLOG (i.e. fake) fd. */
+        if (lf->lf_fd != EXTENDED_LOG_SYSLOG) {
+          (void) close(lf->lf_fd);
+        }
+
+        lf->lf_fd = -1;
+      }
+    }
+
+    res = log_sess_init();
+    if (res < 0) {
+      pr_session_disconnect(&log_module,
+        PR_SESS_DISCONNECT_SESSION_INIT_FAILED, NULL);
+    }
+  }
+
+  return PR_DECLINED(cmd);
+}
+
 MODRET log_post_pass(cmd_rec *cmd) {
   logfile_t *lf;
 
@@ -1538,10 +1818,79 @@ static int log_sess_init(void) {
   /* Open the ServerLog, if present. */
   serverlog_name = get_param_ptr(main_server->conf, "ServerLog", FALSE);
   if (serverlog_name != NULL) {
-    PRIVS_ROOT
     log_closesyslog();
-    log_opensyslog(serverlog_name);
-    PRIVS_RELINQUISH
+
+    if (strncasecmp(serverlog_name, "none", 5) != 0) {
+      int res, xerrno;
+
+      PRIVS_ROOT
+      res = log_opensyslog(serverlog_name);
+      xerrno = errno;
+      PRIVS_RELINQUISH
+
+      if (res < 0) {
+        if (xerrno != ENXIO) {
+          pr_log_debug(DEBUG4, "unable to open ServerLog '%s': %s",
+            serverlog_name, strerror(xerrno));
+
+        } else {
+          pr_log_debug(DEBUG4,
+            "unable to open ServerLog '%s': "
+            "FIFO reader process must be running first", serverlog_name);
+        }
+      }
+    }
+
+  } else {
+    config_rec *c;
+
+    c = find_config(main_server->conf, CONF_PARAM, "SystemLog", FALSE);
+    if (c != NULL) {
+      char *path;
+
+      path = c->argv[0];
+      log_closesyslog();
+
+      if (strncasecmp(path, "none", 5) != 0) {
+        int res, xerrno;
+
+        path = dir_canonical_path(main_server->pool, path);
+
+        pr_signals_block();
+        PRIVS_ROOT
+        res = log_opensyslog(path);
+        xerrno = errno;
+        PRIVS_RELINQUISH
+        pr_signals_unblock();
+
+        if (res < 0) {
+          if (res == PR_LOG_WRITABLE_DIR) {
+            pr_log_pri(PR_LOG_ERR,
+              "unable to open SystemLog '%s': %s is a world-writable directory",
+              path, path);
+
+          } else if (res == PR_LOG_SYMLINK) {
+            pr_log_pri(PR_LOG_ERR,
+              "unable to open SystemLog '%s': %s is a symbolic link", path,
+              path);
+
+          } else {
+            if (xerrno != ENXIO) {
+              pr_log_pri(PR_LOG_ERR,
+                "unable to open SystemLog '%s': %s", path, strerror(xerrno));
+
+            } else {
+              pr_log_pri(PR_LOG_ERR,
+                "unable to open SystemLog '%s': "
+                "FIFO reader process must be running first", path);
+            }
+          }
+        }
+
+      } else {
+        log_discard();
+      }
+    }
   }
 
   /* Open all the ExtendedLog files. */
@@ -1552,7 +1901,7 @@ static int log_sess_init(void) {
 
       /* Is this ExtendedLog to be written to a file, or to syslog? */
       if (strncasecmp(lf->lf_filename, "syslog:", 7) != 0) {
-        int res = 0;
+        int res = 0, xerrno;
 
         pr_log_debug(DEBUG7, "mod_log: opening ExtendedLog '%s'",
           lf->lf_filename);
@@ -1560,13 +1909,20 @@ static int log_sess_init(void) {
         pr_signals_block();
         PRIVS_ROOT
         res = pr_log_openfile(lf->lf_filename, &(lf->lf_fd), EXTENDED_LOG_MODE);
+        xerrno = errno;
         PRIVS_RELINQUISH
         pr_signals_unblock();
 
         if (res < 0) {
           if (res == -1) {
-            pr_log_pri(PR_LOG_NOTICE, "unable to open ExtendedLog '%s': %s",
-              lf->lf_filename, strerror(errno));
+            if (xerrno != ENXIO) {
+              pr_log_pri(PR_LOG_NOTICE, "unable to open ExtendedLog '%s': %s",
+                lf->lf_filename, strerror(xerrno));
+
+            } else {
+              pr_log_pri(PR_LOG_NOTICE, "unable to open ExtendedLog '%s': "
+                "FIFO reader process must be running first", lf->lf_filename);
+            }
 
           } else if (res == PR_LOG_WRITABLE_DIR) {
             pr_log_pri(PR_LOG_NOTICE, "unable to open ExtendedLog '%s': "
@@ -1609,9 +1965,10 @@ static conftable log_conftab[] = {
 
 static cmdtable log_cmdtab[] = {
   { PRE_CMD,		C_DELE,	G_NONE,	log_pre_dele,	FALSE, FALSE },
-  { LOG_CMD,		C_ANY,	G_NONE,	log_any,		FALSE, FALSE },
-  { LOG_CMD_ERR,	C_ANY,	G_NONE,	log_any,		FALSE, FALSE },
-  { POST_CMD,		C_PASS,	G_NONE,	log_post_pass,		FALSE, FALSE },
+  { LOG_CMD,		C_ANY,	G_NONE,	log_any,	FALSE, FALSE },
+  { LOG_CMD_ERR,	C_ANY,	G_NONE,	log_any,	FALSE, FALSE },
+  { POST_CMD,		C_HOST,	G_NONE,	log_post_host,	FALSE, FALSE },
+  { POST_CMD,		C_PASS,	G_NONE,	log_post_pass,	FALSE, FALSE },
   { 0, NULL }
 };
 

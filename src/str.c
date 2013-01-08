@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2008-2011 The ProFTPD Project team
+ * Copyright (c) 2008-2012 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,27 +23,21 @@
  */
 
 /* String manipulation functions
- * $Id: str.c,v 1.11 2011/05/23 21:22:24 castaglia Exp $
+ * $Id: str.c,v 1.15 2012/02/24 07:08:03 castaglia Exp $
  */
 
 #include "conf.h"
 
-/* Maximum number of replacements that we will do in a given string. */
-#define PR_STR_MAX_REPLACEMENTS			128
+/* Maximum number of matches that we will do in a given string. */
+#define PR_STR_MAX_MATCHES			128
 
-char *sreplace(pool *p, char *s, ...) {
-  va_list args;
+static char *str_vreplace(pool *p, unsigned int max_replaces, char *s,
+    va_list args) {
   char *m, *r, *src, *cp;
-  char *matches[PR_STR_MAX_REPLACEMENTS+1], *replaces[PR_STR_MAX_REPLACEMENTS+1];
+  char *matches[PR_STR_MAX_MATCHES+1], *replaces[PR_STR_MAX_MATCHES+1];
   char buf[PR_TUNABLE_PATH_MAX] = {'\0'}, *pbuf = NULL;
   size_t nmatches = 0, rlen = 0;
   int blen = 0;
-
-  if (p == NULL ||
-      s == NULL) {
-    errno = EINVAL;
-    return NULL;
-  }
 
   src = s;
   cp = buf;
@@ -54,10 +48,8 @@ char *sreplace(pool *p, char *s, ...) {
 
   blen = strlen(src) + 1;
 
-  va_start(args, s);
-
   while ((m = va_arg(args, char *)) != NULL &&
-         nmatches < PR_STR_MAX_REPLACEMENTS) {
+         nmatches < PR_STR_MAX_MATCHES) {
     char *tmp = NULL;
     int count = 0;
 
@@ -74,11 +66,9 @@ char *sreplace(pool *p, char *s, ...) {
     while (tmp) {
       pr_signals_handle();
       count++;
-      if (count > 8) {
-        /* More than eight instances of the same escape on the same line?
-         * Give me a break.
-         */
-        return s;
+      if (count > max_replaces) {
+        errno = E2BIG;
+        return NULL;
       }
 
       /* Be sure to increment the pointer returned by strstr(3), to
@@ -108,8 +98,6 @@ char *sreplace(pool *p, char *s, ...) {
       replaces[nmatches++] = r;
     }
   }
-
-  va_end(args);
 
   /* If there are no matches, then there is nothing to replace. */
   if (nmatches == 0) {
@@ -181,23 +169,81 @@ char *sreplace(pool *p, char *s, ...) {
   return pbuf;
 }
 
-/* "safe" strcat, saves room for NUL at end of dst, and refuses to copy more
- * than "n" bytes.
- */
-char *sstrcat(char *dst, const char *src, size_t n) {
-  register char *d;
+char *pr_str_replace(pool *p, unsigned int max_replaces, char *s, ...) {
+  va_list args;
+  char *res = NULL;
 
-  if (!dst || !src || n == 0) {
+  if (p == NULL ||
+      s == NULL ||
+      max_replaces == 0) {
     errno = EINVAL;
     return NULL;
   }
 
-  for (d = dst; *d && n > 1; d++, n--) ;
+  va_start(args, s);
+  res = str_vreplace(p, max_replaces, s, args);
+  va_end(args);
 
-  while (n-- > 1 && *src)
-    *d++ = *src++;
+  return res;
+}
 
-  *d = 0;
+char *sreplace(pool *p, char *s, ...) {
+  va_list args;
+  char *res = NULL;
+
+  if (p == NULL ||
+      s == NULL) {
+    errno = EINVAL;
+    return NULL;
+  }
+
+  va_start(args, s);
+  res = str_vreplace(p, PR_STR_MAX_REPLACEMENTS, s, args);
+  va_end(args);
+
+  if (res == NULL &&
+      errno == E2BIG) {
+    /* For backward compatible behavior. */
+    return s;
+  }
+
+  return res;
+}
+
+/* "safe" strcat, saves room for NUL at end of dst, and refuses to copy more
+ * than "n" bytes.
+ */
+char *sstrcat(char *dst, const char *src, size_t n) {
+  register char *d = dst;
+
+  if (dst == NULL ||
+      src == NULL ||
+      n == 0) {
+    errno = EINVAL;
+    return NULL;
+  }
+
+  /* Edge case short ciruit; strlcat(3) doesn't do what I think it should
+   * do for this particular case.
+   */
+  if (n > 1) {
+#ifdef HAVE_STRLCAT
+    strlcat(dst, src, n);
+  
+#else
+    for (; *d && n > 1; d++, n--) ;
+
+    while (n-- > 1 && *src) {
+      *d++ = *src++;
+    }
+
+    *d = '\0';
+#endif /* HAVE_STRLCAT */
+
+  } else {
+    *d = '\0';
+  }
+
   return dst;
 }
 
@@ -365,6 +411,81 @@ char *pr_str_strip_end(char *s, char *ch) {
   }
 
   return s;
+}
+
+int pr_str_get_nbytes(const char *str, const char *units, off_t *nbytes) {
+  off_t sz;
+  char *ptr = NULL;
+  float factor = 0.0;
+
+  if (str == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  /* No negative numbers. */
+  if (*str == '-') {
+    errno = EINVAL;
+    return -1;
+  }
+
+  if (units == NULL ||
+      *units == '\0') {
+    factor = 1.0;
+
+  } else if (strncasecmp(units, "KB", 3) == 0) {
+    factor = 1024.0;
+
+  } else if (strncasecmp(units, "MB", 3) == 0) {
+    factor = 1024.0 * 1024.0;
+
+  } else if (strncasecmp(units, "GB", 3) == 0) {
+    factor = 1024.0 * 1024.0 * 1024.0;
+
+  } else if (strncasecmp(units, "TB", 3) == 0) {
+    factor = 1024.0 * 1024.0 * 1024.0 * 1024.0;
+  
+  } else if (strncasecmp(units, "B", 2) == 0) {
+    factor = 1.0;
+
+  } else {
+    errno = EINVAL;
+    return -1;
+  }
+
+  errno = 0;
+
+#ifdef HAVE_STRTOULL
+  sz = strtoull(str, &ptr, 10);
+#else
+  sz = strtoul(str, &ptr, 10);
+#endif /* !HAVE_STRTOULL */
+
+  if (errno == ERANGE) {
+    return -1;
+  }
+
+  if (ptr != NULL && *ptr) {
+    /* Error parsing the given string */
+    errno = EINVAL;
+    return -1;
+  }
+
+  /* Don't bother applying the factor if the result will overflow the result. */
+#ifdef ULLONG_MAX
+  if (sz > (ULLONG_MAX / factor)) {
+#else
+  if (sz > (ULONG_MAX / factor)) {
+#endif /* !ULLONG_MAX */
+    errno = ERANGE;
+    return -1;
+  }
+
+  if (nbytes != NULL) {
+    *nbytes = (off_t) (sz * factor);
+  }
+
+  return 0;
 }
 
 char *pr_str_get_word(char **cp, int flags) {
