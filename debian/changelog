@@ -1,3 +1,10 @@
+proftpd-dfsg (1.3.3a-6squeeze6) stable-security; urgency=low
+
+  * Fixed patch 3841 to include the new pr_fsio_lchown() function 
+    to correctly backport changes.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Tue, 08 Jan 2013 12:54:23 +0100
+
 proftpd-dfsg (1.3.3a-6squeeze5) stable-security; urgency=low
 
   * [SECURITY] 3841.dpatch. This patch fixes a possible race condition in the
