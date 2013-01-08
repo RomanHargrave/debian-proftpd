@@ -1,7 +1,7 @@
 Index: proftpd-dfsg/contrib/mod_sftp/fxp.c
 ===================================================================
---- proftpd-dfsg.orig/contrib/mod_sftp/fxp.c	2013-01-08 12:03:49.000000000 +0100
-+++ proftpd-dfsg/contrib/mod_sftp/fxp.c	2013-01-08 12:06:31.000000000 +0100
+--- proftpd-dfsg.orig/contrib/mod_sftp/fxp.c	2013-01-08 14:01:27.000000000 +0100
++++ proftpd-dfsg/contrib/mod_sftp/fxp.c	2013-01-08 14:01:46.000000000 +0100
 @@ -6093,7 +6093,7 @@
    (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
      "creating directory '%s' with mode 0%o", path, (unsigned int) dir_mode);
@@ -13,8 +13,8 @@ Index: proftpd-dfsg/contrib/mod_sftp/fxp.c
      int xerrno = errno;
 Index: proftpd-dfsg/contrib/mod_sftp/scp.c
 ===================================================================
---- proftpd-dfsg.orig/contrib/mod_sftp/scp.c	2013-01-08 12:03:50.000000000 +0100
-+++ proftpd-dfsg/contrib/mod_sftp/scp.c	2013-01-08 12:06:31.000000000 +0100
+--- proftpd-dfsg.orig/contrib/mod_sftp/scp.c	2013-01-08 14:01:27.000000000 +0100
++++ proftpd-dfsg/contrib/mod_sftp/scp.c	2013-01-08 14:01:46.000000000 +0100
 @@ -731,7 +731,7 @@
           * recursive directory uploads via SCP?
           */
@@ -26,8 +26,8 @@ Index: proftpd-dfsg/contrib/mod_sftp/scp.c
            (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
 Index: proftpd-dfsg/include/fsio.h
 ===================================================================
---- proftpd-dfsg.orig/include/fsio.h	2013-01-08 12:03:50.000000000 +0100
-+++ proftpd-dfsg/include/fsio.h	2013-01-08 12:06:31.000000000 +0100
+--- proftpd-dfsg.orig/include/fsio.h	2013-01-08 14:01:27.000000000 +0100
++++ proftpd-dfsg/include/fsio.h	2013-01-08 14:01:46.000000000 +0100
 @@ -243,6 +243,7 @@
  int pr_fsio_rmdir(const char *);
  int pr_fsio_rename(const char *, const char *);
@@ -38,8 +38,8 @@ Index: proftpd-dfsg/include/fsio.h
  pr_fh_t *pr_fsio_open(const char *, int);
 Index: proftpd-dfsg/modules/mod_core.c
 ===================================================================
---- proftpd-dfsg.orig/modules/mod_core.c	2013-01-08 12:03:50.000000000 +0100
-+++ proftpd-dfsg/modules/mod_core.c	2013-01-08 12:07:43.000000000 +0100
+--- proftpd-dfsg.orig/modules/mod_core.c	2013-01-08 14:01:27.000000000 +0100
++++ proftpd-dfsg/modules/mod_core.c	2013-01-08 14:01:46.000000000 +0100
 @@ -4617,7 +4617,8 @@
      return PR_ERROR(cmd);
    }
@@ -124,8 +124,8 @@ Index: proftpd-dfsg/modules/mod_core.c
  
 Index: proftpd-dfsg/src/fsio.c
 ===================================================================
---- proftpd-dfsg.orig/src/fsio.c	2013-01-08 12:03:50.000000000 +0100
-+++ proftpd-dfsg/src/fsio.c	2013-01-08 12:06:31.000000000 +0100
+--- proftpd-dfsg.orig/src/fsio.c	2013-01-08 14:01:27.000000000 +0100
++++ proftpd-dfsg/src/fsio.c	2013-01-08 14:03:23.000000000 +0100
 @@ -29,6 +29,7 @@
   */
  
@@ -305,3 +305,55 @@ Index: proftpd-dfsg/src/fsio.c
  int pr_fsio_rmdir(const char *path) {
    int res;
    pr_fs_t *fs;
+@@ -3357,6 +3522,33 @@
+   return res;
+ }
+ 
++int pr_fsio_lchown(const char *name, uid_t uid, gid_t gid) {
++  int res;
++  pr_fs_t *fs;
++
++  fs = lookup_file_fs(name, NULL, FSIO_FILE_CHOWN);
++  if (fs == NULL) {
++    return -1;
++  }
++
++  /* Find the first non-NULL custom lchown handler.  If there are none,
++   * use the system chown.
++   */
++  while (fs && fs->fs_next && !fs->lchown) {
++    fs = fs->fs_next;
++  }
++
++  pr_trace_msg(trace_channel, 8, "using %s lchown() for path '%s'",
++    fs->fs_name, name);
++  res = (fs->lchown)(fs, name, uid, gid);
++
++  if (res == 0) {
++    pr_fs_clear_cache();
++  }
++
++  return res;
++}
++
+ int pr_fsio_access(const char *path, int mode, uid_t uid, gid_t gid,
+     array_header *suppl_gids) {
+   pr_fs_t *fs;
+@@ -4015,6 +4207,7 @@
+   root_fs->fchmod = sys_fchmod;
+   root_fs->chown = sys_chown;
+   root_fs->fchown = sys_fchown;
++  root_fs->lchown = sys_lchown;
+   root_fs->access = sys_access;
+   root_fs->faccess = sys_faccess;
+   root_fs->utimes = sys_utimes;
+@@ -4096,6 +4289,9 @@
+   if (fs->chown)
+     hooks = pstrcat(p, hooks, *hooks ? ", " : "", "chown(2)", NULL);
+ 
++  if (fs->lchown)
++    hooks = pstrcat(p, hooks, *hooks ? ", " : "", "lchown(2)", NULL);
++
+   if (fs->access)
+     hooks = pstrcat(p, hooks, *hooks ? ", " : "", "access(2)", NULL);
+ 
