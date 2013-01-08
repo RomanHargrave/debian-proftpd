@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2011 The ProFTPD Project team
+ * Copyright (c) 2001-2012 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* ProFTPD logging support.
- * $Id: log.c,v 1.108 2011/05/23 21:22:24 castaglia Exp $
+ * $Id: log.c,v 1.112 2012/05/20 20:38:06 castaglia Exp $
  */
 
 #include "conf.h"
@@ -259,6 +259,11 @@ int pr_log_openfile(const char *log_file, int *log_fd, mode_t log_mode) {
     }
   }
 
+  if (fcntl(*log_fd, F_SETFD, FD_CLOEXEC) < 0) {
+    pr_log_pri(PR_LOG_WARNING, "unable to set CLO_EXEC on log fd %d: %s",
+      *log_fd, strerror(errno));
+  }
+
 #ifdef PR_USE_NONBLOCKING_LOG_OPEN
   /* Return the fd to blocking mode. */
   fd_set_block(*log_fd);
@@ -363,6 +368,16 @@ int log_opensyslog(const char *fn) {
     if (syslog_sockfd < 0)
       return -1;
 
+    /* Find a usable fd for the just-opened socket fd. */
+    if (syslog_sockfd <= STDERR_FILENO) {
+      res = pr_fs_get_usable_fd(syslog_sockfd);
+      if (res > 0) {
+        (void) close(syslog_sockfd);
+        syslog_sockfd = res;
+      }
+    }
+
+    fcntl(syslog_sockfd, F_SETFD, FD_CLOEXEC);
     systemlog_fd = -1;
 
   } else if ((res = pr_log_openfile(systemlog_fn, &systemlog_fd,
@@ -408,12 +423,16 @@ static void log_write(int priority, int f, char *s, int discard) {
     pr_netaddr_t *remote_addr = pr_netaddr_get_sess_remote_addr();
     const char *remote_name = pr_netaddr_get_sess_remote_name();
 
-    snprintf(serverinfo, sizeof(serverinfo), "%s", main_server->ServerFQDN);
+    snprintf(serverinfo, sizeof(serverinfo)-1, "%s", main_server->ServerFQDN);
     serverinfo[sizeof(serverinfo)-1] = '\0';
 
     if (remote_addr && remote_name) {
-      snprintf(serverinfo + strlen(serverinfo),
-        sizeof(serverinfo) - strlen(serverinfo), " (%s[%s])",
+      size_t serverinfo_len;
+
+      serverinfo_len = strlen(serverinfo);
+
+      snprintf(serverinfo + serverinfo_len,
+        sizeof(serverinfo) - serverinfo_len, " (%s[%s])",
         remote_name, pr_netaddr_get_ipstr(remote_addr));
 
       serverinfo[sizeof(serverinfo)-1] = '\0';
@@ -424,19 +443,30 @@ static void log_write(int priority, int f, char *s, int discard) {
       (logstderr || !main_server)) {
     char buf[LOGBUFFER_SIZE] = {'\0'};
     size_t buflen;
+    time_t now = time(NULL);
+    struct tm *tm = NULL;
+
+    tm = pr_localtime(NULL, &now);
+    if (tm == NULL) {
+      return;
+    }
+
+    strftime(buf, sizeof(buf)-1, "%b %d %H:%M:%S ", tm);
+    buf[sizeof(buf)-1] = '\0';
+    buflen = strlen(buf);
 
     if (*serverinfo) {
-      snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
+      snprintf(buf + buflen, sizeof(buf) - buflen,
                "%s proftpd[%u] %s: %s\n", systemlog_host,
                (unsigned int) (session.pid ? session.pid : getpid()),
                serverinfo, s);
     } else {
-      snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
+      snprintf(buf + buflen, sizeof(buf) - buflen,
                "%s proftpd[%u]: %s\n", systemlog_host,
                (unsigned int) (session.pid ? session.pid : getpid()), s);
     }
 
-    buf[sizeof(buf) - 1] = '\0';
+    buf[sizeof(buf)-1] = '\0';
     buflen = strlen(buf);
 
     pr_log_event_generate(PR_LOG_TYPE_SYSTEMLOG, STDERR_FILENO, priority,
@@ -478,14 +508,15 @@ static void log_write(int priority, int f, char *s, int discard) {
 
     strftime(buf, sizeof(buf), "%b %d %H:%M:%S ", t);
     buf[sizeof(buf) - 1] = '\0';
+    buflen = strlen(buf);
 
     if (*serverinfo) {
-      snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
+      snprintf(buf + buflen, sizeof(buf) - buflen,
 	       "%s proftpd[%u] %s: %s\n", systemlog_host,
 	       (unsigned int) (session.pid ? session.pid : getpid()),
                serverinfo, s);
     } else {
-      snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf),
+      snprintf(buf + buflen, sizeof(buf) - buflen,
 	       "%s proftpd[%u]: %s\n", systemlog_host,
 	       (unsigned int) (session.pid ? session.pid : getpid()), s);
     }

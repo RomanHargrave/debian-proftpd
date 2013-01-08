@@ -1,6 +1,6 @@
 /*
  * ProFTPD - mod_sftp packet IO
- * Copyright (c) 2008-2011 TJ Saunders
+ * Copyright (c) 2008-2012 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: packet.c,v 1.32 2011/05/23 21:03:12 castaglia Exp $
+ * $Id: packet.c,v 1.41 2012/12/13 23:05:15 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -74,7 +74,8 @@ static off_t rekey_size = 0;
 static int poll_timeout = -1;
 static time_t last_recvd, last_sent;
 
-static const char *version_id = SFTP_ID_STRING "\r\n";
+static const char *server_version = SFTP_ID_DEFAULT_STRING;
+static const char *version_id = SFTP_ID_DEFAULT_STRING "\r\n";
 static int sent_version_id = FALSE;
 
 static void is_client_alive(void);
@@ -311,81 +312,8 @@ static char peek_mesg_type(struct ssh2_packet *pkt) {
   return mesg_type;
 }
 
-static void handle_debug_mesg(struct ssh2_packet *pkt) {
-  register unsigned int i;
-  char always_display;
-  char *str;
-
-  always_display = sftp_msg_read_bool(pkt->pool, &pkt->payload,
-    &pkt->payload_len);
-  str = sftp_msg_read_string(pkt->pool, &pkt->payload, &pkt->payload_len);
-
-  /* Ignore the language tag. */
-  (void) sftp_msg_read_string(pkt->pool, &pkt->payload, &pkt->payload_len);
-
-  /* Sanity-check the message for control (and other non-printable)
-   * characters.
-   */
-  for (i = 0; i < strlen(str); i++) {
-    if (iscntrl((int) str[i]) ||
-        !isprint((int) str[i])) {
-      str[i] = '?';
-    }
-  }
-
-  (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
-    "client sent SSH_MSG_DEBUG message '%s'", str);
-
-  if (always_display) {
-    pr_log_debug(DEBUG0, MOD_SFTP_VERSION
-      ": client sent SSH_MSG_DEBUG message '%s'", str);
-  }
-
-  destroy_pool(pkt->pool);
-}
-
-static void handle_disconnect_mesg(struct ssh2_packet *pkt) {
-  register unsigned int i;
-  char *explain = NULL, *lang = NULL;
-  const char *reason_str = NULL;
-  uint32_t reason_code;
-
-  reason_code = sftp_msg_read_int(pkt->pool, &pkt->payload, &pkt->payload_len);
-  reason_str = sftp_disconnect_get_str(reason_code);
-  if (reason_str == NULL) {
-    pr_trace_msg(trace_channel, 9,
-      "client sent unknown disconnect reason code %lu",
-      (unsigned long) reason_code);
-    reason_str = "Unknown reason code";
-  }
-
-  explain = sftp_msg_read_string(pkt->pool, &pkt->payload, &pkt->payload_len);
-
-  /* Not all clients send a language tag. */
-  if (pkt->payload_len > 0) {
-    lang = sftp_msg_read_string(pkt->pool, &pkt->payload, &pkt->payload_len);
-  }
-
-  /* Sanity-check the message for control characters. */
-  for (i = 0; i < strlen(explain); i++) {
-    if (iscntrl((int) explain[i])) {
-      explain[i] = '?';
-    }
-  }
-
-  /* XXX Use the language tag somehow, if provided. */
-  if (lang != NULL) {
-    pr_trace_msg(trace_channel, 19, "client sent DISCONNECT language tag '%s'",
-      lang);
-  }
-
-  (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
-    "client sent SSH_DISCONNECT message: %s (%s)", explain, reason_str);
-  pr_session_disconnect(&sftp_module, PR_SESS_DISCONNECT_CLIENT_QUIT, explain);
-}
-
 static void handle_global_request_mesg(struct ssh2_packet *pkt) {
-  char *buf, *ptr;
+  unsigned char *buf, *ptr;
   uint32_t buflen, bufsz;
   char *request_name;
   int want_reply;
@@ -434,33 +362,9 @@ static void handle_client_alive_mesg(struct ssh2_packet *pkt, char mesg_type) {
   destroy_pool(pkt->pool);
 }
 
-static void handle_ignore_mesg(struct ssh2_packet *pkt) {
-  char *str;
-  size_t len;
-
-  str = sftp_msg_read_string(pkt->pool, &pkt->payload, &pkt->payload_len);
-  len = strlen(str);
-
-  (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
-    "client sent SSH_MSG_IGNORE message (%u bytes)", (unsigned int) len);
-
-  destroy_pool(pkt->pool);
-}
-
-static void handle_unimplemented_mesg(struct ssh2_packet *pkt) {
-  uint32_t seqno;
-
-  seqno = sftp_msg_read_int(pkt->pool, &pkt->payload, &pkt->payload_len);
-
-  pr_trace_msg(trace_channel, 7, "received SSH_MSG_UNIMPLEMENTED for "
-    "packet #%lu", (unsigned long) seqno);
-
-  destroy_pool(pkt->pool);
-}
-
 static void is_client_alive(void) {
   unsigned int count;
-  char *buf, *ptr;
+  unsigned char *buf, *ptr;
   uint32_t bufsz, buflen, channel_id;
   struct ssh2_packet *pkt;
   pool *tmp_pool;
@@ -533,7 +437,7 @@ static void read_packet_discard(int sockfd) {
   if (buflen > 0) {
     int flags = SFTP_PACKET_READ_FL_PESSIMISTIC;
 
-    /* We don't necessary want to wait for the entire random amount of data
+    /* We don't necessarily want to wait for the entire random amount of data
      * to be read in.
      */
     sftp_ssh2_packet_sock_read(sockfd, buf, buflen, flags);
@@ -779,7 +683,7 @@ char sftp_ssh2_packet_get_mesg_type(struct ssh2_packet *pkt) {
   return mesg_type;
 }
 
-const char *sftp_ssh2_packet_get_mesg_type_desc(char mesg_type) {
+const char *sftp_ssh2_packet_get_mesg_type_desc(unsigned char mesg_type) {
   switch (mesg_type) {
     case SFTP_SSH2_MSG_DISCONNECT:
       return "SSH_MSG_DISCONNECT";
@@ -1272,7 +1176,9 @@ int sftp_ssh2_packet_send(int sockfd, struct ssh2_packet *pkt) {
    */
   res = writev(sockfd, packet_iov, packet_niov);
   while (res < 0) {
-    if (errno == EINTR) {
+    int xerrno = errno;
+
+    if (xerrno == EINTR) {
       pr_signals_handle();
 
       res = writev(sockfd, packet_iov, packet_niov);
@@ -1280,12 +1186,11 @@ int sftp_ssh2_packet_send(int sockfd, struct ssh2_packet *pkt) {
     }
 
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
-      "error writing packet (fd %d): %s", sockfd, strerror(errno));
+      "error writing packet (fd %d): %s", sockfd, strerror(xerrno));
 
-    if (errno == ECONNRESET ||
-        errno == ECONNABORTED ||
-        errno == EPIPE) {
-      int xerrno = errno;
+    if (xerrno == ECONNRESET ||
+        xerrno == ECONNABORTED ||
+        xerrno == EPIPE) {
 
       (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
         "disconnecting client (%s)", strerror(xerrno));
@@ -1297,6 +1202,7 @@ int sftp_ssh2_packet_send(int sockfd, struct ssh2_packet *pkt) {
     memset(packet_iov, 0, sizeof(packet_iov));
     packet_niov = 0;
 
+    errno = xerrno;
     return -1;
   }
 
@@ -1306,7 +1212,12 @@ int sftp_ssh2_packet_send(int sockfd, struct ssh2_packet *pkt) {
   memset(packet_iov, 0, sizeof(packet_iov));
   packet_niov = 0;
 
-  sent_version_id = TRUE;
+  if (sent_version_id == FALSE) {
+    (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+      "sent server version '%s'", server_version);
+    sent_version_id = TRUE;
+  }
+
   time(&last_sent);
 
   packet_server_seqno++;
@@ -1367,6 +1278,104 @@ int sftp_ssh2_packet_write(int sockfd, struct ssh2_packet *pkt) {
   return sftp_ssh2_packet_send(sockfd, pkt);
 }
 
+void sftp_ssh2_packet_handle_debug(struct ssh2_packet *pkt) {
+  register unsigned int i;
+  char always_display;
+  char *str;
+
+  always_display = sftp_msg_read_bool(pkt->pool, &pkt->payload,
+    &pkt->payload_len);
+  str = sftp_msg_read_string(pkt->pool, &pkt->payload, &pkt->payload_len);
+
+  /* Ignore the language tag. */
+  (void) sftp_msg_read_string(pkt->pool, &pkt->payload, &pkt->payload_len);
+
+  /* Sanity-check the message for control (and other non-printable)
+   * characters.
+   */
+  for (i = 0; i < strlen(str); i++) {
+    if (iscntrl((int) str[i]) ||
+        !isprint((int) str[i])) {
+      str[i] = '?';
+    }
+  }
+
+  (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+    "client sent SSH_MSG_DEBUG message '%s'", str);
+
+  if (always_display) {
+    pr_log_debug(DEBUG0, MOD_SFTP_VERSION
+      ": client sent SSH_MSG_DEBUG message '%s'", str);
+  }
+
+  destroy_pool(pkt->pool);
+}
+
+void sftp_ssh2_packet_handle_disconnect(struct ssh2_packet *pkt) {
+  register unsigned int i;
+  char *explain = NULL, *lang = NULL;
+  const char *reason_str = NULL;
+  uint32_t reason_code;
+
+  reason_code = sftp_msg_read_int(pkt->pool, &pkt->payload, &pkt->payload_len);
+  reason_str = sftp_disconnect_get_str(reason_code);
+  if (reason_str == NULL) {
+    pr_trace_msg(trace_channel, 9,
+      "client sent unknown disconnect reason code %lu",
+      (unsigned long) reason_code);
+    reason_str = "Unknown reason code";
+  }
+
+  explain = sftp_msg_read_string(pkt->pool, &pkt->payload, &pkt->payload_len);
+
+  /* Not all clients send a language tag. */
+  if (pkt->payload_len > 0) {
+    lang = sftp_msg_read_string(pkt->pool, &pkt->payload, &pkt->payload_len);
+  }
+
+  /* Sanity-check the message for control characters. */
+  for (i = 0; i < strlen(explain); i++) {
+    if (iscntrl((int) explain[i])) {
+      explain[i] = '?';
+    }
+  }
+
+  /* XXX Use the language tag somehow, if provided. */
+  if (lang != NULL) {
+    pr_trace_msg(trace_channel, 19, "client sent DISCONNECT language tag '%s'",
+      lang);
+  }
+
+  (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+    "client at %s sent SSH_DISCONNECT message: %s (%s)",
+    pr_netaddr_get_ipstr(session.c->remote_addr), explain, reason_str);
+  pr_session_disconnect(&sftp_module, PR_SESS_DISCONNECT_CLIENT_QUIT, explain);
+}
+
+void sftp_ssh2_packet_handle_ignore(struct ssh2_packet *pkt) {
+  char *str;
+  size_t len;
+
+  str = sftp_msg_read_string(pkt->pool, &pkt->payload, &pkt->payload_len);
+  len = strlen(str);
+
+  (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+    "client sent SSH_MSG_IGNORE message (%u bytes)", (unsigned int) len);
+
+  destroy_pool(pkt->pool);
+}
+
+void sftp_ssh2_packet_handle_unimplemented(struct ssh2_packet *pkt) {
+  uint32_t seqno;
+
+  seqno = sftp_msg_read_int(pkt->pool, &pkt->payload, &pkt->payload_len);
+
+  pr_trace_msg(trace_channel, 7, "received SSH_MSG_UNIMPLEMENTED for "
+    "packet #%lu", (unsigned long) seqno);
+
+  destroy_pool(pkt->pool);
+}
+
 int sftp_ssh2_packet_handle(void) {
   struct ssh2_packet *pkt;
   char mesg_type;
@@ -1393,11 +1402,11 @@ int sftp_ssh2_packet_handle(void) {
   
   switch (mesg_type) {
     case SFTP_SSH2_MSG_DEBUG:
-      handle_debug_mesg(pkt);
+      sftp_ssh2_packet_handle_debug(pkt);
       break;
 
     case SFTP_SSH2_MSG_DISCONNECT:
-      handle_disconnect_mesg(pkt);
+      sftp_ssh2_packet_handle_disconnect(pkt);
       break;
 
     case SFTP_SSH2_MSG_GLOBAL_REQUEST:
@@ -1412,11 +1421,11 @@ int sftp_ssh2_packet_handle(void) {
       break;
 
     case SFTP_SSH2_MSG_IGNORE:
-      handle_ignore_mesg(pkt);
+      sftp_ssh2_packet_handle_ignore(pkt);
       break;
 
     case SFTP_SSH2_MSG_UNIMPLEMENTED:
-      handle_unimplemented_mesg(pkt);
+      sftp_ssh2_packet_handle_unimplemented(pkt);
       break;
 
     case SFTP_SSH2_MSG_KEXINIT:
@@ -1429,6 +1438,7 @@ int sftp_ssh2_packet_handle(void) {
       sftp_sess_state &= ~SFTP_SESS_STATE_HAVE_KEX;
 
       if (sftp_kex_handle(pkt) < 0) {
+        pr_event_generate("mod_sftp.ssh2.kex.failed", NULL);
         SFTP_DISCONNECT_CONN(SFTP_SSH2_DISCONNECT_BY_APPLICATION, NULL);
       }
 
@@ -1460,14 +1470,26 @@ int sftp_ssh2_packet_handle(void) {
 
     case SFTP_SSH2_MSG_USER_AUTH_REQUEST:
       if (sftp_sess_state & SFTP_SESS_STATE_HAVE_SERVICE) {
-        int ok;
 
-        ok = sftp_auth_handle(pkt);
-        if (ok == 1) {
-          sftp_sess_state |= SFTP_SESS_STATE_HAVE_AUTH;
+        /* If the client has already authenticated this connection, then
+         * silently ignore this additional auth request, per recommendation
+         * in RFC4252.
+         */
+        if (sftp_sess_state & SFTP_SESS_STATE_HAVE_AUTH) {
+          (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+            "ignoring %s (%d) message: Connection already authenticated",
+            sftp_ssh2_packet_get_mesg_type_desc(mesg_type), mesg_type);
 
-        } else if (ok < 0) {
-          SFTP_DISCONNECT_CONN(SFTP_SSH2_DISCONNECT_BY_APPLICATION, NULL);
+        } else {
+          int ok;
+
+          ok = sftp_auth_handle(pkt);
+          if (ok == 1) {
+            sftp_sess_state |= SFTP_SESS_STATE_HAVE_AUTH;
+
+          } else if (ok < 0) {
+            SFTP_DISCONNECT_CONN(SFTP_SSH2_DISCONNECT_BY_APPLICATION, NULL);
+          }
         }
 
         break;
@@ -1568,8 +1590,22 @@ int sftp_ssh2_packet_send_version(void) {
 
     sent_version_id = TRUE;
     session.total_raw_out += res;
+
+    (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+      "sent server version '%s'", server_version);
   }
 
+  return 0;
+}
+
+int sftp_ssh2_packet_set_version(const char *version) {
+  if (server_version == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  server_version = version;
+  version_id = pstrcat(sftp_pool, version, "\r\n", NULL);
   return 0;
 }
 

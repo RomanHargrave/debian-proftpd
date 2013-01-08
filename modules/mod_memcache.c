@@ -1,7 +1,7 @@
 /*
  * ProFTPD: mod_memcache -- a module for managing memcache data
  *
- * Copyright (c) 2010-2011 The ProFTPD Project
+ * Copyright (c) 2010-2012 The ProFTPD Project
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@
  * source distribution.
  *
  * $Libraries: -lmemcached -lmemcachedutil$
- * $Id: mod_memcache.c,v 1.15 2011/05/23 21:11:56 castaglia Exp $
+ * $Id: mod_memcache.c,v 1.19 2012/10/02 19:49:32 castaglia Exp $
  */
 
 #include "conf.h"
@@ -41,6 +41,47 @@ extern xaset_t *server_list;
 module memcache_module;
 
 static int memcache_logfd = -1;
+static pool *memcache_pool = NULL;
+static array_header *memcache_server_lists = NULL;
+
+static void mcache_exit_ev(const void *, void *);
+static int mcache_sess_init(void);
+
+/* Command handlers
+ */
+
+MODRET memcache_post_host(cmd_rec *cmd) {
+
+  /* If the HOST command changed the main_server pointer, reinitialize
+   * ourselves.
+   */
+  if (session.prev_server != NULL) {
+    int res;
+    config_rec *c;
+
+    pr_event_unregister(&memcache_module, "core.exit", mcache_exit_ev);
+    (void) close(memcache_logfd);
+
+    c = find_config(session.prev_server->conf, CONF_PARAM, "MemcacheServers",
+      FALSE);
+    if (c != NULL) {
+      memcached_server_st *memcache_servers;
+
+      memcache_servers = c->argv[0];
+      memcache_set_servers(memcache_servers);
+    }
+
+    /* XXX Restore other memcache settings? */
+
+    res = mcache_sess_init();
+    if (res < 0) {
+      pr_session_disconnect(&memcache_module,
+        PR_SESS_DISCONNECT_SESSION_INIT_FAILED, NULL);
+    }
+  }
+
+  return PR_DECLINED(cmd);
+}
 
 /* Configuration handlers
  */
@@ -174,7 +215,7 @@ MODRET set_memcacheservers(cmd_rec *cmd) {
   config_rec *c;
   char *str = "";
   int ctxt;
-  memcached_server_st *memcache_servers;
+  memcached_server_st *memcache_servers = NULL;
 
   if (cmd->argc-1 < 1) {
     CONF_ERROR(cmd, "wrong number of parameters");
@@ -204,6 +245,9 @@ MODRET set_memcacheservers(cmd_rec *cmd) {
   }
 
   c->argv[0] = memcache_servers;
+
+  /* Add the libmemcached-allocated pointer to a list, for later freeing. */
+  *((memcached_server_st **) push_array(memcache_server_lists)) = memcache_servers;
   return PR_HANDLED(cmd);
 }
 
@@ -281,19 +325,27 @@ static void mcache_exit_ev(const void *event_data, void *user_data) {
 }
 
 static void mcache_restart_ev(const void *event_data, void *user_data) {
-  server_rec *s;
+  register unsigned int i;
+  memcached_server_st **mcache_servers = NULL;
 
-  for (s = (server_rec *) server_list->xas_list; s; s = s->next) {
-    config_rec *c;
-
-    c = find_config(s->conf, CONF_PARAM, "MemcacheServers", FALSE);
-    if (c) {
-      memcached_server_st *memcache_servers;
-
-      memcache_servers = c->argv[0];
-      memcached_server_list_free(memcache_servers);
-    }
+  mcache_servers = memcache_server_lists->elts;
+  for (i = 0; i < memcache_server_lists->nelts; i++) {
+    memcached_server_list_free(mcache_servers[i]);
   }
+
+  /* Make sure to clear the pointer in the Memcache API as well, to prevent
+   * a dangling pointer situation.
+   */
+  memcache_set_servers(NULL);
+
+  /* Now we can recycle the mod_memcache pool and its associated resources. */
+  destroy_pool(memcache_pool);
+
+  memcache_pool = make_sub_pool(permanent_pool);
+  pr_pool_tag(memcache_pool, MOD_MEMCACHE_VERSION);
+
+  memcache_server_lists = make_array(memcache_pool, 2,
+    sizeof(memcached_server_st **));
 }
 
 /* Initialization functions
@@ -301,6 +353,12 @@ static void mcache_restart_ev(const void *event_data, void *user_data) {
 
 static int mcache_init(void) {
   const char *version;
+
+  memcache_pool = make_sub_pool(permanent_pool);
+  pr_pool_tag(memcache_pool, MOD_MEMCACHE_VERSION);
+
+  memcache_server_lists = make_array(memcache_pool, 2,
+    sizeof(memcached_server_st **));
 
   memcache_init();
 
@@ -347,7 +405,7 @@ static int mcache_sess_init(void) {
 
       pr_signals_block();
       PRIVS_ROOT
-      res = pr_log_openfile(path, &memcache_logfd, 0600);
+      res = pr_log_openfile(path, &memcache_logfd, PR_LOG_SYSTEM_MODE);
       PRIVS_RELINQUISH
       pr_signals_unblock();
 
@@ -427,6 +485,11 @@ static int mcache_sess_init(void) {
 /* Module API tables
  */
 
+static cmdtable memcache_cmdtab[] = {
+  { POST_CMD,	C_HOST,	G_NONE,	memcache_post_host,	FALSE,	FALSE },
+  { 0, NULL }
+};
+
 static conftable memcache_conftab[] = {
   { "MemcacheConnectFailures",	set_memcacheconnectfailures,	NULL },
   { "MemcacheEngine",		set_memcacheengine,		NULL },
@@ -452,7 +515,7 @@ module memcache_module = {
   memcache_conftab,
 
   /* Module command handler table */
-  NULL,
+  memcache_cmdtab,
 
   /* Module authentication handler table */
   NULL,

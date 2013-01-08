@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2011 The ProFTPD Project team
+ * Copyright (c) 2001-2013 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,10 +25,11 @@
  */
 
 /* Read configuration file(s), and manage server/configuration structures.
- * $Id: dirtree.c,v 1.260 2011/07/01 18:03:31 castaglia Exp $
+ * $Id: dirtree.c,v 1.269 2013/01/04 21:47:15 castaglia Exp $
  */
 
 #include "conf.h"
+#include "privs.h"
 
 #ifdef HAVE_ARPA_INET_H
 # include <arpa/inet.h>
@@ -139,14 +140,16 @@ xaset_t *get_dir_ctxt(pool *p, char *dir_path) {
   char *full_path = dir_path;
 
   if (session.chroot_path) {
-    if (*dir_path != '/')
+    if (*dir_path != '/') {
       full_path = pdircat(p, session.chroot_path, session.cwd, dir_path, NULL);
 
-    else
+    } else {
       full_path = pdircat(p, session.chroot_path, dir_path, NULL);
+    }
 
-  } else if (*dir_path != '/')
+  } else if (*dir_path != '/') {
     full_path = pdircat(p, session.cwd, dir_path, NULL);
+  }
 
   c = dir_match_path(p, full_path);
 
@@ -666,8 +669,9 @@ static config_rec *recur_match_path(pool *p, xaset_t *s, char *path) {
       tmp_path = c->name;
 
       if (c->argv[1]) {
-        if (*(char *)(c->argv[1]) == '~')
+        if (*(char *)(c->argv[1]) == '~') {
           c->argv[1] = dir_canonical_path(c->pool, (char *) c->argv[1]);
+        }
 
         tmp_path = pdircat(p, (char *) c->argv[1], tmp_path, NULL);
       }
@@ -766,7 +770,10 @@ config_rec *dir_match_path(pool *p, char *path) {
   char *tmp = NULL;
   size_t tmplen;
 
-  if (!p || !path || !*path) {
+  if (p == NULL ||
+      path == NULL ||
+      *path == '\0') {
+    errno = EINVAL;
     return NULL;
   }
 
@@ -1049,8 +1056,14 @@ static int check_group_access(xaset_t *set, const char *name) {
 
 static int check_class_access(xaset_t *set, const char *name) {
   int res = 0;
-  config_rec *c = find_config(set, CONF_PARAM, name, FALSE);
+  config_rec *c;
 
+  /* If no class was found for this session, short-circuit the check. */
+  if (session.conn_class == NULL) {
+    return res;
+  }
+
+  c = find_config(set, CONF_PARAM, name, FALSE);
   while (c) {
     pr_signals_handle();
 
@@ -1058,8 +1071,9 @@ static int check_class_access(xaset_t *set, const char *name) {
     if (*((unsigned char *) c->argv[0]) == PR_EXPR_EVAL_REGEX) {
       pr_regex_t *pre = (pr_regex_t *) c->argv[1];
 
-      if (session.class &&
-          pr_regexp_exec(pre, session.class->cls_name, 0, NULL, 0, 0, 0) == 0) {
+      if (session.conn_class &&
+          pr_regexp_exec(pre, session.conn_class->cls_name, 0, NULL, 0,
+            0, 0) == 0) {
         res = TRUE;
         break;
       }
@@ -1259,7 +1273,7 @@ static int check_limit_allow(config_rec *c, cmd_rec *cmd) {
     return 1;
   }
 
-  if (session.class &&
+  if (session.conn_class != NULL &&
       check_class_access(c->subset, "AllowClass")) {
     return 1;
   }
@@ -1299,7 +1313,7 @@ static int check_limit_deny(config_rec *c, cmd_rec *cmd) {
     return 1;
   }
 
-  if (session.class &&
+  if (session.conn_class != NULL &&
       check_class_access(c->subset, "DenyClass")) {
     return 1;
   }
@@ -2177,7 +2191,7 @@ static void reparent_all(config_rec *newparent, xaset_t *set) {
  * directive to.
  */
 
-static config_rec *_find_best_dir(xaset_t *set, char *path, size_t *matchlen) {
+static config_rec *find_best_dir(xaset_t *set, char *path, size_t *matchlen) {
   config_rec *c, *res = NULL, *rres;
   size_t len, pathlen, imatchlen, tmatchlen;
 
@@ -2205,6 +2219,8 @@ static config_rec *_find_best_dir(xaset_t *set, char *path, size_t *matchlen) {
         continue;
 
       len = strlen(c->name);
+
+      /* Do NOT change the zero here to a one; the expression IS correct. */
       while (len > 0 &&
              (*(c->name+len-1) == '*' || *(c->name+len-1) == '/')) {
         len--;
@@ -2227,7 +2243,7 @@ static config_rec *_find_best_dir(xaset_t *set, char *path, size_t *matchlen) {
 
       if (len < pathlen &&
           strncmp(c->name, path, len) == 0) {
-        rres = _find_best_dir(c->subset ,path, &imatchlen);
+        rres = find_best_dir(c->subset ,path, &imatchlen);
         tmatchlen = _strmatch(path, c->name);
         if (!rres &&
             tmatchlen > *matchlen) {
@@ -2285,7 +2301,7 @@ static void reorder_dirs(xaset_t *set, int flags) {
         xaset_remove(c->parent->subset, (xasetmember_t *) c);
 
       } else {
-        newparent = _find_best_dir(set, c->name, &tmp);
+        newparent = find_best_dir(set, c->name, &tmp);
         if (newparent) {
           if (!newparent->subset)
             newparent->subset = xaset_create(newparent->pool, NULL);
@@ -2885,7 +2901,6 @@ void find_config_set_top(config_rec *c) {
   }
 }
 
-
 config_rec *find_config(xaset_t *set, int type, const char *name, int recurse) {
   if (!set ||
       !set->xas_list)
@@ -3173,8 +3188,18 @@ int parse_config_path(pool *p, const char *path) {
         config_filename_cmp);
 
       for (i = 0; i < file_list->nelts; i++) {
-        char *file = ((char **) file_list->elts)[i];
+        char *file;
+
+        file = ((char **) file_list->elts)[i];
+
+        /* Make sure we always parse the files with root privs.  The
+         * previously parsed file might have had root privs relinquished
+         * (e.g. by its directive handlers), but when we first start up,
+         * we have root privs.  See Bug#3855.
+         */
+        PRIVS_ROOT
         pr_parser_parse_file(p, file, NULL, 0);
+        PRIVS_RELINQUISH
       }
     }
 
@@ -3202,7 +3227,7 @@ int fixup_servers(xaset_t *list) {
     unsigned char *default_server = NULL;
 
     next_s = s->next;
-    if (!s->ServerAddress) {
+    if (s->ServerAddress == NULL) {
       array_header *addrs = NULL;
 
       s->ServerAddress = pr_netaddr_get_localaddr_str(s->pool);
@@ -3236,8 +3261,9 @@ int fixup_servers(xaset_t *list) {
         }
       }
  
-    } else 
+    } else {
       s->addr = pr_netaddr_get_addr(s->pool, s->ServerAddress, NULL);
+    }
 
     if (s->addr == NULL) {
       pr_log_pri(PR_LOG_WARNING,
@@ -3249,27 +3275,32 @@ int fixup_servers(xaset_t *list) {
 
       xaset_remove(list, (xasetmember_t *) s);
       destroy_pool(s->pool);
+      s->pool = NULL;
       continue;
     }
 
     s->ServerFQDN = pr_netaddr_get_dnsstr(s->addr);
 
-    if (!s->ServerFQDN)
+    if (s->ServerFQDN == NULL) {
       s->ServerFQDN = s->ServerAddress;
+    }
 
-    if (!s->ServerAdmin)
+    if (s->ServerAdmin == NULL) {
       s->ServerAdmin = pstrcat(s->pool, "root@", s->ServerFQDN, NULL);
+    }
 
-    if (!s->ServerName) {
+    if (s->ServerName == NULL) {
       server_rec *m = (server_rec *) list->xas_list;
       s->ServerName = pstrdup(s->pool, m->ServerName);
     }
 
-    if (!s->tcp_rcvbuf_len)
+    if (s->tcp_rcvbuf_len == 0) {
       s->tcp_rcvbuf_len = tcp_rcvbufsz;
+    }
 
-    if (!s->tcp_sndbuf_len)
+    if (s->tcp_sndbuf_len == 0) {
       s->tcp_sndbuf_len = tcp_sndbufsz;
+    }
 
     c = find_config(s->conf, CONF_PARAM, "MasqueradeAddress", FALSE);
     if (c != NULL) {
@@ -3286,7 +3317,7 @@ int fixup_servers(xaset_t *list) {
     if (default_server &&
         *default_server == TRUE) {
 
-      if (!SocketBindTight) {
+      if (SocketBindTight == FALSE) {
         pr_netaddr_set_sockaddr_any(s->addr);
 
       } else {
@@ -3311,7 +3342,7 @@ int fixup_servers(xaset_t *list) {
   return 0;
 }
 
-static void set_tcp_bufsz(void) {
+static void set_tcp_bufsz(server_rec *s) {
   int sockfd;
   socklen_t optlen = 0;
   struct protoent *p = NULL;
@@ -3323,15 +3354,15 @@ static void set_tcp_bufsz(void) {
   p = getprotobyname("tcp");
   if (p == NULL) {
 #ifndef PR_TUNABLE_RCVBUFSZ
-    tcp_rcvbufsz = PR_TUNABLE_DEFAULT_RCVBUFSZ;
+    s->tcp_rcvbuf_len = tcp_rcvbufsz = PR_TUNABLE_DEFAULT_RCVBUFSZ;
 #else
-    tcp_rcvbufsz = PR_TUNABLE_RCVBUFSZ;
+    s->tcp_rcvbuf_len = tcp_rcvbufsz = PR_TUNABLE_RCVBUFSZ;
 #endif /* PR_TUNABLE_RCVBUFSZ */
 
 #ifndef PR_TUNABLE_SNDBUFSZ
-    tcp_sndbufsz = PR_TUNABLE_DEFAULT_SNDBUFSZ;
+    s->tcp_sndbuf_len = tcp_sndbufsz = PR_TUNABLE_DEFAULT_SNDBUFSZ;
 #else
-    tcp_sndbufsz = PR_TUNABLE_SNDBUFSZ;
+    s->tcp_sndbuf_len = tcp_sndbufsz = PR_TUNABLE_SNDBUFSZ;
 #endif /* PR_TUNABLE_SNDBUFSZ */
 
     pr_log_debug(DEBUG3, "getprotobyname error for 'tcp': %s", strerror(errno));
@@ -3351,8 +3382,8 @@ static void set_tcp_bufsz(void) {
 
   sockfd = socket(AF_INET, SOCK_STREAM, p->p_proto);
   if (sockfd < 0) {
-    tcp_rcvbufsz = PR_TUNABLE_DEFAULT_RCVBUFSZ;
-    tcp_sndbufsz = PR_TUNABLE_DEFAULT_SNDBUFSZ;
+    s->tcp_rcvbuf_len = tcp_rcvbufsz = PR_TUNABLE_DEFAULT_RCVBUFSZ;
+    s->tcp_sndbuf_len = tcp_sndbufsz = PR_TUNABLE_DEFAULT_SNDBUFSZ;
 
     pr_log_debug(DEBUG3, "socket error: %s", strerror(errno));
     pr_log_debug(DEBUG4, "using default TCP receive/send buffer sizes");
@@ -3363,7 +3394,7 @@ static void set_tcp_bufsz(void) {
   optlen = sizeof(tcp_rcvbufsz);
   if (getsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, (void *) &tcp_rcvbufsz,
       &optlen) < 0) {
-    tcp_rcvbufsz = PR_TUNABLE_DEFAULT_RCVBUFSZ;
+    s->tcp_rcvbuf_len = tcp_rcvbufsz = PR_TUNABLE_DEFAULT_RCVBUFSZ;
 
     pr_log_debug(DEBUG3, "getsockopt error for SO_RCVBUF: %s", strerror(errno));
     pr_log_debug(DEBUG4, "using default TCP receive buffer size of %d bytes",
@@ -3372,10 +3403,11 @@ static void set_tcp_bufsz(void) {
   } else {
     pr_log_debug(DEBUG5, "using TCP receive buffer size of %d bytes",
       tcp_rcvbufsz);
+    s->tcp_rcvbuf_len = tcp_rcvbufsz;
   }
 #else
   optlen = -1;
-  tcp_rcvbufsz = PR_TUNABLE_RCVBUFSZ;
+  s->tcp_rcvbuf_len = tcp_rcvbufsz = PR_TUNABLE_RCVBUFSZ;
   pr_log_debug(DEBUG5, "using preset TCP receive buffer size of %d bytes",
     tcp_rcvbufsz);
 #endif /* PR_TUNABLE_RCVBUFSZ */
@@ -3385,7 +3417,7 @@ static void set_tcp_bufsz(void) {
   optlen = sizeof(tcp_sndbufsz);
   if (getsockopt(sockfd, SOL_SOCKET, SO_SNDBUF, (void *) &tcp_sndbufsz,
       &optlen) < 0) {
-    tcp_sndbufsz = PR_TUNABLE_DEFAULT_SNDBUFSZ;
+    s->tcp_sndbuf_len = tcp_sndbufsz = PR_TUNABLE_DEFAULT_SNDBUFSZ;
     
     pr_log_debug(DEBUG3, "getsockopt error for SO_SNDBUF: %s", strerror(errno));
     pr_log_debug(DEBUG4, "using default TCP send buffer size of %d bytes",
@@ -3394,10 +3426,11 @@ static void set_tcp_bufsz(void) {
   } else {
     pr_log_debug(DEBUG5, "using TCP send buffer size of %d bytes",
       tcp_sndbufsz);
+    s->tcp_sndbuf_len = tcp_sndbufsz;
   }
 #else
   optlen = -1;
-  tcp_sndbufsz = PR_TUNABLE_SNDBUFSZ;
+  s->tcp_sndbuf_len = tcp_sndbufsz = PR_TUNABLE_SNDBUFSZ;
   pr_log_debug(DEBUG5, "using preset TCP send buffer size of %d bytes",
     tcp_sndbufsz);
 #endif /* PR_TUNABLE_SNDBUFSZ */
@@ -3455,6 +3488,13 @@ void init_config(void) {
     /* Free the old configuration completely */
     for (s = (server_rec *) server_list->xas_list; s; s = s_next) {
       s_next = s->next;
+
+      /* Make sure that any pointers are explicitly nulled; this does not
+       * automatically happen as part of pool destruction.
+       */
+      s->conf = NULL;
+      s->set = NULL;
+
       destroy_pool(s->pool);
     }
 
@@ -3478,12 +3518,21 @@ void init_config(void) {
   main_server->pool = conf_pool;
   main_server->set = server_list;
   main_server->sid = 1;
+  main_server->notes = pr_table_nalloc(conf_pool, 0, 8);
+
+  /* TCP KeepAlive is enabled by default, with the system defaults. */
+  main_server->tcp_keepalive = palloc(main_server->pool,
+    sizeof(struct tcp_keepalive));
+  main_server->tcp_keepalive->keepalive_enabled = TRUE;
+  main_server->tcp_keepalive->keepalive_idle = -1;
+  main_server->tcp_keepalive->keepalive_count = -1;
+  main_server->tcp_keepalive->keepalive_intvl = -1;
 
   /* Default server port */
   main_server->ServerPort = pr_inet_getservport(main_server->pool,
     "ftp", "tcp");
 
-  set_tcp_bufsz();
+  set_tcp_bufsz(main_server);
   return;
 }
 

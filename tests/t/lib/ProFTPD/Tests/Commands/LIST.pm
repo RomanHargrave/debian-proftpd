@@ -157,6 +157,21 @@ my $TESTS = {
     test_class => [qw(forking)],
   },
 
+  list_opt_R_self_symlinked_dir_bug3719 => {
+    order => ++$order,
+    test_class => [qw(bug forking)],
+  },
+
+  list_opt_R_self_complex_symlinked_dir_bug3719 => {
+    order => ++$order,
+    test_class => [qw(bug forking)],
+  },
+
+  list_opt_R_rel_symlinked_file_bug3719 => {
+    order => ++$order,
+    test_class => [qw(bug forking)],
+  },
+
   # XXX Plenty of other tests needed: params, maxfiles, maxdirs, depth, etc
 };
 
@@ -176,7 +191,7 @@ sub list_ok_raw_active {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -306,6 +321,9 @@ sub list_ok_raw_active {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -320,7 +338,7 @@ sub list_ok_raw_passive {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -450,6 +468,9 @@ sub list_ok_raw_passive {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -464,7 +485,7 @@ sub list_ok_file {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -580,6 +601,9 @@ sub list_ok_file {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -594,7 +618,7 @@ sub list_ok_dir {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -709,6 +733,9 @@ sub list_ok_dir {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -723,7 +750,7 @@ sub list_ok_no_path {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -833,6 +860,9 @@ sub list_ok_no_path {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -847,7 +877,7 @@ sub list_ok_glob {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -962,6 +992,9 @@ sub list_ok_glob {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -976,7 +1009,7 @@ sub list_fails_login_required {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $config = {
     PidFile => $pid_file,
@@ -1053,6 +1086,9 @@ sub list_fails_login_required {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -1067,7 +1103,7 @@ sub list_fails_enoent {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -1178,6 +1214,9 @@ sub list_fails_enoent {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -1192,7 +1231,7 @@ sub list_fails_enoent_glob {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -1264,15 +1303,7 @@ sub list_fails_enoent_glob {
       # Unlike NLST, for LIST proftpd returns 226, and simply sends an
       # empty list.
 
-      my $expected;
-
-      $expected = 226;
-      $self->assert($expected == $resp_code,
-        test_msg("Expected $expected, got $resp_code"));
-
-      $expected = "Transfer complete";
-      $self->assert($expected eq $resp_msg,
-        test_msg("Expected '$expected', got '$resp_msg'"));
+      $self->assert_transfer_ok($resp_code, $resp_msg);
     };
 
     if ($@) {
@@ -1298,6 +1329,9 @@ sub list_fails_enoent_glob {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -1312,7 +1346,7 @@ sub list_fails_eperm {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -1433,6 +1467,9 @@ sub list_fails_eperm {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -1447,7 +1484,7 @@ sub list_bug2821 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -1605,6 +1642,9 @@ sub list_bug2821 {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -1619,7 +1659,7 @@ sub list_opt_C {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -1764,6 +1804,9 @@ sub list_opt_C {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -1783,7 +1826,7 @@ sub list_nonascii_chars_bug3032 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -1914,6 +1957,9 @@ sub list_nonascii_chars_bug3032 {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -1928,7 +1974,7 @@ sub list_leading_whitespace_bug3268 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -2010,16 +2056,7 @@ sub list_leading_whitespace_bug3268 {
 
       my $resp_code = $client->response_code();
       my $resp_msg = $client->response_msg();
-
-      my $expected;
-   
-      $expected = 226;
-      $self->assert($expected == $resp_code,
-        test_msg("Expected $expected, got $resp_code"));
-
-      $expected = 'Transfer complete';
-      $self->assert($expected eq $resp_msg,
-        test_msg("Expected '$expected', got '$resp_msg'"));
+      $self->assert_transfer_ok($resp_code, $resp_msg);
 
       # We have to be careful of the fact that readdir returns directory
       # entries in an unordered fashion.
@@ -2031,7 +2068,7 @@ sub list_leading_whitespace_bug3268 {
         }
       }
 
-      $expected = {
+      my $expected = {
         ' test.txt' => 1,
       };
 
@@ -2073,6 +2110,9 @@ sub list_leading_whitespace_bug3268 {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -2087,7 +2127,7 @@ sub list_leading_whitespace_with_opts_bug3268 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -2169,16 +2209,7 @@ sub list_leading_whitespace_with_opts_bug3268 {
 
       my $resp_code = $client->response_code();
       my $resp_msg = $client->response_msg();
-
-      my $expected;
-   
-      $expected = 226;
-      $self->assert($expected == $resp_code,
-        test_msg("Expected $expected, got $resp_code"));
-
-      $expected = 'Transfer complete';
-      $self->assert($expected eq $resp_msg,
-        test_msg("Expected '$expected', got '$resp_msg'"));
+      $self->assert_transfer_ok($resp_code, $resp_msg);
 
       # We have to be careful of the fact that readdir returns directory
       # entries in an unordered fashion.
@@ -2190,7 +2221,7 @@ sub list_leading_whitespace_with_opts_bug3268 {
         }
       }
 
-      $expected = {
+      my $expected = {
         ' test.txt' => 1,
       };
 
@@ -2232,6 +2263,9 @@ sub list_leading_whitespace_with_opts_bug3268 {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -2246,7 +2280,7 @@ sub list_leading_whitespace_with_strict_opts_bug3268 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -2330,16 +2364,7 @@ sub list_leading_whitespace_with_strict_opts_bug3268 {
 
       my $resp_code = $client->response_code();
       my $resp_msg = $client->response_msg();
-
-      my $expected;
-   
-      $expected = 226;
-      $self->assert($expected == $resp_code,
-        test_msg("Expected $expected, got $resp_code"));
-
-      $expected = 'Transfer complete';
-      $self->assert($expected eq $resp_msg,
-        test_msg("Expected '$expected', got '$resp_msg'"));
+      $self->assert_transfer_ok($resp_code, $resp_msg);
 
       # We have to be careful of the fact that readdir returns directory
       # entries in an unordered fashion.
@@ -2351,7 +2376,7 @@ sub list_leading_whitespace_with_strict_opts_bug3268 {
         }
       }
 
-      $expected = {
+      my $expected = {
         ' test.txt' => 1,
       };
 
@@ -2393,6 +2418,9 @@ sub list_leading_whitespace_with_strict_opts_bug3268 {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -2407,7 +2435,7 @@ sub list_symlink_bug3254 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -2573,19 +2601,9 @@ EOL
 
       my $resp_code = $client->response_code();
       my $resp_msg = $client->response_msg();
-
-      my $expected;
-
-      $expected = 226;
-      $self->assert($expected == $resp_code,
-        test_msg("Expected $expected, got $resp_code"));
-
-      $expected = 'Transfer complete';
-      $self->assert($expected eq $resp_msg,
-        test_msg("Expected '$expected', got '$resp_msg'"));
+      $self->assert_transfer_ok($resp_code, $resp_msg);
 
       $client->quote('CWD', '..');
-
       $client->quit();
     };
 
@@ -2612,6 +2630,9 @@ EOL
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -2626,7 +2647,7 @@ sub list_showsymlinks_on {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -2724,20 +2745,11 @@ sub list_showsymlinks_on {
 
       my $resp_code = $client->response_code();
       my $resp_msg = $client->response_msg();
-
-      my $expected;
-
-      $expected = 226;
-      $self->assert($expected == $resp_code,
-        test_msg("Expected $expected, got $resp_code"));
-
-      $expected = 'Transfer complete';
-      $self->assert($expected eq $resp_msg,
-        test_msg("Expected '$expected', got '$resp_msg'"));
+      $self->assert_transfer_ok($resp_code, $resp_msg);
 
       chomp($buf);
 
-      $expected = '^l\S+\s+\d+\s+\S+\s+\S+\s+\d+\s+\S+\s+\d+\s+\S+\s+(.*?)$';
+      my $expected = '^l\S+\s+\d+\s+\S+\s+\S+\s+\d+\s+\S+\s+\d+\s+\S+\s+(.*?)$';
       $self->assert(qr/$expected/, $buf,
         test_msg("Expected '$expected', got '$buf'"));
 
@@ -2774,6 +2786,9 @@ sub list_showsymlinks_on {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -2788,7 +2803,7 @@ sub list_glob_bug2367 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -2902,6 +2917,9 @@ sub list_glob_bug2367 {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -2916,7 +2934,7 @@ sub list_glob_legit_dir_name {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -3030,6 +3048,9 @@ sub list_glob_legit_dir_name {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -3044,7 +3065,7 @@ sub list_glob_legit_dir_name_bug3407 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -3158,6 +3179,9 @@ sub list_glob_legit_dir_name_bug3407 {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -3172,7 +3196,7 @@ sub list_opt_c {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -3317,6 +3341,9 @@ sub list_opt_c {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -3331,7 +3358,7 @@ sub list_opt_u {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -3474,6 +3501,9 @@ sub list_opt_u {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -3488,7 +3518,7 @@ sub list_dash_filename_bug3476 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -3611,6 +3641,9 @@ sub list_dash_filename_bug3476 {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -3625,7 +3658,7 @@ sub list_opt_noerrorifabsent_bug3506 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -3704,16 +3737,7 @@ sub list_opt_noerrorifabsent_bug3506 {
 
       my $resp_code = $client->response_code();
       my $resp_msg = $client->response_msg();
-
-      my $expected;
-
-      $expected = 226;
-      $self->assert($expected == $resp_code,
-        test_msg("Expected $expected, got $resp_code"));
-
-      $expected = 'Transfer complete';
-      $self->assert($expected eq $resp_msg,
-        test_msg("Expected '$expected', got '$resp_msg'"));
+      $self->assert_transfer_ok($resp_code, $resp_msg);
 
       my $res = {};
       my $lines = [split(/\n/, $buf)];
@@ -3752,6 +3776,9 @@ sub list_opt_noerrorifabsent_bug3506 {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -3766,7 +3793,7 @@ sub list_slashstar_bug3529 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -3869,16 +3896,7 @@ sub list_slashstar_bug3529 {
 
       my $resp_code = $client->response_code();
       my $resp_msg = $client->response_msg();
-
-      my $expected;
-
-      $expected = 226;
-      $self->assert($expected == $resp_code,
-        test_msg("Expected $expected, got $resp_code"));
-
-      $expected = 'Transfer complete';
-      $self->assert($expected eq $resp_msg,
-        test_msg("Expected '$expected', got '$resp_msg'"));
+      $self->assert_transfer_ok($resp_code, $resp_msg);
 
       $client->quit();
 
@@ -3892,13 +3910,14 @@ sub list_slashstar_bug3529 {
         }
       }
 
-      $expected = {
+      my $expected = {
         '/AAA' => 1,
         '/cmds.conf' => 1,
         '/cmds.group' => 1,
         '/cmds.passwd' => 1,
         '/cmds.pid' => 1,
         '/cmds.scoreboard' => 1,
+        '/cmds.scoreboard.lck' => 1,
         '/foo.txt' => 1,
       };
 
@@ -3940,6 +3959,9 @@ sub list_slashstar_bug3529 {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -3954,7 +3976,7 @@ sub list_star_bug3529 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -4055,16 +4077,7 @@ sub list_star_bug3529 {
 
       my $resp_code = $client->response_code();
       my $resp_msg = $client->response_msg();
-
-      my $expected;
-
-      $expected = 226;
-      $self->assert($expected == $resp_code,
-        test_msg("Expected $expected, got $resp_code"));
-
-      $expected = 'Transfer complete';
-      $self->assert($expected eq $resp_msg,
-        test_msg("Expected '$expected', got '$resp_msg'"));
+      $self->assert_transfer_ok($resp_code, $resp_msg);
 
       $client->quit();
 
@@ -4078,7 +4091,7 @@ sub list_star_bug3529 {
         }
       }
 
-      $expected = {
+      my $expected = {
         'AAA' => 1,
         'cmds.conf' => 1,
         'cmds.group' => 1,
@@ -4127,6 +4140,9 @@ sub list_star_bug3529 {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -4141,7 +4157,7 @@ sub list_opt_R {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -4293,6 +4309,602 @@ sub list_opt_R {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
+    die($ex);
+  }
+
+  unlink($log_file);
+}
+
+sub list_opt_R_self_symlinked_dir_bug3719 {
+  my $self = shift;
+  my $tmpdir = $self->{tmpdir};
+
+  my $config_file = "$tmpdir/cmds.conf";
+  my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
+  my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
+
+  my $log_file = test_get_logfile();
+
+  my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
+  my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
+
+  my $user = 'proftpd';
+  my $passwd = 'test';
+  my $group = 'ftpd';
+  my $home_dir = File::Spec->rel2abs($tmpdir);
+  my $uid = 500;
+  my $gid = 500;
+
+  # Make sure that, if we're running as root, that the home directory has
+  # permissions/privs set for the account we create
+  if ($< == 0) {
+    unless (chmod(0755, $home_dir)) {
+      die("Can't set perms on $home_dir to 0755: $!");
+    }
+
+    unless (chown($uid, $gid, $home_dir)) {
+      die("Can't set owner of $home_dir to $uid/$gid: $!");
+    }
+  }
+
+  # For this test, we need to create about 100 files in a sub directory.
+  my $test_dir = File::Spec->rel2abs("$tmpdir/sub.d");
+  mkpath($test_dir);
+
+  my $test_file_prefix = $test_dir;
+
+  my $dir_count = 10;
+  my $file_count = 10;
+
+  if ($ENV{TEST_VERBOSE}) {
+    print STDOUT "# Creating $dir_count directories in $tmpdir\n";
+  }
+
+  for (my $i = 1; $i <= $dir_count; $i++) {
+    my $sub_dir = sprintf("%04s", $i);
+    my $dir_path = "$home_dir/$sub_dir";
+
+    mkpath($dir_path);
+
+    if ($ENV{TEST_VERBOSE}) {
+      print STDOUT "# Creating $file_count files in $dir_path\n";
+    }
+
+    for (my $j = 1; $j <= $file_count; $j++) {
+      my $test_file = sprintf("%02s%02s", $i, $j);
+      my $file_path = "$dir_path/$test_file";
+
+      if (open(my $fh, "> $file_path")) {
+        close($fh);
+
+      } else {
+        die("Can't open $file_path: $!");
+      }
+    }
+  }
+
+  # Now create a directory symlink, in the home directory, pointing to itself.
+  # This self-symlink is what caused Bug#3719 - proftpd would loop endlessly.
+
+  my $cwd = getcwd();
+
+  unless (chdir($test_dir)) {
+    die("Can't chdir to $test_dir: $!");
+  }
+
+  unless (symlink('.', 'self.d')) {
+    die("Can't symlink '.' to 'self.d': $!");
+  }
+
+  unless (chdir($cwd)) {
+    die("Can't chdir to $cwd: $!");
+  }
+
+  auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
+    '/bin/bash');
+  auth_group_write($auth_group_file, $group, $gid, $user);
+
+  my $config = {
+    PidFile => $pid_file,
+    ScoreboardFile => $scoreboard_file,
+    SystemLog => $log_file,
+
+    AuthUserFile => $auth_user_file,
+    AuthGroupFile => $auth_group_file,
+
+    IfModules => {
+      'mod_delay.c' => {
+        DelayEngine => 'off',
+      },
+    },
+  };
+
+  my ($port, $config_user, $config_group) = config_write($config_file, $config);
+
+  # Open pipes, for use between the parent and child processes.  Specifically,
+  # the child will indicate when it's done with its test by writing a message
+  # to the parent.
+  my ($rfh, $wfh);
+  unless (pipe($rfh, $wfh)) {
+    die("Can't open pipe: $!");
+  }
+
+  my $ex;
+
+  # Fork child
+  $self->handle_sigchld();
+  defined(my $pid = fork()) or die("Can't fork: $!");
+  if ($pid) {
+    eval {
+      my $client = ProFTPD::TestSuite::FTP->new('127.0.0.1', $port);
+      $client->login($user, $passwd);
+
+      my $conn = $client->list_raw("-R");
+      unless ($conn) {
+        die("LIST failed: " . $client->response_code() . " " .
+          $client->response_msg());
+      }
+
+      my $buf;
+      my $tmp;
+
+      my $res = $conn->read($tmp, 32768, 25);
+      while ($res) {
+        $buf .= $tmp;
+        $tmp = undef;
+
+        $res = $conn->read($tmp, 32768, 25);
+      }
+
+      eval { $conn->close() };
+
+      $res = {};
+      my $lines = [split(/\n/, $buf)];
+      foreach my $line (@$lines) {
+        if ($line =~ /\s+(\S+)$/) {
+          $res->{$1} = 1;
+        }
+      }
+
+      my $list_count = scalar(keys(%$res));
+
+      # There are 10 directories, with 10 files in each.  That's 100 files.
+      # Plus 10 for the directory names themselves.  Plus 6 files for the
+      # config, scoreboard, etc, and one for the symlink.  That gives a total
+      # of 116 files expected.  The extra files are for the config file,
+      # scoreboard, etc.
+      my $expected_count = ($dir_count * $file_count) + 17;
+      unless ($list_count == $expected_count) {
+        die("LIST returned wrong number of entries (expected $expected_count, got $list_count)");
+      }
+    };
+
+    if ($@) {
+      $ex = $@;
+    }
+
+    $wfh->print("done\n");
+    $wfh->flush();
+
+  } else {
+    eval { server_wait($config_file, $rfh) };
+    if ($@) {
+      warn($@);
+      exit 1;
+    }
+
+    exit 0;
+  }
+
+  # Stop server
+  server_stop($pid_file);
+
+  $self->assert_child_ok($pid);
+
+  if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
+    die($ex);
+  }
+
+  unlink($log_file);
+}
+
+sub list_opt_R_self_complex_symlinked_dir_bug3719 {
+  my $self = shift;
+  my $tmpdir = $self->{tmpdir};
+
+  my $config_file = "$tmpdir/cmds.conf";
+  my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
+  my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
+
+  my $log_file = test_get_logfile();
+
+  my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
+  my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
+
+  my $user = 'proftpd';
+  my $passwd = 'test';
+  my $group = 'ftpd';
+  my $home_dir = File::Spec->rel2abs($tmpdir);
+  my $uid = 500;
+  my $gid = 500;
+
+  # Make sure that, if we're running as root, that the home directory has
+  # permissions/privs set for the account we create
+  if ($< == 0) {
+    unless (chmod(0755, $home_dir)) {
+      die("Can't set perms on $home_dir to 0755: $!");
+    }
+
+    unless (chown($uid, $gid, $home_dir)) {
+      die("Can't set owner of $home_dir to $uid/$gid: $!");
+    }
+  }
+
+  # For this test, we need to create about 100 files in a sub directory.
+  my $test_dir = File::Spec->rel2abs("$tmpdir/sub.d");
+  mkpath($test_dir);
+
+  my $test_file_prefix = $test_dir;
+
+  my $dir_count = 10;
+  my $file_count = 10;
+
+  if ($ENV{TEST_VERBOSE}) {
+    print STDOUT "# Creating $dir_count directories in $tmpdir\n";
+  }
+
+  for (my $i = 1; $i <= $dir_count; $i++) {
+    my $sub_dir = sprintf("%04s", $i);
+    my $dir_path = "$home_dir/$sub_dir";
+
+    mkpath($dir_path);
+
+    if ($ENV{TEST_VERBOSE}) {
+      print STDOUT "# Creating $file_count files in $dir_path\n";
+    }
+
+    for (my $j = 1; $j <= $file_count; $j++) {
+      my $test_file = sprintf("%02s%02s", $i, $j);
+      my $file_path = "$dir_path/$test_file";
+
+      if (open(my $fh, "> $file_path")) {
+        close($fh);
+
+      } else {
+        die("Can't open $file_path: $!");
+      }
+    }
+  }
+
+  # Now create a directory symlink, in the home directory, pointing to itself.
+  # This self-symlink is what caused Bug#3719 - proftpd would loop endlessly.
+
+  my $cwd = getcwd();
+
+  unless (chdir($test_dir)) {
+    die("Can't chdir to $test_dir: $!");
+  }
+
+  unless (symlink('../.././././.././', 'self.d')) {
+    die("Can't symlink '../.././././.././' to 'self.d': $!");
+  }
+
+  unless (chdir($cwd)) {
+    die("Can't chdir to $cwd: $!");
+  }
+
+  auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
+    '/bin/bash');
+  auth_group_write($auth_group_file, $group, $gid, $user);
+
+  my $config = {
+    PidFile => $pid_file,
+    ScoreboardFile => $scoreboard_file,
+    SystemLog => $log_file,
+
+    AuthUserFile => $auth_user_file,
+    AuthGroupFile => $auth_group_file,
+
+    IfModules => {
+      'mod_delay.c' => {
+        DelayEngine => 'off',
+      },
+    },
+  };
+
+  my ($port, $config_user, $config_group) = config_write($config_file, $config);
+
+  # Open pipes, for use between the parent and child processes.  Specifically,
+  # the child will indicate when it's done with its test by writing a message
+  # to the parent.
+  my ($rfh, $wfh);
+  unless (pipe($rfh, $wfh)) {
+    die("Can't open pipe: $!");
+  }
+
+  my $ex;
+
+  # Fork child
+  $self->handle_sigchld();
+  defined(my $pid = fork()) or die("Can't fork: $!");
+  if ($pid) {
+    eval {
+      my $client = ProFTPD::TestSuite::FTP->new('127.0.0.1', $port);
+      $client->login($user, $passwd);
+
+      my $conn = $client->list_raw("-R");
+      unless ($conn) {
+        die("LIST failed: " . $client->response_code() . " " .
+          $client->response_msg());
+      }
+
+      my $buf;
+      my $tmp;
+
+      my $res = $conn->read($tmp, 32768, 25);
+      while ($res) {
+        $buf .= $tmp;
+        $tmp = undef;
+
+        $res = $conn->read($tmp, 32768, 25);
+      }
+
+      eval { $conn->close() };
+
+      $res = {};
+      my $lines = [split(/\n/, $buf)];
+      foreach my $line (@$lines) {
+        if ($line =~ /\s+(\S+)$/) {
+          $res->{$1} = 1;
+        }
+      }
+
+      my $list_count = scalar(keys(%$res));
+
+      # There are 10 directories, with 10 files in each.  That's 100 files.
+      # Plus 10 for the directory names themselves.  Plus 6 files for the
+      # config, scoreboard, etc, and one for the symlink.  That gives a total
+      # of 116 files expected.  The extra files are for the config file,
+      # scoreboard, etc.
+      my $expected_count = ($dir_count * $file_count) + 17;
+      unless ($list_count == $expected_count) {
+        die("LIST returned wrong number of entries (expected $expected_count, got $list_count)");
+      }
+    };
+
+    if ($@) {
+      $ex = $@;
+    }
+
+    $wfh->print("done\n");
+    $wfh->flush();
+
+  } else {
+    eval { server_wait($config_file, $rfh) };
+    if ($@) {
+      warn($@);
+      exit 1;
+    }
+
+    exit 0;
+  }
+
+  # Stop server
+  server_stop($pid_file);
+
+  $self->assert_child_ok($pid);
+
+  if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
+    die($ex);
+  }
+
+  unlink($log_file);
+}
+
+sub list_opt_R_rel_symlinked_file_bug3719 {
+  my $self = shift;
+  my $tmpdir = $self->{tmpdir};
+
+  my $config_file = "$tmpdir/cmds.conf";
+  my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
+  my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
+
+  my $log_file = test_get_logfile();
+
+  my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
+  my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
+
+  my $user = 'proftpd';
+  my $passwd = 'test';
+  my $group = 'ftpd';
+  my $home_dir = File::Spec->rel2abs($tmpdir);
+  my $uid = 500;
+  my $gid = 500;
+
+  # Make sure that, if we're running as root, that the home directory has
+  # permissions/privs set for the account we create
+  if ($< == 0) {
+    unless (chmod(0755, $home_dir)) {
+      die("Can't set perms on $home_dir to 0755: $!");
+    }
+
+    unless (chown($uid, $gid, $home_dir)) {
+      die("Can't set owner of $home_dir to $uid/$gid: $!");
+    }
+  }
+
+  # For this test, we need to create about 100 files in a sub directory.
+  my $test_dir = File::Spec->rel2abs("$tmpdir/sub.d");
+  mkpath($test_dir);
+
+  my $test_file = File::Spec->rel2abs("$test_dir/test.txt");
+  if (open(my $fh, "> $test_file")) {
+    close($fh);
+
+  } else {
+    die("Can't open $test_file: $!");
+  }
+
+  my $test_file_prefix = $test_dir;
+
+  my $dir_count = 10;
+  my $file_count = 10;
+
+  if ($ENV{TEST_VERBOSE}) {
+    print STDOUT "# Creating $dir_count directories in $tmpdir\n";
+  }
+
+  for (my $i = 1; $i <= $dir_count; $i++) {
+    my $sub_dir = sprintf("%04s", $i);
+    my $dir_path = "$home_dir/$sub_dir";
+
+    mkpath($dir_path);
+
+    if ($ENV{TEST_VERBOSE}) {
+      print STDOUT "# Creating $file_count files in $dir_path\n";
+    }
+
+    for (my $j = 1; $j <= $file_count; $j++) {
+      my $test_file = sprintf("%02s%02s", $i, $j);
+      my $file_path = "$dir_path/$test_file";
+
+      if (open(my $fh, "> $file_path")) {
+        close($fh);
+
+      } else {
+        die("Can't open $file_path: $!");
+      }
+    }
+  }
+
+  my $cwd = getcwd();
+
+  unless (chdir($test_dir)) {
+    die("Can't chdir to $test_dir: $!");
+  }
+
+  unless (symlink('./test.txt', 'test.lnk')) {
+    die("Can't symlink './test.txt' to 'test.lnk': $!");
+  }
+
+  unless (chdir($cwd)) {
+    die("Can't chdir to $cwd: $!");
+  }
+
+  auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
+    '/bin/bash');
+  auth_group_write($auth_group_file, $group, $gid, $user);
+
+  my $config = {
+    PidFile => $pid_file,
+    ScoreboardFile => $scoreboard_file,
+    SystemLog => $log_file,
+
+    AuthUserFile => $auth_user_file,
+    AuthGroupFile => $auth_group_file,
+
+    IfModules => {
+      'mod_delay.c' => {
+        DelayEngine => 'off',
+      },
+    },
+  };
+
+  my ($port, $config_user, $config_group) = config_write($config_file, $config);
+
+  # Open pipes, for use between the parent and child processes.  Specifically,
+  # the child will indicate when it's done with its test by writing a message
+  # to the parent.
+  my ($rfh, $wfh);
+  unless (pipe($rfh, $wfh)) {
+    die("Can't open pipe: $!");
+  }
+
+  my $ex;
+
+  # Fork child
+  $self->handle_sigchld();
+  defined(my $pid = fork()) or die("Can't fork: $!");
+  if ($pid) {
+    eval {
+      my $client = ProFTPD::TestSuite::FTP->new('127.0.0.1', $port);
+      $client->login($user, $passwd);
+
+      my $conn = $client->list_raw("-R");
+      unless ($conn) {
+        die("LIST failed: " . $client->response_code() . " " .
+          $client->response_msg());
+      }
+
+      my $buf;
+      my $tmp;
+
+      my $res = $conn->read($tmp, 32768, 25);
+      while ($res) {
+        $buf .= $tmp;
+        $tmp = undef;
+
+        $res = $conn->read($tmp, 32768, 25);
+      }
+
+      eval { $conn->close() };
+
+      $res = {};
+      my $lines = [split(/\n/, $buf)];
+      foreach my $line (@$lines) {
+        if ($line =~ /\s+(\S+)$/) {
+          $res->{$1} = 1;
+        }
+      }
+
+      my $list_count = scalar(keys(%$res));
+
+      # There are 10 directories, with 10 files in each.  That's 100 files.
+      # Plus 10 for the directory names themselves.  Plus 6 files for the
+      # config, scoreboard, etc, and one for the symlink.  That gives a total
+      # of 116 files expected.  The extra files are for the config file,
+      # scoreboard, etc.
+      my $expected_count = ($dir_count * $file_count) + 19;
+      unless ($list_count == $expected_count) {
+        die("LIST returned wrong number of entries (expected $expected_count, got $list_count)");
+      }
+    };
+
+    if ($@) {
+      $ex = $@;
+    }
+
+    $wfh->print("done\n");
+    $wfh->flush();
+
+  } else {
+    eval { server_wait($config_file, $rfh) };
+    if ($@) {
+      warn($@);
+      exit 1;
+    }
+
+    exit 0;
+  }
+
+  # Stop server
+  server_stop($pid_file);
+
+  $self->assert_child_ok($pid);
+
+  if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 

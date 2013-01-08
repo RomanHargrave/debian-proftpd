@@ -23,7 +23,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #define TPL_VERSION 1.5
 
-static const char id[]="$Id: tpl.c,v 1.2 2011/04/30 23:04:12 castaglia Exp $";
+static const char id[]="$Id: tpl.c,v 1.4 2012/06/18 16:48:30 castaglia Exp $";
 
 
 #include <stdlib.h>  /* malloc */
@@ -54,7 +54,7 @@ typedef unsigned __int64 uint64_t;
 #endif
 
 
-#if ( defined __CYGWIN__ || defined __MINGW32__ || defined _WIN32 )
+#if ( defined __MINGW32__ || defined _WIN32 )
 #include "win/mman.h"   /* mmap */
 #else
 #include <sys/mman.h>   /* mmap */
@@ -1757,7 +1757,7 @@ static int tpl_mmap_file(char *filename, tpl_mmap_rec *mr) {
     }
 
     mr->text_sz = (size_t)stat_buf.st_size;  
-    mr->text = mmap(0, stat_buf.st_size, PROT_READ, MAP_PRIVATE, mr->fd, 0);
+    mr->text = mmap(0, mr->text_sz, PROT_READ, MAP_PRIVATE, mr->fd, 0);
     if (mr->text == MAP_FAILED) {
         close(mr->fd);
         tpl_hook.oops("Failed to mmap %s: %s\n", filename, strerror(errno));

@@ -22,6 +22,8 @@ our @CONFIG = qw(
 );
 
 our @FEATURES = qw(
+  feature_get_compiled_modules
+  feature_get_shared_modules
   feature_get_version
   feature_have_feature_enabled
   feature_have_module_compiled
@@ -29,12 +31,15 @@ our @FEATURES = qw(
 );
 
 our @RUNNING = qw(
+  server_restart
   server_start
   server_stop
   server_wait
 );
 
 our @TEST = qw(
+  test_append_logfile
+  test_get_logfile
   test_msg
 );
 
@@ -89,6 +94,10 @@ sub get_high_numbered_port {
 sub get_passwd {
   my $user_passwd = shift;
 
+  if ($user_passwd eq '') {
+    return '';
+  }
+
   # First, try to use MD5 hashing for passwords
   my $md5_salt = '$1$' . join('', (0..9, 'A'..'Z', 'a'..'z')[rand(62), rand(62), rand(62), rand(62), rand(62), rand(62), rand(62), rand(62)]);
 
@@ -140,7 +149,7 @@ sub auth_user_write {
   my $user_name = shift;
   croak("Missing user name argument") unless $user_name;
   my $user_passwd = shift;
-  croak("Missing user password argument") unless $user_passwd;
+  croak("Missing user password argument") unless defined($user_passwd);
   my $user_id = shift;
   croak("Missing user ID argument") unless defined($user_id);
   my $group_id = shift;
@@ -518,6 +527,44 @@ sub config_write {
   return 1;
 }
 
+sub feature_get_shared_modules {
+  my $proftpd_bin = get_proftpd_bin();
+
+  my $shared_modules = [];
+
+  my $configure_args;
+  if (open(my $cmdh, "$proftpd_bin -V |")) {
+    while (my $line = <$cmdh>) {
+      chomp($line);
+
+      next unless $line =~ /^\s+configure (.*?)$/;
+
+      $configure_args = $1;
+      last;
+    }
+
+    close($cmdh);
+
+    my $args = [split(' ', $configure_args)];
+
+    foreach my $arg (@$args) {
+      $arg =~ s/^'//;
+      $arg =~ s/'$//;
+
+      if ($arg =~ /^\-\-with\-shared=(.*?)$/) {
+        my $module_list = $1;
+
+        $shared_modules = [split(':', $module_list)];
+      }
+    }
+
+    return $shared_modules;
+
+  } else {
+    croak("Error listing features");
+  }
+}
+
 sub feature_get_version {
   my $proftpd_bin = get_proftpd_bin();
 
@@ -567,6 +614,13 @@ sub feature_have_feature_enabled {
 
       if ($flag eq '+') {
         push(@$feat_list, $feature);
+
+        # Special-case hack for FIPS-enabled OpenSSL
+        if ($feature =~ /OpenSSL/i) {
+          if ($line =~ /\(FIPS enabled\)/) {
+            push(@$feat_list, "OpenSSL_FIPS");             
+          }
+        }
       }
     }
 
@@ -580,14 +634,11 @@ sub feature_have_feature_enabled {
   }
 }
 
-sub feature_have_module_compiled {
-  my $module = shift;
-
+sub feature_get_compiled_modules {
   my $proftpd_bin = get_proftpd_bin();
+  my $mod_list = [];
 
   if (open(my $cmdh, "$proftpd_bin -l |")) {
-    my $mod_list;
-
     while (my $line = <$cmdh>) {
       chomp($line);
 
@@ -599,13 +650,19 @@ sub feature_have_module_compiled {
 
     close($cmdh);
 
-    my $matches = grep { /^$module$/ } @$mod_list;
-
-    return $matches;
-
   } else {
     croak("Error listing compiled modules");
   }
+
+  return $mod_list;
+}
+
+sub feature_have_module_compiled {
+  my $module = shift;
+
+  my $mod_list = feature_get_compiled_modules();
+  my $matches = grep { /^$module$/ } @$mod_list;
+  return $matches;
 }
 
 sub feature_have_module_loaded {
@@ -644,23 +701,63 @@ sub feature_have_module_loaded {
   }
 }
 
+sub server_restart {
+  my $pid_file = shift;
+  croak("Missing PID file argument") unless $pid_file;
+
+  my $pid;
+  if (open(my $fh, "< $pid_file")) {
+    $pid = <$fh>;
+    chomp($pid);
+    close($fh);
+
+  } else {
+    die("Can't read $pid_file: $!");
+  }
+
+  my $cmd = "kill -HUP $pid";
+
+  if ($ENV{TEST_VERBOSE}) {
+    print STDERR "Restarting server: $cmd\n";
+  }
+
+  my @output = `$cmd`;
+}
+
 sub server_start {
   my $config_file = shift;
   croak("Missing config file argument") unless $config_file;
-  my $debug_level = shift;
   my $pid_file = shift;
+  my $server_opts = shift;
+  $server_opts = {} unless defined($server_opts);
 
   # Make sure that the config file is an absolute path
   my $abs_config_file = File::Spec->rel2abs($config_file);
 
   my $proftpd_bin = get_proftpd_bin();
 
-  my $cmd = "$proftpd_bin -q -c $abs_config_file";
+  my $cmd = '';
 
-  if ($debug_level) {
-    $cmd .= " -d $debug_level";
+  if (defined($server_opts->{env})) {
+    my $envs = $server_opts->{env};
 
-  } elsif ($ENV{TEST_VERBOSE}) {
+    while (my ($key, $value) = each(%$envs)) {
+      # Assume Bourne-shell syntax
+      $cmd .= "$key=$value ";
+    }
+  }
+
+  $cmd .= "$proftpd_bin -q -c $abs_config_file";
+
+  if (defined($server_opts->{define})) {
+    my $defines = $server_opts->{define};
+
+    foreach my $define (@$defines) {
+      $cmd .= " -D$define";
+    }
+  }
+
+  if ($ENV{TEST_VERBOSE}) {
     $cmd .= " -d10";
 
   } else {
@@ -754,10 +851,29 @@ sub server_wait {
   my $config_file = shift;
   my $rfh = shift;
   $server_wait_timeout = shift;
-  $server_wait_timeout = 10 unless defined($server_wait_timeout);
+  my $server_opts = {};
+
+  # Check to see if the timeout argument is a hashref (for additional
+  # server_start parameters) or not.  If not, it's just the timeout.
+
+  if (defined($server_wait_timeout)) {
+    if (ref($server_wait_timeout) eq 'HASH') {
+      $server_opts = $server_wait_timeout;
+
+      if (defined($server_opts->{timeout})) {
+        $server_wait_timeout = $server_opts->{timeout};
+
+      } else {
+        $server_wait_timeout = 10;
+      }
+    }
+
+  } else {
+    $server_wait_timeout = 10;
+  }
 
   # Start server
-  server_start($config_file);
+  server_start($config_file, undef, $server_opts);
 
   $SIG{ALRM} = \&server_wait_alarm;
   alarm($server_wait_timeout);
@@ -774,6 +890,59 @@ sub server_wait {
   alarm(0);
   $SIG{ALRM} = 'DEFAULT';
   return 1;
+}
+
+sub test_append_logfile {
+  my $log_file = shift;
+  my $ex = shift;
+
+  my ($infh, $outfh); 
+
+  my $out_file = File::Spec->rel2abs('tests.log');
+
+  unless (open($outfh, ">> $out_file")) {
+    die("Can't append to $out_file: $!");
+  }
+
+  unless (open($infh, "< $log_file")) {
+    die("Can't read $log_file: $!");
+  }
+
+  my ($pkg, $filename, $lineno, $func) = (caller(1))[0, 1, 2, 3];
+
+  print $outfh "-----BEGIN $func-----\n";
+
+  while (my $line = <$infh>) {
+    print $outfh $line;
+  }
+
+  # If an exception was provided, write that out to the log file, too.
+  if (defined($ex)) {
+    print $outfh "\nException:\n\t$ex\n";
+  }
+
+  print $outfh "-----END $func-----\n";
+
+  close($infh);
+
+  unless (close($outfh)) {
+    die("Can't write $out_file: $!");
+  }
+}
+
+sub test_get_logfile {
+  # Returns the testcase-specific logfile name to use
+
+  my ($pkg, $filename, $lineno, $func) = (caller(1))[0, 1, 2, 3];
+
+  # We use the function name as the basis for the testcase-specific log
+  # file name.  We ignore the first two parts (which are always 'ProFTPD' and
+  # 'Tests'), and merge the rest into a log file name.
+
+  my @parts = split('::', $func);
+  my $logfile = File::Spec->rel2abs(join('_', @parts) . '.log');
+
+  return $logfile;
 }
 
 sub test_msg {

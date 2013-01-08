@@ -1,6 +1,6 @@
 /*
  * ProFTPD - mod_sftp SCP
- * Copyright (c) 2008-2011 TJ Saunders
+ * Copyright (c) 2008-2013 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: scp.c,v 1.64 2011/09/24 21:56:47 castaglia Exp $
+ * $Id: scp.c,v 1.77 2013/01/03 21:51:51 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -34,6 +34,11 @@
 #include "disconnect.h"
 
 #define SFTP_SCP_ST_MODE_MASK	(S_ISUID|S_ISGID|S_ISVTX|S_IRWXU|S_IRWXG|S_IRWXO)
+
+/* Define a maximum limit on the amount of data we buffer when handling
+ * fragmented control messages.
+ */
+#define SFTP_SCP_MAX_CTL_LEN	(PR_TUNABLE_PATH_MAX + 256)
 
 struct scp_path {
   char *path;
@@ -65,6 +70,11 @@ struct scp_path {
   const char *best_path;
   int recvd_finfo;
   int recvd_data;
+
+  /* For reading of control messages. */
+  pool *ctl_pool;
+  unsigned char *ctl_data;
+  uint32_t ctl_datalen;
 
   /* For the reading of bytes of files. */
   off_t recvlen;
@@ -286,7 +296,7 @@ static void reset_path(struct scp_path *sp) {
   sp->wrote_errors = FALSE;
 }
 
-static int read_confirm(struct ssh2_packet *pkt, char **buf,
+static int read_confirm(struct ssh2_packet *pkt, unsigned char **buf,
     uint32_t *buflen) {
   char code;
 
@@ -333,7 +343,7 @@ static int read_confirm(struct ssh2_packet *pkt, char **buf,
 
 static int write_confirm(pool *p, uint32_t channel_id, int code,
     const char *msg) {
-  char *buf, *ptr;
+  unsigned char *buf, *ptr;
   uint32_t buflen, bufsz;
 
   /* XXX Is this big enough?  Too big? */
@@ -360,7 +370,8 @@ static int write_confirm(pool *p, uint32_t channel_id, int code,
     errlen = strlen(errstr);
 
     sftp_msg_write_byte(&buf, &buflen, code);
-    sftp_msg_write_data(&buf, &buflen, errstr, errlen, FALSE);
+    sftp_msg_write_data(&buf, &buflen, (const unsigned char *) errstr, errlen,
+      FALSE);
   }
 
   return sftp_channel_write_data(p, channel_id, ptr, (bufsz - buflen));
@@ -368,8 +379,72 @@ static int write_confirm(pool *p, uint32_t channel_id, int code,
 
 /* Functions for receiving files from the client. */
 
+static int recv_ctl(uint32_t channel_id, struct scp_path *sp,
+    unsigned char *data, uint32_t datalen,
+    unsigned char **ctl_data, uint32_t *ctl_datalen) {
+  register int i;
+  int have_newline = FALSE;
+  char *tmp;
+  uint32_t tmplen;
+
+  for (i = datalen-1; i >= 0; i--) {
+    if (data[i] == '\n') {
+      have_newline = TRUE;
+      break;
+    }
+  }
+
+  if (sp->ctl_data == NULL) {
+    if (have_newline == TRUE) {
+      *ctl_data = data;
+      *ctl_datalen = datalen;
+
+      return 1;
+    }
+
+    sp->ctl_pool = pr_pool_create_sz(scp_session->pool, 128);
+    sp->ctl_datalen = datalen;
+    sp->ctl_data = palloc(sp->ctl_pool, sp->ctl_datalen);
+    memmove(sp->ctl_data, data, datalen);
+
+    return 0;
+  }
+
+  /* Add the given data to the existing cache of data. */
+  tmplen = sp->ctl_datalen + datalen;
+  tmp = palloc(sp->ctl_pool, tmplen);
+  memmove(tmp, sp->ctl_data, sp->ctl_datalen);
+  memmove(tmp + sp->ctl_datalen, data, datalen);
+
+  sp->ctl_data = (unsigned char *) tmp;
+  sp->ctl_datalen = tmplen;
+
+  /* Now, if we saw a newline, we can return all of the cached data as the
+   * complete control message.
+   */
+  if (have_newline == TRUE) {
+    *ctl_data = sp->ctl_data;
+    *ctl_datalen = sp->ctl_datalen;
+
+    sp->ctl_data = NULL;
+    sp->ctl_datalen = 0;
+    destroy_pool(sp->ctl_pool);
+    sp->ctl_pool = NULL;
+    return 1;
+  }
+
+  if (sp->ctl_datalen >= SFTP_SCP_MAX_CTL_LEN) {
+    write_confirm(sp->ctl_pool, channel_id, 1,
+      "max control message size exceeded");
+    return 1;
+  }
+
+  /* Otherwise, we need to aggregate more data from the client. */
+  return 0;
+}
+
 static int recv_errors(pool *p, uint32_t channel_id, struct scp_path *sp,
-    char *data, uint32_t datalen) {
+    unsigned char *data, uint32_t datalen) {
 
   /* Check for error messages from the client first. */
   if (data[0] == '\01') {
@@ -383,11 +458,11 @@ static int recv_errors(pool *p, uint32_t channel_id, struct scp_path *sp,
     }
 
     if (i < datalen) {
-      msg = pstrndup(p, &(data[1]), i + 1);
+      msg = pstrndup(p, (char *) &(data[1]), i + 1);
 
     } else {
       msg = pcalloc(p, i + 1);
-        memcpy(msg, &(data[1]), i);
+      memcpy(msg, &(data[1]), i);
     }
 
     pr_trace_msg(trace_channel, 3,
@@ -412,16 +487,26 @@ static int recv_errors(pool *p, uint32_t channel_id, struct scp_path *sp,
 }
 
 static int recv_timeinfo(pool *p, uint32_t channel_id, struct scp_path *sp,
-    char *data, uint32_t datalen) {
+    unsigned char *buf, uint32_t buflen, unsigned char **remain,
+    uint32_t *remainlen) {
   register unsigned int i;
-  char *msg, *ptr = NULL, *tmp = NULL;
+  unsigned char *data = NULL, *msg, *ptr = NULL;
+  uint32_t datalen = 0;
+  char *tmp = NULL;
+  int res;
+
+  res = recv_ctl(channel_id, sp, buf, buflen, &data, &datalen);
+  if (res != 1) {
+    return res;
+  }
 
   if (data[0] != 'T') {
-    pr_trace_msg(trace_channel, 2, "expected T control message, got '%c'",
-      data[0]);
-    write_confirm(p, channel_id, 1,
-      pstrcat(p, sp->path, ": expected control message", NULL));
-    return 1;
+    /* Not a timeinfo message; let someone else process this. */
+    *remain = data;
+    *remainlen = datalen;
+
+    errno = EINVAL;
+    return -1;
   }
 
   for (i = 1; i < datalen; i++) {
@@ -438,31 +523,31 @@ static int recv_timeinfo(pool *p, uint32_t channel_id, struct scp_path *sp,
 
   pr_trace_msg(trace_channel, 5, "'%s' control message: T%s", sp->path, msg);
 
-  sp->times[1].tv_sec = strtoul(msg, &tmp, 10);
+  sp->times[1].tv_sec = strtoul((char *) msg, &tmp, 10);
   if (tmp == NULL ||
       *tmp != ' ') {
     write_confirm(p, channel_id, 1, "mtime secs not delimited");
     return 1;
   }
 
-  msg = tmp + 1;
-  sp->times[1].tv_usec = strtoul(msg, &tmp, 10);
+  msg = ((unsigned char *) tmp) + 1;
+  sp->times[1].tv_usec = strtoul((char *) msg, &tmp, 10);
   if (tmp == NULL ||
       *tmp != ' ') {
     write_confirm(p, channel_id, 1, "mtime usecs not delimited");
     return 1;
   }
 
-  msg = tmp + 1;
-  sp->times[0].tv_sec = strtoul(msg, &tmp, 10);
+  msg = ((unsigned char *) tmp) + 1;
+  sp->times[0].tv_sec = strtoul((char *) msg, &tmp, 10);
   if (tmp == NULL ||
       *tmp != ' ') {
     write_confirm(p, channel_id, 1, "atime secs not delimited");
     return 1;
   }
 
-  msg = tmp + 1;
-  sp->times[0].tv_usec = strtoul(msg, &tmp, 10);
+  msg = ((unsigned char *) tmp) + 1;
+  sp->times[0].tv_usec = strtoul((char *) msg, &tmp, 10);
   if (tmp == NULL ||
       *tmp != '\0') {
     write_confirm(p, channel_id, 1, "atime usecs not delimited");
@@ -634,11 +719,19 @@ static int recv_filename(pool *p, uint32_t channel_id, char *name_str,
 }
 
 static int recv_finfo(pool *p, uint32_t channel_id, struct scp_path *sp,
-    char *data, uint32_t datalen) {
+    unsigned char *buf, uint32_t buflen) {
   register unsigned int i;
-  char *hiddenstore_path = NULL, *msg, *ptr = NULL;
-  int have_dir = FALSE;
+  char *hiddenstore_path = NULL;
+  unsigned char *data = NULL, *msg;
+  uint32_t datalen = 0;
+  char *ptr = NULL;
+  int have_dir = FALSE, res;
   cmd_rec *cmd = NULL;
+
+  res = recv_ctl(channel_id, sp, buf, buflen, &data, &datalen);
+  if (res != 1) {
+    return res;
+  }
 
   switch (data[0]) {
     case 'C':
@@ -668,7 +761,7 @@ static int recv_finfo(pool *p, uint32_t channel_id, struct scp_path *sp,
 
   for (i = 1; i < datalen; i++) {
     if (data[i] == '\n') {
-      ptr = &data[i++];
+      ptr = (char *) &data[i++];
       break;
     }
   }
@@ -681,9 +774,10 @@ static int recv_finfo(pool *p, uint32_t channel_id, struct scp_path *sp,
   pr_trace_msg(trace_channel, 5, "'%s' control message: %c%s", sp->path,
     !have_dir ? 'C' : 'D', msg);
 
-  ptr = msg;
-  if (recv_perms(p, channel_id, ptr, &sp->perms) < 0)
+  ptr = (char *) msg;
+  if (recv_perms(p, channel_id, ptr, &sp->perms) < 0) {
     return 1;
+  }
 
   ptr = strchr(ptr, ' ');
   if (ptr == NULL) {
@@ -696,8 +790,9 @@ static int recv_finfo(pool *p, uint32_t channel_id, struct scp_path *sp,
 
   /* Advance past the space delimiter. */
   ptr++;
-  if (recv_filesz(p, channel_id, ptr, &sp->filesz) < 0)
+  if (recv_filesz(p, channel_id, ptr, &sp->filesz) < 0) {
     return 1;
+  }
 
   ptr = strchr(ptr, ' ');
   if (ptr == NULL) {
@@ -711,8 +806,9 @@ static int recv_finfo(pool *p, uint32_t channel_id, struct scp_path *sp,
 
   /* Advance past the space delimiter. */
   ptr++;
-  if (recv_filename(p, channel_id, ptr, sp) < 0)
+  if (recv_filename(p, channel_id, ptr, sp) < 0) {
     return 1;
+  }
 
   sp->recvd_finfo = TRUE;
 
@@ -731,7 +827,7 @@ static int recv_finfo(pool *p, uint32_t channel_id, struct scp_path *sp,
          * recursive directory uploads via SCP?
          */
 
-        if (pr_fsio_mkdir(sp->filename, 0777) < 0) {
+        if (pr_fsio_smkdir(p, sp->filename, 0777, (uid_t) -1, (gid_t) -1) < 0) {
           xerrno = errno;
 
           (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
@@ -743,6 +839,8 @@ static int recv_finfo(pool *p, uint32_t channel_id, struct scp_path *sp,
           errno = xerrno;
           return 1;
         }
+
+        sftp_misc_chown_path(sp->filename);
 
       } else {
         (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
@@ -814,9 +912,11 @@ static int recv_finfo(pool *p, uint32_t channel_id, struct scp_path *sp,
   if (exists(sp->best_path)) {
     if (pr_table_add(cmd->notes, "mod_xfer.file-modified",
         pstrdup(cmd->pool, "true"), 0) < 0) {
-      pr_log_pri(PR_LOG_NOTICE,
-        "notice: error adding 'mod_xfer.file-modified' note: %s",
-        strerror(errno));
+      if (errno != EEXIST) {
+        pr_log_pri(PR_LOG_NOTICE,
+          "notice: error adding 'mod_xfer.file-modified' note: %s",
+          strerror(errno));
+      }
     }
 
     sp->file_existed = TRUE;
@@ -895,25 +995,64 @@ static int recv_finfo(pool *p, uint32_t channel_id, struct scp_path *sp,
 
   pr_fsio_set_block(sp->fh);
 
-  sftp_misc_handle_chown(sp->fh);
+  sftp_misc_chown_file(sp->fh);
 
   write_confirm(p, channel_id, 0, NULL);
   return 0;
 }
 
 static int recv_data(pool *p, uint32_t channel_id, struct scp_path *sp,
-    char *data, uint32_t datalen) {
+    unsigned char *data, uint32_t datalen) {
   uint32_t writelen;
+  config_rec *c;
+  off_t nbytes_max_store = 0;
+
+  /* Check MaxStoreFileSize */
+  c = find_config(get_dir_ctxt(p, sp->fh->fh_path), CONF_PARAM,
+    "MaxStoreFileSize", FALSE);
+  if (c != NULL) {
+    nbytes_max_store = *((off_t *) c->argv[0]);
+  }
 
   writelen = datalen;
   if (writelen > (sp->filesz - sp->recvlen)) {
-    writelen = (sp->filesz - sp->recvlen);
+    writelen = (uint32_t) (sp->filesz - sp->recvlen);
+  }
+
+  if (nbytes_max_store > 0) {
+    if (sp->recvlen > nbytes_max_store) {
+#if defined(EFBIG)
+        int xerrno = EFBIG;
+#elif defined(ENOSPC)
+        int xerrno = ENOSPC;
+#else
+        int xerno = EIO;
+#endif
+
+        pr_log_pri(PR_LOG_INFO, "MaxStoreFileSize (%" PR_LU " %s) reached: "
+          "aborting transfer of '%s'", (pr_off_t) nbytes_max_store,
+          nbytes_max_store != 1 ? "bytes" : "byte", sp->fh->fh_path);
+
+        (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+          "error writing %lu bytes to '%s': %s "
+          "(MaxStoreFileSize %" PR_LU " exceeded)", (unsigned long) writelen,
+          sp->fh->fh_path, strerror(xerrno), (pr_off_t) nbytes_max_store);
+
+        write_confirm(p, channel_id, 1,
+          pstrcat(p, sp->filename, ": write error: ", strerror(xerrno), NULL));
+
+        pr_fsio_close(sp->fh);
+        sp->fh = NULL;
+
+        errno = xerrno;
+        return 1;
+    }
   }
 
   if (writelen > 0) {
     while (TRUE) {
       /* XXX Do we need to properly handle short writes here? */
-      if (pr_fsio_write(sp->fh, data, writelen) != writelen) {
+      if (pr_fsio_write(sp->fh, (char *) data, writelen) != writelen) {
         int xerrno = errno;
 
         if (xerrno == EINTR ||
@@ -973,12 +1112,25 @@ static int recv_data(pool *p, uint32_t channel_id, struct scp_path *sp,
 }
 
 static int recv_eod(pool *p, uint32_t channel_id, struct scp_path *sp,
-    char *data, uint32_t datalen) {
+    unsigned char *buf, uint32_t buflen, unsigned char **remain,
+    uint32_t *remainlen) {
   struct scp_path *parent_sp;
-  int ok = TRUE;
+  unsigned char *data = NULL;
+  uint32_t datalen = 0;
+  int ok = TRUE, res;
+
+  res = recv_ctl(channel_id, sp, buf, buflen, &data, &datalen);
+  if (res != 1) {
+    return res;
+  }
 
   if (data[0] != 'E') {
-    return 0;
+    /* Not an EOD message; let someone else process this. */
+    *remain = data;
+    *remainlen = datalen;
+
+    errno = EINVAL;
+    return -1;
   }
 
   pr_trace_msg(trace_channel, 5, "'%s' control message: E", sp->path);
@@ -1029,14 +1181,15 @@ static int recv_eod(pool *p, uint32_t channel_id, struct scp_path *sp,
  * receive it (due to some error).
  */
 static int recv_path(pool *p, uint32_t channel_id, struct scp_path *sp,
-    char *data, uint32_t datalen) {
+    unsigned char *data, uint32_t datalen) {
   int res;
   cmd_rec *cmd = NULL;
 
   if (!sp->checked_errors) {
     res = recv_errors(p, channel_id, sp, data, datalen);
-    if (res == 1)
+    if (res == 1) {
       return 1;
+    }
   }
 
   if (!sp->have_mode) {
@@ -1097,8 +1250,15 @@ static int recv_path(pool *p, uint32_t channel_id, struct scp_path *sp,
    */
   if (sp->parent_dir != NULL &&
       sp->recvd_finfo == FALSE &&
-      sp->recvlen == 0) {
-    res = recv_eod(p, channel_id, sp, data, datalen);
+      (sp->recvlen == 0 || sp->recvd_data)) {
+    unsigned char *remain = NULL;
+    uint32_t remainlen = 0;
+
+    res = recv_eod(p, channel_id, sp, data, datalen, &remain, &remainlen);
+    if (res == 0) {
+      return res;
+    }
+
     if (res == 1) {
       struct scp_path *parent_dir = NULL;
 
@@ -1118,11 +1278,30 @@ static int recv_path(pool *p, uint32_t channel_id, struct scp_path *sp,
        */
       return 1;
     }
+
+    data = remain;
+    datalen = remainlen;
   }
 
   if ((scp_opts & SFTP_SCP_OPT_PRESERVE) &&
-      !sp->recvd_timeinfo) {
-    return recv_timeinfo(p, channel_id, sp, data, datalen);
+      !sp->recvd_timeinfo &&
+      !sp->recvd_finfo) {
+    unsigned char *remain = NULL;
+    uint32_t remainlen = 0;
+
+    /* It possible that this is not a timeinfo message; we need to be
+     * prepared for this.  PuTTY, for example, when recursively uploading
+     * a directory with the -p (preserve time) option enabled, does NOT
+     * send the timeinfo message, whereas OpenSSH's scp(1) does.
+     */
+    res = recv_timeinfo(p, channel_id, sp, data, datalen, &remain, &remainlen);
+    if (res < 0) {
+      data = remain;
+      datalen = remainlen;
+
+    } else {
+      return res;
+    }
   }
 
   if (!sp->recvd_finfo) {
@@ -1131,8 +1310,17 @@ static int recv_path(pool *p, uint32_t channel_id, struct scp_path *sp,
 
   if (!sp->recvd_data &&
       sp->recvlen != sp->filesz) {
-    if (cmd == NULL)
+    if (cmd == NULL) {
       cmd = scp_cmd_alloc(p, C_STOR, sp->best_path);
+
+      if (pr_table_add(cmd->notes, "mod_xfer.store-path",
+          pstrdup(p, sp->best_path), 0) < 0) {
+        if (errno != EEXIST) {
+          (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+            "error adding 'mod_xfer.store-path: %s", strerror(errno));
+        }
+      }
+    }
 
     pr_throttle_init(cmd);
 
@@ -1141,8 +1329,9 @@ static int recv_path(pool *p, uint32_t channel_id, struct scp_path *sp,
      * to continue one to the end-of-path processing.
      */
     res = recv_data(p, channel_id, sp, data, datalen);
-    if (res != 1)
+    if (res != 1) {
       return res;
+    }
   }
 
   /* The uploaded file may be smaller than an existing file; call
@@ -1261,15 +1450,26 @@ static int recv_path(pool *p, uint32_t channel_id, struct scp_path *sp,
     /* We only send this if there were no end-of-path handling errors. */
     write_confirm(p, channel_id, 0, NULL);
 
-    if (cmd == NULL)
+    if (cmd == NULL) {
       cmd = scp_cmd_alloc(p, C_STOR, sp->best_path);
+
+      if (pr_table_add(cmd->notes, "mod_xfer.store-path",
+          pstrdup(p, sp->best_path), 0) < 0) {
+        if (errno != EEXIST) {
+          (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+            "error adding 'mod_xfer.store-path: %s", strerror(errno));
+        }
+      }
+    }
 
     if (sp->file_existed) {
       if (pr_table_add(cmd->notes, "mod_xfer.file-modified",
           pstrdup(cmd->pool, "true"), 0) < 0) {
-        pr_log_pri(PR_LOG_NOTICE,
-          "notice: error adding 'mod_xfer.file-modified' note: %s",
-          strerror(errno));
+        if (errno != EEXIST) {
+          pr_log_pri(PR_LOG_NOTICE,
+            "notice: error adding 'mod_xfer.file-modified' note: %s",
+            strerror(errno));
+        }
       }
     }
 
@@ -1277,8 +1477,17 @@ static int recv_path(pool *p, uint32_t channel_id, struct scp_path *sp,
     (void) pr_cmd_dispatch_phase(cmd, LOG_CMD, 0);
 
   } else {
-    if (cmd == NULL)
+    if (cmd == NULL) {
       cmd = scp_cmd_alloc(p, C_STOR, sp->best_path);
+
+      if (pr_table_add(cmd->notes, "mod_xfer.store-path",
+          pstrdup(p, sp->best_path), 0) < 0) {
+        if (errno != EEXIST) {
+          (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+            "error adding 'mod_xfer.store-path: %s", strerror(errno));
+        }
+      }
+    }
 
     if (sp->file_existed) {
       if (pr_table_add(cmd->notes, "mod_xfer.file-modified",
@@ -1301,7 +1510,7 @@ static int recv_path(pool *p, uint32_t channel_id, struct scp_path *sp,
 static int send_timeinfo(pool *p, uint32_t channel_id, struct scp_path *sp,
     struct stat *st) {
   int res;
-  char ctrl_msg[64];
+  unsigned char ctrl_msg[64];
   size_t ctrl_msglen;
 
   memset(ctrl_msg, '\0', sizeof(ctrl_msg));
@@ -1315,15 +1524,15 @@ static int send_timeinfo(pool *p, uint32_t channel_id, struct scp_path *sp,
    *  0       (future proof field for sending atime usecs)
    */
 
-  snprintf(ctrl_msg, sizeof(ctrl_msg), "T%lu 0 %lu 0",
+  snprintf((char *) ctrl_msg, sizeof(ctrl_msg), "T%lu 0 %lu 0",
     (unsigned long) (st->st_mtime > 0 ? st->st_mtime : 0),
     (unsigned long) (st->st_atime > 0 ? st->st_atime : 0));
 
   pr_trace_msg(trace_channel, 3, "sending '%s' T (timestamps): %s", sp->path,
     ctrl_msg);
 
-  ctrl_msg[strlen(ctrl_msg)] = '\n';
-  ctrl_msglen = strlen(ctrl_msg);
+  ctrl_msg[strlen((char *) ctrl_msg)] = '\n';
+  ctrl_msglen = strlen((char *) ctrl_msg);
 
   need_confirm = TRUE;
 
@@ -1338,7 +1547,7 @@ static int send_timeinfo(pool *p, uint32_t channel_id, struct scp_path *sp,
 static int send_dirinfo(pool *p, uint32_t channel_id, struct scp_path *sp,
     struct stat *st) {
   int res;
-  char ctrl_msg[1536];
+  unsigned char ctrl_msg[1536];
   size_t ctrl_msglen;
   char *tmp;
 
@@ -1354,14 +1563,14 @@ static int send_dirinfo(pool *p, uint32_t channel_id, struct scp_path *sp,
   }
 
   memset(ctrl_msg, '\0', sizeof(ctrl_msg));
-  snprintf(ctrl_msg, sizeof(ctrl_msg), "D%04o 0 %.1024s",
+  snprintf((char *) ctrl_msg, sizeof(ctrl_msg), "D%04o 0 %.1024s",
     (unsigned int) (st->st_mode & SFTP_SCP_ST_MODE_MASK), tmp);
 
   pr_trace_msg(trace_channel, 3, "sending '%s' D (directory): %s", sp->path,
     ctrl_msg);
 
-  ctrl_msg[strlen(ctrl_msg)] = '\n';
-  ctrl_msglen = strlen(ctrl_msg);
+  ctrl_msg[strlen((char *) ctrl_msg)] = '\n';
+  ctrl_msglen = strlen((char *) ctrl_msg);
 
   need_confirm = TRUE;
 
@@ -1376,7 +1585,7 @@ static int send_dirinfo(pool *p, uint32_t channel_id, struct scp_path *sp,
 static int send_finfo(pool *p, uint32_t channel_id, struct scp_path *sp,
     struct stat *st) {
   int res;
-  char ctrl_msg[1536];
+  unsigned char ctrl_msg[1536];
   size_t ctrl_msglen;
   char *tmp;
 
@@ -1392,15 +1601,15 @@ static int send_finfo(pool *p, uint32_t channel_id, struct scp_path *sp,
   }
 
   memset(ctrl_msg, '\0', sizeof(ctrl_msg));
-  snprintf(ctrl_msg, sizeof(ctrl_msg), "C%04o %" PR_LU " %.1024s",
+  snprintf((char *) ctrl_msg, sizeof(ctrl_msg), "C%04o %" PR_LU " %.1024s",
     (unsigned int) (st->st_mode & SFTP_SCP_ST_MODE_MASK),
     (pr_off_t) st->st_size, tmp);
 
   pr_trace_msg(trace_channel, 3, "sending '%s' C (info): %s", sp->path,
     ctrl_msg);
 
-  ctrl_msg[strlen(ctrl_msg)] = '\n';
-  ctrl_msglen = strlen(ctrl_msg);
+  ctrl_msg[strlen((char *) ctrl_msg)] = '\n';
+  ctrl_msglen = strlen((char *) ctrl_msg);
 
   need_confirm = TRUE;
 
@@ -1415,7 +1624,7 @@ static int send_finfo(pool *p, uint32_t channel_id, struct scp_path *sp,
 static int send_data(pool *p, uint32_t channel_id, struct scp_path *sp,
     struct stat *st) {
   int res;
-  char *chunk;
+  unsigned char *chunk;
   size_t chunksz;
   long chunklen;
 
@@ -1446,7 +1655,7 @@ static int send_data(pool *p, uint32_t channel_id, struct scp_path *sp,
         (pr_off_t) sp->sentlen, (pr_off_t) st->st_size, sp->path);
     }
 
-    chunklen = pr_fsio_read(sp->fh, chunk, chunksz - 1);
+    chunklen = pr_fsio_read(sp->fh, (char *) chunk, chunksz - 1);
     if (chunklen < 0) {
       (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
         "error reading from '%s': %s", sp->path, strerror(errno));
@@ -1598,7 +1807,7 @@ static int send_dir(pool *p, uint32_t channel_id, struct scp_path *sp,
     /* Send end-of-directory control message */
 
     need_confirm = TRUE;
-    res = sftp_channel_write_data(p, channel_id, "E\n", 2);
+    res = sftp_channel_write_data(p, channel_id, (unsigned char *) "E\n", 2);
     if (res < 0)
       return res;
   }
@@ -1649,12 +1858,15 @@ static int send_path(pool *p, uint32_t channel_id, struct scp_path *sp) {
 
         destroy_pool(cmd->pool);
         session.curr_cmd_rec = NULL;
+
+        write_confirm(p, channel_id, 1,
+          pstrcat(p, sp->path, ": ", strerror(xerrno), NULL));
         return 1;
       }
     }
 
     if (strcmp(sp->path, cmd->arg) != 0) {
-      sp->path = cmd->arg;
+      sp->path = pstrdup(scp_session->pool, cmd->arg);
     }
   }
 
@@ -1679,6 +1891,9 @@ static int send_path(pool *p, uint32_t channel_id, struct scp_path *sp) {
 
     destroy_pool(cmd->pool);
     session.curr_cmd_rec = NULL;
+
+    write_confirm(p, channel_id, 1,
+      pstrcat(p, sp->path, ": ", strerror(xerrno), NULL));
     return 1;
   }
 
@@ -1703,6 +1918,9 @@ static int send_path(pool *p, uint32_t channel_id, struct scp_path *sp) {
 
         destroy_pool(cmd->pool);
         session.curr_cmd_rec = NULL;
+
+        write_confirm(p, channel_id, 1,
+          pstrcat(p, sp->path, ": ", strerror(EPERM), NULL));
         return 1;
       }
 
@@ -1715,6 +1933,9 @@ static int send_path(pool *p, uint32_t channel_id, struct scp_path *sp) {
 
       destroy_pool(cmd->pool);
       session.curr_cmd_rec = NULL;
+
+      write_confirm(p, channel_id, 1,
+        pstrcat(p, sp->path, ": ", strerror(EPERM), NULL));
       return 1;
     }
   }
@@ -1731,6 +1952,9 @@ static int send_path(pool *p, uint32_t channel_id, struct scp_path *sp) {
 
       destroy_pool(cmd->pool);
       session.curr_cmd_rec = NULL;
+
+      write_confirm(p, channel_id, 1,
+        pstrcat(p, sp->path, ": ", strerror(EACCES), NULL));
       return 1;
     }
 
@@ -1751,6 +1975,9 @@ static int send_path(pool *p, uint32_t channel_id, struct scp_path *sp) {
 
       destroy_pool(cmd->pool);
       session.curr_cmd_rec = NULL;
+
+      write_confirm(p, channel_id, 1,
+        pstrcat(p, sp->path, ": ", strerror(xerrno), NULL));
 
       errno = xerrno;
       return 1;
@@ -1824,7 +2051,7 @@ static int send_path(pool *p, uint32_t channel_id, struct scp_path *sp) {
 
 /* Main entry point */
 int sftp_scp_handle_packet(pool *p, void *ssh2, uint32_t channel_id,
-    char *data, uint32_t datalen) {
+    unsigned char *data, uint32_t datalen) {
   int res = -1;
   struct ssh2_packet *pkt;
 
@@ -2259,6 +2486,8 @@ int sftp_scp_open_session(uint32_t channel_id) {
     scp_sessions = sess;
   }
 
+  pr_event_generate("mod_sftp.scp.session-opened", NULL);
+
   pr_timer_remove(PR_TIMER_STALLED, ANY_MODULE);
 
   timeout_stalled = pr_data_get_timeout(PR_DATA_TIMEOUT_STALLED);
@@ -2376,6 +2605,8 @@ int sftp_scp_close_session(uint32_t channel_id) {
       destroy_pool(sess->pool);
 
       pr_session_set_protocol("ssh2");
+
+      pr_event_generate("mod_sftp.scp.session-closed", NULL);
       return 0;
     }
 

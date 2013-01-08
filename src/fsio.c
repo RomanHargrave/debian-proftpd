@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (C) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (C) 2001-2011 The ProFTPD Project
+ * Copyright (C) 2001-2012 The ProFTPD Project
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,10 +25,11 @@
  */
 
 /* ProFTPD virtual/modular file-system support
- * $Id: fsio.c,v 1.102 2011/05/27 00:38:45 castaglia Exp $
+ * $Id: fsio.c,v 1.113 2013/01/03 18:08:44 castaglia Exp $
  */
 
 #include "conf.h"
+#include "privs.h"
 
 #ifdef HAVE_SYS_STATVFS_H
 # include <sys/statvfs.h>
@@ -173,6 +174,10 @@ static int sys_chown(pr_fs_t *fs, const char *path, uid_t uid, gid_t gid) {
 
 static int sys_fchown(pr_fh_t *fh, int fd, uid_t uid, gid_t gid) {
   return fchown(fd, uid, gid);
+}
+
+static int sys_lchown(pr_fs_t *fs, const char *path, uid_t uid, gid_t gid) {
+  return lchown(path, uid, gid);
 }
 
 /* We provide our own equivalent of access(2) here, rather than using
@@ -1524,55 +1529,97 @@ int pr_fs_dircat(char *buf, int buflen, const char *dir1, const char *dir2) {
  *           1 : interpolation done
  */
 int pr_fs_interpolate(const char *path, char *buf, size_t buflen) {
-  pool *p = NULL;
-  struct passwd *pw = NULL;
-  struct stat sbuf;
-  char *fname = NULL;
-  char user[PR_TUNABLE_LOGIN_MAX + 1] = {'\0'};
-  int len;
+  char *ptr = NULL;
+  size_t currlen, pathlen;
+  char user[PR_TUNABLE_LOGIN_MAX+1];
 
-  if (!path) {
+  if (path == NULL) {
     errno = EINVAL;
     return -1;
   }
 
-  if (path[0] == '~') {
-    fname = strchr(path, '/');
+  if (path[0] != '~') {
+    sstrncpy(buf, path, buflen);
+    return 1;
+  }
 
-    /* Copy over the username.
+  memset(user, '\0', sizeof(user));
+
+  /* The first character of the given path is '~'.
+   *
+   * We next need to see what the rest of the path looks like.  Could be:
+   *
+   *  "~"
+   *  "~user"
+   *  "~/"
+   *  "~/path"
+   *  "~user/path"
+   */
+
+  pathlen = strlen(path);
+  if (pathlen == 1) {
+    /* If the path is just "~", AND we're chrooted, then the interpolation
+     * is easy.
      */
-    if (fname) {
-      len = fname - path;
-      sstrncpy(user, path + 1, len > sizeof(user) ? sizeof(user) : len);
+    if (session.chroot_path != NULL) {
+      sstrncpy(buf, session.chroot_path, buflen);
+      return 1;
+    }
+  }
 
-      /* Advance past the '/'. */
-      fname++;
+  ptr = strchr(path, '/');
+  if (ptr == NULL) {
+    struct stat st;
 
-    } else if (pr_fsio_stat(path, &sbuf) == -1) {
+    /* No path separator present, which means path must be "~user".
+     *
+     * This means that a path of "~foo" could be a file with that exact
+     * name, or it could be that user's home directory.  Let's find out
+     * which it is.
+     */
 
-      /* Otherwise, this might be something like "~foo" which could be a file
-       * or it could be a user.  Let's find out.
-       *
-       * Must be a user, if anything...otherwise it's probably a typo.
-       */
-      len = strlen(path);
-      sstrncpy(user, path + 1, len > sizeof(user) ? sizeof(user) : len);
+    if (pr_fsio_stat(path, &st) == -1) {
+       /* Must be a user, if anything...otherwise it's probably a typo.
+        *
+        * The user name, then, is everything just past the '~' character.
+        */
+      sstrncpy(user, path+1,
+        pathlen-1 > sizeof(user)-1 ? sizeof(user)-1 : pathlen-1);
 
     } else {
-
-      /* Otherwise, this _is_ the file in question, perform no interpolation.
-       */
-      fname = (char *) path;
+      /* This IS the file in question, perform no interpolation. */
       return 0;
     }
 
-    /* If the user hasn't been explicitly specified, set it here.  This
-     * handles cases such as files beginning with "~", "~/foo" or simply "~".
-     */
-    if (!*user)
-      sstrncpy(user, session.user, sizeof(user));
+  } else {
+    currlen = ptr - path;
+    if (currlen > 1) {
+      /* Copy over the username. */
+      sstrncpy(user, path+1,
+        currlen > sizeof(user)-1 ? sizeof(user)-1 : currlen);
+    }
 
-    /* The permanent pool is used here, rather than session.pool, as path
+    /* Advance past the '/'. */
+    ptr++;
+  }
+
+  if (user[0] == '\0') {
+    /* No user name provided.  If we are chrooted, we leave it that way.
+     * Otherwise, we're not chrooted, and we can assume the current user.
+     */
+    if (session.chroot_path == NULL) {
+      sstrncpy(user, session.user, sizeof(user)-1);
+    }
+  }
+
+  if (user[0] != '\0') {
+    struct passwd *pw = NULL;
+    pool *p = NULL;
+
+    /* We need to look up the info for the given username, and add it
+     * into the buffer.
+     *
+     * The permanent pool is used here, rather than session.pool, as path
      * interpolation can occur during startup parsing, when session.pool does
      * not exist.  It does not really matter, since the allocated sub pool
      * is destroyed shortly.
@@ -1581,8 +1628,7 @@ int pr_fs_interpolate(const char *path, char *buf, size_t buflen) {
     pr_pool_tag(p, "pr_fs_interpolate() pool");
 
     pw = pr_auth_getpwnam(p, user);
-
-    if (!pw) {
+    if (pw == NULL) {
       destroy_pool(p);
       errno = ENOENT;
       return -1;
@@ -1593,17 +1639,23 @@ int pr_fs_interpolate(const char *path, char *buf, size_t buflen) {
     /* Done with pw, which means we can destroy the temporary pool now. */
     destroy_pool(p);
 
-    len = strlen(buf);
+  } else {
+    /* We're chrooted. */
+    sstrncpy(buf, "/", buflen);
+  }
+ 
+  currlen = strlen(buf);
 
-    if (fname && len < buflen && buf[len - 1] != '/')
-      buf[len++] = '/';
+  if (ptr != NULL &&
+      currlen < buflen &&
+      buf[currlen-1] != '/') {
+    buf[currlen++] = '/';
+  }
 
-    if (fname)
-      sstrncpy(&buf[len], fname, buflen - len);
-
-  } else
-    sstrncpy(buf, path, buflen);
-
+  if (ptr != NULL) {
+    sstrncpy(&buf[currlen], ptr, buflen - currlen);
+  }
+ 
   return 1;
 }
 
@@ -2076,8 +2128,8 @@ char *pr_fs_decode_path(pool *p, const char *path) {
     return (char *) path;
   }
 
-  res = pr_decode_str(p, path, strlen(path) + 1, &outlen);
-  if (!res) {
+  res = pr_decode_str(p, path, strlen(path), &outlen);
+  if (res == NULL) {
     pr_trace_msg("encode", 1, "error decoding path '%s': %s", path,
       strerror(errno));
     return (char *) path;
@@ -2099,8 +2151,8 @@ char *pr_fs_encode_path(pool *p, const char *path) {
     return (char *) path;
   }
 
-  res = pr_encode_str(p, path, strlen(path) + 1, &outlen);
-  if (!res) {
+  res = pr_encode_str(p, path, strlen(path), &outlen);
+  if (res == NULL) {
     pr_trace_msg("encode", 1, "error encoding path '%s': %s", path,
       strerror(errno));
     return (char *) path;
@@ -2498,6 +2550,170 @@ int pr_fsio_mkdir(const char *path, mode_t mode) {
   return res;
 }
 
+/* "safe mkdir" variant of mkdir(2), uses mkdtemp(3), lchown(2), and
+ * rename(2) to create a directory which cannot be hijacked by a symlink
+ * race (hopefully) before the UserOwner/GroupOwner ownership changes are
+ * applied.
+ */
+int pr_fsio_smkdir(pool *p, const char *path, mode_t mode, uid_t uid,
+    gid_t gid) {
+  int res;
+  char *tmpl_path;
+#ifdef HAVE_MKDTEMP
+  mode_t mask, *dir_umask;
+  char *dst_dir, *tmpl, *ptr;
+  size_t tmpl_len;
+  struct stat st;
+#endif /* HAVE_MKDTEMP */
+
+  if (path == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+
+#ifdef HAVE_MKDTEMP
+  ptr = strrchr(path, '/');
+  if (ptr == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  dst_dir = pstrndup(p, path, (ptr - path));
+  res = lstat(dst_dir, &st);
+  if (res < 0) {
+    return -1;
+  }
+
+  if (!S_ISDIR(st.st_mode) &&
+      !S_ISLNK(st.st_mode)) {
+    errno = EPERM;
+    return -1;
+  }
+
+  /* Allocate enough space for the temporary name: the length of the
+   * destination directory, a slash, 9 X's, 3 for the prefix, and 1 for the
+   * trailing NUL.
+   */
+  tmpl_len = strlen(path) + 14;
+  tmpl = pcalloc(p, tmpl_len);
+  snprintf(tmpl, tmpl_len-1, "%s/dstXXXXXXXXX", dst_dir);
+
+  /* Use mkdtemp(3) to create the temporary directory (in the same destination
+   * directory as the target path).
+   */
+  tmpl_path = mkdtemp(tmpl);
+  if (tmpl_path == NULL) {
+    return -1;
+  }
+#else
+
+  res = pr_fsio_mkdir(path, mode);
+  if (res < 0) {
+    return -1;
+  }
+
+  tmpl_path = pstrdup(p, path);
+#endif /* HAVE_MKDTEMP */
+
+  if (uid != (uid_t) -1) {
+    int xerrno;
+
+    PRIVS_ROOT
+    res = pr_fsio_lchown(tmpl_path, uid, gid);
+    xerrno = errno;
+    PRIVS_RELINQUISH
+
+    if (res < 0) {
+      pr_log_pri(PR_LOG_WARNING, "lchown(%s) as root failed: %s", tmpl_path,
+        strerror(xerrno));
+
+    } else {
+      if (gid != (gid_t) -1) {
+        pr_log_debug(DEBUG2, "root lchown(%s) to UID %lu, GID %lu successful",
+          tmpl_path, (unsigned long) uid, (unsigned long) gid);
+
+      } else {
+        pr_log_debug(DEBUG2, "root lchown(%s) to UID %lu successful",
+          tmpl_path, (unsigned long) uid);
+      }
+    }
+
+  } else if (gid != (gid_t) -1) {
+    register unsigned int i;
+    int use_root_privs = TRUE, xerrno;
+
+    /* Check if session.fsgid is in session.gids.  If not, use root privs.  */
+    for (i = 0; i < session.gids->nelts; i++) {
+      gid_t *group_ids = session.gids->elts;
+
+      if (group_ids[i] == gid) {
+        use_root_privs = FALSE;
+        break;
+      }
+    }
+
+    if (use_root_privs) {
+      PRIVS_ROOT
+    }
+
+    res = pr_fsio_lchown(tmpl_path, (uid_t) -1, gid);
+    xerrno = errno;
+
+    if (use_root_privs) {
+      PRIVS_RELINQUISH
+    }
+
+    if (res < 0) {
+      pr_log_pri(PR_LOG_WARNING, "%slchown(%s) failed: %s",
+        use_root_privs ? "root " : "", tmpl_path, strerror(xerrno));
+
+    } else {
+      pr_log_debug(DEBUG2, "%slchown(%s) to GID %lu successful",
+        use_root_privs ? "root " : "", tmpl_path, (unsigned long) gid);
+    }
+  }
+
+#ifdef HAVE_MKDTEMP
+  /* Use chmod(2) to set the permission that we want.
+   *
+   * mkdtemp(3) creates a directory with 0700 perms; we are given the
+   * target mode (modulo the configured Umask).
+   */
+  dir_umask = get_param_ptr(CURRENT_CONF, "DirUmask", FALSE);
+  if (dir_umask) {
+    mask = *dir_umask;
+
+  } else {
+    mask = (mode_t) 0022;
+  }
+
+  res = chmod(tmpl_path, mode & ~mask);
+  if (res < 0) {
+    int xerrno = errno;
+
+    (void) rmdir(tmpl_path);
+
+    errno = xerrno;
+    return -1;
+  }
+
+  /* Use rename(2) to move the temporary directory into place at the
+   * target path.
+   */
+  res = rename(tmpl_path, path);
+  if (res < 0) {
+    int xerrno = errno;
+
+    (void) rmdir(tmpl_path);
+
+    errno = xerrno;
+    return -1;
+  }
+#endif /* HAVE_MKDTEMP */
+
+  return 0;
+}
+
 int pr_fsio_rmdir(const char *path) {
   int res;
   pr_fs_t *fs;
@@ -2798,8 +3014,9 @@ pr_fh_t *pr_fsio_open_canon(const char *name, int flags) {
   /* Find the first non-NULL custom open handler.  If there are none,
    * use the system open.
    */
-  while (fs && fs->fs_next && !fs->open)
+  while (fs && fs->fs_next && !fs->open) {
     fs = fs->fs_next;
+  }
 
   pr_trace_msg(trace_channel, 8, "using %s open() for path '%s'", fs->fs_name,
     name);
@@ -2808,6 +3025,13 @@ pr_fh_t *pr_fsio_open_canon(const char *name, int flags) {
   if (fh->fh_fd == -1) {
     destroy_pool(fh->fh_pool);
     return NULL;
+  }
+
+  if (fcntl(fh->fh_fd, F_SETFD, FD_CLOEXEC) < 0) {
+    if (errno != EBADF) {
+      pr_trace_msg(trace_channel, 1, "error setting CLOEXEC on file fd %d: %s",
+        fh->fh_fd, strerror(errno));
+    }
   }
 
   return fh;
@@ -2842,8 +3066,9 @@ pr_fh_t *pr_fsio_open(const char *name, int flags) {
   /* Find the first non-NULL custom open handler.  If there are none,
    * use the system open.
    */
-  while (fs && fs->fs_next && !fs->open)
+  while (fs && fs->fs_next && !fs->open) {
     fs = fs->fs_next;
+  }
 
   pr_trace_msg(trace_channel, 8, "using %s open() for path '%s'", fs->fs_name,
     name);
@@ -2852,6 +3077,13 @@ pr_fh_t *pr_fsio_open(const char *name, int flags) {
   if (fh->fh_fd == -1) {
     destroy_pool(fh->fh_pool);
     return NULL;
+  }
+
+  if (fcntl(fh->fh_fd, F_SETFD, FD_CLOEXEC) < 0) {
+    if (errno != EBADF) {
+      pr_trace_msg(trace_channel, 1, "error setting CLOEXEC on file fd %d: %s",
+        fh->fh_fd, strerror(errno));
+    }
   }
 
   return fh;
@@ -2894,6 +3126,13 @@ pr_fh_t *pr_fsio_creat_canon(const char *name, mode_t mode) {
     return NULL;
   }
 
+  if (fcntl(fh->fh_fd, F_SETFD, FD_CLOEXEC) < 0) {
+    if (errno != EBADF) {
+      pr_trace_msg(trace_channel, 1, "error setting CLOEXEC on file fd %d: %s",
+        fh->fh_fd, strerror(errno));
+    }
+  }
+
   return fh;
 }
 
@@ -2931,6 +3170,13 @@ pr_fh_t *pr_fsio_creat(const char *name, mode_t mode) {
   if (fh->fh_fd == -1) {
     destroy_pool(fh->fh_pool);
     return NULL;
+  }
+
+  if (fcntl(fh->fh_fd, F_SETFD, FD_CLOEXEC) < 0) {
+    if (errno != EBADF) {
+      pr_trace_msg(trace_channel, 1, "error setting CLOEXEC on file fd %d: %s",
+        fh->fh_fd, strerror(errno));
+    }
   }
 
   return fh;
@@ -3357,6 +3603,33 @@ int pr_fsio_fchown(pr_fh_t *fh, uid_t uid, gid_t gid) {
   return res;
 }
 
+int pr_fsio_lchown(const char *name, uid_t uid, gid_t gid) {
+  int res;
+  pr_fs_t *fs;
+
+  fs = lookup_file_fs(name, NULL, FSIO_FILE_CHOWN);
+  if (fs == NULL) {
+    return -1;
+  }
+
+  /* Find the first non-NULL custom lchown handler.  If there are none,
+   * use the system chown.
+   */
+  while (fs && fs->fs_next && !fs->lchown) {
+    fs = fs->fs_next;
+  }
+
+  pr_trace_msg(trace_channel, 8, "using %s lchown() for path '%s'",
+    fs->fs_name, name);
+  res = (fs->lchown)(fs, name, uid, gid);
+
+  if (res == 0) {
+    pr_fs_clear_cache();
+  }
+
+  return res;
+}
+
 int pr_fsio_access(const char *path, int mode, uid_t uid, gid_t gid,
     array_header *suppl_gids) {
   pr_fs_t *fs;
@@ -3766,22 +4039,25 @@ int pr_fs_get_usable_fd(int fd) {
 
 /* Simple multiplication and division doesn't work with very large
  * filesystems (overflows 32 bits).  This code should handle it.
+ *
+ * Note that this returns a size in KB, not bytes.
  */
-static off_t calc_fs_size(size_t blocks, size_t bsize) {
+static off_t get_fs_size(size_t nblocks, size_t blocksz) {
   off_t bl_lo, bl_hi;
   off_t res_lo, res_hi, tmp;
 
-  bl_lo = blocks & 0x0000ffff;
-  bl_hi = blocks & 0xffff0000;
+  bl_lo = nblocks & 0x0000ffff;
+  bl_hi = nblocks & 0xffff0000;
 
-  tmp = (bl_hi >> 16) * bsize;
+  tmp = (bl_hi >> 16) * blocksz;
   res_hi = tmp & 0xffff0000;
   res_lo = (tmp & 0x0000ffff) << 16;
-  res_lo += bl_lo * bsize;
+  res_lo += bl_lo * blocksz;
 
-  if (res_hi & 0xfc000000)
+  if (res_hi & 0xfc000000) {
     /* Overflow */
     return 0;
+  }
 
   return (res_lo >> 10) | (res_hi << 6);
 }
@@ -3815,16 +4091,20 @@ static int fs_getsize(char *path, off_t *fs_size) {
     return -1;
   }
 
-  /* The calc_fs_size() function is only useful for 32-bit numbers;
+  /* The getc_fs_size() function is only useful for 32-bit numbers;
    * if either of our two values are in datatypes larger than 4 bytes,
    * we'll use typecasting.
    */
   if (sizeof(fs.f_bavail) > 4 ||
       sizeof(fs.f_frsize) > 4) {
-    *fs_size = ((off_t) fs.f_bavail * (off_t) fs.f_frsize);
+
+    /* In order to return a size in KB, as get_fs_size() does, we need
+     * to divide by 1024.
+     */
+    *fs_size = (((off_t) fs.f_bavail * (off_t) fs.f_frsize) / 1024);
 
   } else {
-    *fs_size = calc_fs_size(fs.f_bavail, fs.f_frsize);
+    *fs_size = get_fs_size(fs.f_bavail, fs.f_frsize);
   }
 
   return 0;
@@ -3843,16 +4123,20 @@ static int fs_getsize(char *path, off_t *fs_size) {
     return -1;
   }
 
-  /* The calc_fs_size() function is only useful for 32-bit numbers;
+  /* The get_fs_size() function is only useful for 32-bit numbers;
    * if either of our two values are in datatypes larger than 4 bytes,
    * we'll use typecasting.
    */
   if (sizeof(fs.f_bavail) > 4 ||
       sizeof(fs.f_bsize) > 4) {
-    *fs_size = ((off_t) fs.f_bavail * (off_t) fs.f_bsize);
+
+    /* In order to return a size in KB, as get_fs_size() does, we need
+     * to divide by 1024.
+     */
+    *fs_size = (((off_t) fs.f_bavail * (off_t) fs.f_frsize) / 1024);
 
   } else {
-    *fs_size = calc_fs_size(fs.f_bavail, fs.f_bsize);
+    *fs_size = get_fs_size(fs.f_bavail, fs.f_bsize);
   }
 
   return 0;
@@ -3871,16 +4155,20 @@ static int fs_getsize(char *path, off_t *fs_size) {
     return -1;
   }
 
-  /* The calc_fs_size() function is only useful for 32-bit numbers;
+  /* The get_fs_size() function is only useful for 32-bit numbers;
    * if either of our two values are in datatypes larger than 4 bytes,
    * we'll use typecasting.
    */
   if (sizeof(fs.f_bavail) > 4 ||
       sizeof(fs.f_bsize) > 4) {
-    *fs_size = ((off_t) fs.f_bavail * (off_t) fs.f_bsize);
+
+    /* In order to return a size in KB, as get_fs_size() does, we need
+     * to divide by 1024.
+     */
+    *fs_size = (((off_t) fs.f_bavail * (off_t) fs.f_frsize) / 1024);
 
   } else {
-    *fs_size = calc_fs_size(fs.f_bavail, fs.f_bsize);
+    *fs_size = get_fs_size(fs.f_bavail, fs.f_bsize);
   }
 
   return 0;
@@ -4015,6 +4303,7 @@ int init_fs(void) {
   root_fs->fchmod = sys_fchmod;
   root_fs->chown = sys_chown;
   root_fs->fchown = sys_fchown;
+  root_fs->lchown = sys_lchown;
   root_fs->access = sys_access;
   root_fs->faccess = sys_faccess;
   root_fs->utimes = sys_utimes;
@@ -4095,6 +4384,12 @@ static const char *get_fs_hooks_str(pool *p, pr_fs_t *fs) {
 
   if (fs->chown)
     hooks = pstrcat(p, hooks, *hooks ? ", " : "", "chown(2)", NULL);
+
+  if (fs->fchown)
+    hooks = pstrcat(p, hooks, *hooks ? ", " : "", "fchown(2)", NULL);
+
+  if (fs->lchown)
+    hooks = pstrcat(p, hooks, *hooks ? ", " : "", "lchown(2)", NULL);
 
   if (fs->access)
     hooks = pstrcat(p, hooks, *hooks ? ", " : "", "access(2)", NULL);

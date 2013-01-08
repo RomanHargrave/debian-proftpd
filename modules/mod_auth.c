@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2011 The ProFTPD Project team
+ * Copyright (c) 2001-2012 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* Authentication module for ProFTPD
- * $Id: mod_auth.c,v 1.295 2011/05/23 21:11:56 castaglia Exp $
+ * $Id: mod_auth.c,v 1.309 2012/12/20 23:54:52 castaglia Exp $
  */
 
 #include "conf.h"
@@ -68,7 +68,8 @@ static int auth_cmd_chk_cb(cmd_rec *cmd) {
 
 static int auth_login_timeout_cb(CALLBACK_FRAME) {
   pr_response_send_async(R_421,
-    _("Login timeout (%d seconds): closing control connection"), TimeoutLogin);
+    _("Login timeout (%d %s): closing control connection"), TimeoutLogin,
+    TimeoutLogin != 1 ? "seconds" : "second");
 
   /* It's possible that any listeners of this event might terminate the
    * session process themselves (e.g. mod_ban).  So write out that the
@@ -105,7 +106,7 @@ static int auth_session_timeout_cb(CALLBACK_FRAME) {
 
 static void auth_exit_ev(const void *event_data, void *user_data) {
   /* Close the scoreboard descriptor that we opened. */
-  (void) pr_close_scoreboard();
+  (void) pr_close_scoreboard(FALSE);
 }
 
 static int auth_sess_init(void) {
@@ -152,38 +153,56 @@ static int auth_sess_init(void) {
 
   pr_event_register(&auth_module, "core.exit", auth_exit_ev, NULL);
 
-  /* Create an entry in the scoreboard for this session. */
-  if (pr_scoreboard_entry_add() < 0)
-    pr_log_pri(PR_LOG_NOTICE, "notice: unable to add scoreboard entry: %s",
-      strerror(errno));
+  /* Create an entry in the scoreboard for this session, if we don't already
+   * have one.
+   */
+  if (pr_scoreboard_entry_get(PR_SCORE_CLIENT_ADDR) == NULL) {
+    if (pr_scoreboard_entry_add() < 0) {
+      pr_log_pri(PR_LOG_NOTICE, "notice: unable to add scoreboard entry: %s",
+        strerror(errno));
+    }
 
-  pr_scoreboard_entry_update(session.pid,
-    PR_SCORE_USER, "(none)",
-    PR_SCORE_SERVER_PORT, main_server->ServerPort,
-    PR_SCORE_SERVER_ADDR, session.c->local_addr, session.c->local_port,
-    PR_SCORE_SERVER_LABEL, main_server->ServerName,
-    PR_SCORE_CLIENT_ADDR, session.c->remote_addr,
-    PR_SCORE_CLIENT_NAME, session.c->remote_name,
-    PR_SCORE_CLASS, session.class ? session.class->cls_name : "",
-    PR_SCORE_PROTOCOL, "ftp",
-    PR_SCORE_BEGIN_SESSION, time(NULL),
-    NULL);
+    pr_scoreboard_entry_update(session.pid,
+      PR_SCORE_USER, "(none)",
+      PR_SCORE_SERVER_PORT, main_server->ServerPort,
+      PR_SCORE_SERVER_ADDR, session.c->local_addr, session.c->local_port,
+      PR_SCORE_SERVER_LABEL, main_server->ServerName,
+      PR_SCORE_CLIENT_ADDR, session.c->remote_addr,
+      PR_SCORE_CLIENT_NAME, session.c->remote_name,
+      PR_SCORE_CLASS, session.conn_class ? session.conn_class->cls_name : "",
+      PR_SCORE_PROTOCOL, "ftp",
+      PR_SCORE_BEGIN_SESSION, time(NULL),
+      NULL);
+
+  } else {
+    /* We're probably handling a HOST comand, and the server changed; just
+     * update the SERVER_LABEL field.
+     */
+    pr_scoreboard_entry_update(session.pid,
+      PR_SCORE_SERVER_LABEL, main_server->ServerName,
+      NULL);
+  }
 
   /* Should we create the home for a user, if they don't have one? */
   tmp = get_param_ptr(main_server->conf, "CreateHome", FALSE);
-  if (tmp != NULL && *tmp == TRUE)
+  if (tmp != NULL &&
+      *tmp == TRUE) {
     mkhome = TRUE;
-  else
+
+  } else {
     mkhome = FALSE;
+  }
 
 #ifdef PR_USE_LASTLOG
   /* Use the lastlog file, if supported and requested. */
   tmp = get_param_ptr(main_server->conf, "UseLastlog", FALSE);
   if (tmp &&
-      *tmp == TRUE)
+      *tmp == TRUE) {
     lastlog = TRUE;
-  else
+
+  } else {
     lastlog = FALSE;
+  }
 #endif /* PR_USE_LASTLOG */
 
   /* Scan the scoreboard now, in order to tally up certain values for
@@ -240,6 +259,40 @@ static int _do_auth(pool *p, xaset_t *conf, char *u, char *pw) {
   return pr_auth_authenticate(p, u, pw);
 }
 
+/* Command handlers
+ */
+
+MODRET auth_post_host(cmd_rec *cmd) {
+
+  /* If the HOST command changed the main_server pointer, reinitialize
+   * ourselves.
+   */
+  if (session.prev_server != NULL) {
+    int res;
+
+    /* Remove the TimeoutLogin timer. */
+    pr_timer_remove(PR_TIMER_LOGIN, &auth_module);
+
+    pr_event_unregister(&auth_module, "core.exit", auth_exit_ev);
+
+    /* Reset the CreateHome setting. */
+    mkhome = FALSE;
+
+#ifdef PR_USE_LASTLOG
+    /* Reset the UseLastLog setting. */
+    lastlog = FALSE;
+#endif /* PR_USE_LASTLOG */
+
+    res = auth_sess_init();
+    if (res < 0) {
+      pr_session_disconnect(&auth_module,
+        PR_SESS_DISCONNECT_SESSION_INIT_FAILED, NULL);
+    }
+  }
+
+  return PR_DECLINED(cmd);
+}
+
 MODRET auth_err_pass(cmd_rec *cmd) {
 
   /* Remove the stashed original USER name here in a LOG_CMD_ERR handler, so
@@ -263,11 +316,13 @@ MODRET auth_log_pass(cmd_rec *cmd) {
   pr_log_auth(PR_LOG_NOTICE, "%s %s: Login successful.",
     (session.anon_config != NULL) ? "ANON" : C_USER, session.user);
 
-  /* And scrub the memory holding the password sent by the client, for
-   * safety/security.
-   */
-  passwd_len = strlen(cmd->arg);
-  pr_memscrub(cmd->arg, passwd_len);
+  if (cmd->arg != NULL) {
+    /* And scrub the memory holding the password sent by the client, for
+     * safety/security.
+     */
+    passwd_len = strlen(cmd->arg);
+    pr_memscrub(cmd->arg, passwd_len);
+  }
 
   return PR_DECLINED(cmd);
 }
@@ -277,7 +332,7 @@ MODRET auth_post_pass(cmd_rec *cmd) {
   char *grantmsg = NULL, *user;
   unsigned int ctxt_precedence = 0;
   unsigned char have_user_timeout, have_group_timeout, have_class_timeout,
-    have_all_timeout, *privsdrop = NULL, *authenticated;
+    have_all_timeout, *root_revoke = NULL, *authenticated;
   struct stat st;
 
   /* Was there a precending USER command? Was the client successfully
@@ -391,8 +446,8 @@ MODRET auth_post_pass(cmd_rec *cmd) {
         }
 
       } else if (strncmp(c->argv[1], "class", 6) == 0) {
-        if (session.class &&
-            strcmp(session.class->cls_name, c->argv[2]) == 0) {
+        if (session.conn_class != NULL &&
+            strcmp(session.conn_class->cls_name, c->argv[2]) == 0) {
 
           if (*((unsigned int *) c->argv[1]) > ctxt_precedence) {
 
@@ -497,9 +552,13 @@ MODRET auth_post_pass(cmd_rec *cmd) {
      pr_response_add(auth_pass_resp_code, "%s", grantmsg);
   }
 
-  privsdrop = get_param_ptr(TOPLEVEL_CONF, "RootRevoke", FALSE);
-  if (privsdrop != NULL &&
-      *privsdrop == TRUE) {
+  /* A RootRevoke value of 0 indicates 'false', 1 indicates 'true', and
+   * 2 indicates 'NonCompliantActiveTransfer'.  We will drop root privs for any
+   * RootRevoke value greater than 0.
+   */
+  root_revoke = get_param_ptr(TOPLEVEL_CONF, "RootRevoke", FALSE);
+  if (root_revoke != NULL &&
+      *root_revoke > 0) {
     pr_signals_block();
     PRIVS_ROOT
     PRIVS_REVOKE
@@ -508,13 +567,17 @@ MODRET auth_post_pass(cmd_rec *cmd) {
     /* Disable future attempts at UID/GID manipulation. */
     session.disable_id_switching = TRUE;
 
-    /* If the server's listening port is less than 1025, block PORT
-     * commands (effectively allowing only passive connections, which is
-     * not necessarily a Bad Thing).  Only log this here -- the blocking
-     * will need to occur in mod_core's cmd_port() function.
-     */
-    if (session.c->local_port < 1025)
-      pr_log_debug(DEBUG0, "RootRevoke in effect, disabling active transfers");
+    if (*root_revoke == 1) {
+      /* If the server's listening port is less than 1024, block PORT
+       * commands (effectively allowing only passive connections, which is
+       * not necessarily a Bad Thing).  Only log this here -- the blocking
+       * will need to occur in mod_core's handling of the PORT/EPRT commands.
+       */
+      if (session.c->local_port < 1024) {
+        pr_log_debug(DEBUG0,
+          "RootRevoke in effect, disabling active transfers");
+      }
+    }
 
     pr_log_debug(DEBUG0, "RootRevoke in effect, dropped root privs");
   }
@@ -614,13 +677,12 @@ static char *get_default_chdir(pool *p, xaset_t *conf) {
 /* Determine if the user (non-anon) needs a default root dir other than /.
  */
 
-static char *get_default_root(pool *p) {
+static int get_default_root(pool *p, int allow_symlinks, char **root) {
   config_rec *c = NULL;
   char *dir = NULL;
-  int ret;
+  int res;
 
   c = find_config(main_server->conf, CONF_PARAM, "DefaultRoot", FALSE);
-
   while (c) {
     pr_signals_handle();
 
@@ -630,9 +692,8 @@ static char *get_default_root(pool *p) {
       break;
     }
 
-    ret = pr_expr_eval_group_and(((char **) c->argv)+1);
-
-    if (ret) {
+    res = pr_expr_eval_group_and(((char **) c->argv)+1);
+    if (res) {
       dir = c->argv[0];
       break;
     }
@@ -656,6 +717,60 @@ static char *get_default_root(pool *p) {
       char *realdir;
       int xerrno = 0;
 
+      if (allow_symlinks == FALSE) {
+        char *path, target_path[PR_TUNABLE_PATH_MAX + 1];
+        struct stat st;
+        size_t pathlen;
+
+        /* First, deal with any possible interpolation.  dir_realpath() will
+         * do this for us, but dir_realpath() ALSO automatically follows
+         * symlinks, which is what we do NOT want to do here.
+         */
+
+        path = dir;
+        if (*path != '/') {
+          if (*path == '~') {
+            if (pr_fs_interpolate(dir, target_path,
+                sizeof(target_path)-1) < 0) {
+              return -1;
+            }
+
+            path = target_path;
+          }
+        }
+
+        /* Note: lstat(2) is sensitive to the presence of a trailing slash on
+         * the path, particularly in the case of a symlink to a directory.
+         * Thus to get the correct test, we need to remove any trailing slash
+         * that might be present.  Subtle.
+         */
+        pathlen = strlen(path);
+        if (pathlen > 1 &&
+            path[pathlen-1] == '/') {
+          path[pathlen-1] = '\0';
+        }
+
+        pr_fs_clear_cache();
+        res = pr_fsio_lstat(path, &st);
+        if (res < 0) {
+          xerrno = errno;
+
+          pr_log_pri(PR_LOG_ERR, "error: unable to check %s: %s", path,
+            strerror(xerrno));
+
+          errno = xerrno;
+          return -1;
+        }
+
+        if (S_ISLNK(st.st_mode)) {
+          pr_log_pri(PR_LOG_ERR,
+            "error: DefaultRoot %s is a symlink (denied by AllowChrootSymlinks "
+            "config)", path);
+          errno = EPERM;
+          return -1;
+        }
+      }
+
       /* We need to be the final user here so that if the user has their home
        * directory with a mode the user proftpd is running (i.e. the User
        * directive) as can not traverse down, we can still have the default
@@ -664,8 +779,7 @@ static char *get_default_root(pool *p) {
 
       PRIVS_USER
       realdir = dir_realpath(p, dir);
-      if (realdir == NULL)
-        xerrno = errno;
+      xerrno = errno;
       PRIVS_RELINQUISH
 
       if (realdir) {
@@ -681,11 +795,14 @@ static char *get_default_root(pool *p) {
         pr_log_pri(PR_LOG_NOTICE,
           "notice: unable to use '%s' [resolved to '%s']: %s", dir, interp_dir,
           strerror(xerrno));
+
+        errno = xerrno;
       }
     }
   }
 
-  return dir;
+  *root = dir;
+  return 0;
 }
 
 static struct passwd *passwd_dup(pool *p, struct passwd *pw) {
@@ -723,10 +840,10 @@ static void ensure_open_passwd(pool *p) {
 static int setup_env(pool *p, cmd_rec *cmd, char *user, char *pass) {
   struct passwd *pw;
   config_rec *c, *tmpc;
-  char *origuser,*ourname,*anonname = NULL,*anongroup = NULL,*ugroup = NULL;
+  char *origuser, *ourname,*anonname = NULL,*anongroup = NULL,*ugroup = NULL;
   char *defaulttransfermode, *defroot = NULL,*defchdir = NULL,*xferlog = NULL;
   const char *sess_ttyname;
-  int aclp, i, res = 0, showsymlinks;
+  int aclp, i, res = 0, allow_chroot_symlinks = TRUE, showsymlinks;
   unsigned char *wtmp_log = NULL, *anon_require_passwd = NULL;
 
   /********************* Authenticate the user here *********************/
@@ -741,7 +858,7 @@ static int setup_env(pool *p, cmd_rec *cmd, char *user, char *pass) {
 
   if (!user) {
     pr_log_auth(PR_LOG_NOTICE, "USER %s: user is not a UserAlias from %s [%s] "
-      "to %s:%i", origuser,session.c->remote_name,
+      "to %s:%i", origuser, session.c->remote_name,
       pr_netaddr_get_ipstr(session.c->remote_addr),
       pr_netaddr_get_ipstr(session.c->local_addr), session.c->local_port);
     goto auth_failure;
@@ -749,11 +866,15 @@ static int setup_env(pool *p, cmd_rec *cmd, char *user, char *pass) {
 
   pw = pr_auth_getpwnam(p, user);
   if (pw == NULL) {
+    int auth_code = PR_AUTH_NOPWD;
+
     pr_log_auth(PR_LOG_NOTICE,
       "USER %s: no such user found from %s [%s] to %s:%i",
       user, session.c->remote_name,
       pr_netaddr_get_ipstr(session.c->remote_addr),
       pr_netaddr_get_ipstr(session.c->local_addr), session.c->local_port);
+    pr_event_generate("mod_auth.authentication-code", &auth_code); 
+
     goto auth_failure;
   }
 
@@ -818,6 +939,12 @@ static int setup_env(pool *p, cmd_rec *cmd, char *user, char *pass) {
        pr_log_debug(DEBUG2, "no supplemental groups found for user '%s'",
          pw->pw_name);
      }
+  }
+
+  tmpc = find_config(main_server->conf, CONF_PARAM, "AllowChrootSymlinks",
+    FALSE);
+  if (tmpc != NULL) {
+    allow_chroot_symlinks = *((int *) tmpc->argv[0]);
   }
 
   /* If c != NULL from this point on, we have an anonymous login */
@@ -996,7 +1123,7 @@ static int setup_env(pool *p, cmd_rec *cmd, char *user, char *pass) {
   if (c) {
     struct group *grp = NULL;
     unsigned char *add_userdir = NULL;
-    char *u;
+    char *u, *chroot_dir;
 
     u = pr_table_get(session.notes, "mod_auth.orig-user", NULL);
     add_userdir = get_param_ptr(c->subset, "UserDirRoot", FALSE);
@@ -1030,18 +1157,81 @@ static int setup_env(pool *p, cmd_rec *cmd, char *user, char *pass) {
 
     if ((add_userdir && *add_userdir == TRUE) &&
         strcmp(u, user) != 0) {
-      char *userdir_path = pdircat(p, c->name, u, NULL);
+      chroot_dir = pdircat(p, c->name, u, NULL);
 
-      session.chroot_path = dir_realpath(p, userdir_path);
+    } else {
+      chroot_dir = c->name;
+    }
+
+    if (allow_chroot_symlinks == FALSE) {
+      char *chroot_path, target_path[PR_TUNABLE_PATH_MAX+1];
+      struct stat st;
+
+      chroot_path = chroot_dir;
+      if (chroot_path[0] != '/') {
+        if (chroot_path[0] == '~') {
+          if (pr_fs_interpolate(chroot_path, target_path,
+              sizeof(target_path)-1) == 0) {
+            chroot_path = target_path;
+
+          } else {
+            chroot_path = NULL;
+          }
+        }
+      }
+
+      if (chroot_path != NULL) {
+        size_t chroot_pathlen;
+
+        /* Note: lstat(2) is sensitive to the presence of a trailing slash on
+         * the path, particularly in the case of a symlink to a directory.
+         * Thus to get the correct test, we need to remove any trailing slash
+         * that might be present.  Subtle.
+         */
+        chroot_pathlen = strlen(chroot_path);
+        if (chroot_pathlen > 1 &&
+            chroot_path[chroot_pathlen-1] == '/') {
+          chroot_path[chroot_pathlen-1] = '\0';
+        }
+
+        pr_fs_clear_cache();
+        res = pr_fsio_lstat(chroot_path, &st);
+        if (res < 0) {
+          int xerrno = errno;
+
+          pr_log_pri(PR_LOG_ERR, "error: unable to check %s: %s", chroot_path,
+            strerror(xerrno));
+
+          errno = xerrno;
+          chroot_path = NULL;
+
+        } else {
+          if (S_ISLNK(st.st_mode)) {
+            pr_log_pri(PR_LOG_ERR,
+              "error: <Anonymous %s> is a symlink (denied by "
+              "AllowChrootSymlinks config)", chroot_path);
+            errno = EPERM;
+            chroot_path = NULL;
+          }
+        }
+      }
+
+      if (chroot_path != NULL) {
+        session.chroot_path = dir_realpath(p, chroot_dir);
+
+      } else {
+        session.chroot_path = NULL;
+      }
+
       if (session.chroot_path == NULL) {
-        pr_log_debug(DEBUG8, "error resolving '%s': %s", userdir_path,
+        pr_log_debug(DEBUG8, "error resolving '%s': %s", chroot_dir,
           strerror(errno));
       }
 
     } else {
-      session.chroot_path = dir_realpath(p, c->name);
+      session.chroot_path = dir_realpath(p, chroot_dir);
       if (session.chroot_path == NULL) {
-        pr_log_debug(DEBUG8, "error resolving '%s': %s", c->name,
+        pr_log_debug(DEBUG8, "error resolving '%s': %s", chroot_dir,
           strerror(errno));
       }
     }
@@ -1263,27 +1453,35 @@ static int setup_env(pool *p, cmd_rec *cmd, char *user, char *pass) {
   PRIVS_RELINQUISH
 
   /* Now check to see if the user has an applicable DefaultRoot */
-  if (!c && (defroot = get_default_root(session.pool))) {
-
-    ensure_open_passwd(p);
-
-    if (pr_auth_chroot(defroot) == -1) {
-      pr_log_pri(PR_LOG_ERR, "error: unable to set default root directory");
+  if (c == NULL) {
+    if (get_default_root(session.pool, allow_chroot_symlinks, &defroot) < 0) {
+      pr_log_pri(PR_LOG_ERR,
+        "error: unable to determine DefaultRoot directory");
       pr_response_send(R_530, _("Login incorrect."));
       pr_session_end(0);
     }
 
-    /* Re-calc the new cwd based on this root dir.  If not applicable
-     * place the user in / (of defroot)
-     */
+    ensure_open_passwd(p);
 
-    if (strncmp(session.cwd, defroot, strlen(defroot)) == 0) {
-      char *newcwd = &session.cwd[strlen(defroot)];
+    if (defroot != NULL) {
+      if (pr_auth_chroot(defroot) == -1) {
+        pr_log_pri(PR_LOG_ERR, "error: unable to set DefaultRoot directory");
+        pr_response_send(R_530, _("Login incorrect."));
+        pr_session_end(0);
+      }
 
-      if (*newcwd == '/')
-        newcwd++;
-      session.cwd[0] = '/';
-      sstrncpy(&session.cwd[1], newcwd, sizeof(session.cwd));
+      /* Re-calc the new cwd based on this root dir.  If not applicable
+       * place the user in / (of defroot)
+       */
+
+      if (strncmp(session.cwd, defroot, strlen(defroot)) == 0) {
+        char *newcwd = &session.cwd[strlen(defroot)];
+
+        if (*newcwd == '/')
+          newcwd++;
+        session.cwd[0] = '/';
+        sstrncpy(&session.cwd[1], newcwd, sizeof(session.cwd));
+      }
     }
   }
 
@@ -1528,9 +1726,10 @@ static int auth_scan_scoreboard(void) {
       /* Note: the class member of the scoreboard entry will never be
        * NULL.  At most, it may be the empty string.
        */
-      if (session.class &&
-          strcasecmp(score->sce_class, session.class->cls_name) == 0)
+      if (session.conn_class != NULL &&
+          strcasecmp(score->sce_class, session.conn_class->cls_name) == 0) {
         ccur++;
+      }
     }
   }
   pr_restore_scoreboard();
@@ -1545,7 +1744,7 @@ static int auth_scan_scoreboard(void) {
       "warning: error stashing '%s': %s", key, strerror(errno));
   }
 
-  if (session.class) {
+  if (session.conn_class != NULL) {
     key = "class-client-count";
     (void) pr_table_remove(session.notes, key, NULL);
     v = palloc(session.pool, sizeof(unsigned int));
@@ -1593,17 +1792,49 @@ static int auth_scan_scoreboard(void) {
   return 0;
 }
 
+static int have_client_limits(cmd_rec *cmd) {
+  if (find_config(cmd->server->conf, CONF_PARAM, "MaxClientsPerClass", FALSE) != NULL) {
+    return TRUE;
+  }
+
+  if (find_config(cmd->server->conf, CONF_PARAM, "MaxClientsPerHost", FALSE) != NULL) {
+    return TRUE;
+  }
+
+  if (find_config(cmd->server->conf, CONF_PARAM, "MaxClientsPerUser", FALSE) != NULL) {
+    return TRUE;
+  }
+
+  if (find_config(cmd->server->conf, CONF_PARAM, "MaxClients", FALSE) != NULL) {
+    return TRUE;
+  }
+
+  if (find_config(cmd->server->conf, CONF_PARAM, "MaxHostsPerUser", FALSE) != NULL) {
+    return TRUE;
+  }
+
+  return FALSE;
+}
+
 static int auth_count_scoreboard(cmd_rec *cmd, char *user) {
   char *key;
   void *v;
   pr_scoreboard_entry_t *score = NULL;
   long cur = 0, hcur = 0, ccur = 0, hostsperuser = 1, usersessions = 0;
-  config_rec *c = NULL, *anon_config = NULL, *maxc = NULL;
-  char *origuser;
+  config_rec *c = NULL, *maxc = NULL;
+
+  /* First, check to see which Max* directives are configured.  If none
+   * are configured, then there is no need for us to needlessly scan the
+   * ScoreboardFile.
+   */
+  if (have_client_limits(cmd) == FALSE) {
+    return 0;
+  }
 
   /* Determine how many users are currently connected. */
-  origuser = user;
-  anon_config = pr_auth_get_anon_config(cmd->tmp_pool, &user, NULL, NULL);
+
+  /* We use this call to get the possibly-changed user name. */
+  (void) pr_auth_get_anon_config(cmd->tmp_pool, &user, NULL, NULL);
 
   /* Gather our statistics. */
   if (user) {
@@ -1668,8 +1899,8 @@ static int auth_count_scoreboard(cmd_rec *cmd, char *user) {
           }
         }
 
-        if (session.class &&
-            strcasecmp(score->sce_class, session.class->cls_name) == 0) {
+        if (session.conn_class != NULL &&
+            strcasecmp(score->sce_class, session.conn_class->cls_name) == 0) {
           ccur++;
         }
       }
@@ -1688,7 +1919,7 @@ static int auth_count_scoreboard(cmd_rec *cmd, char *user) {
       "warning: error stashing '%s': %s", key, strerror(errno));
   }
 
-  if (session.class) {
+  if (session.conn_class != NULL) {
     key = "class-client-count";
     (void) pr_table_remove(session.notes, key, NULL);
     v = palloc(session.pool, sizeof(unsigned int));
@@ -1707,12 +1938,12 @@ static int auth_count_scoreboard(cmd_rec *cmd, char *user) {
 
   maxc = find_config(cmd->server->conf, CONF_PARAM, "MaxClientsPerClass",
     FALSE);
-  while (session.class && maxc) {
+  while (session.conn_class != NULL && maxc) {
     char *maxstr = "Sorry, the maximum number of clients (%m) from your class "
       "are already connected.";
     unsigned int *max = maxc->argv[1];
 
-    if (strcmp(maxc->argv[0], session.class->cls_name) != 0) {
+    if (strcmp(maxc->argv[0], session.conn_class->cls_name) != 0) {
       maxc = find_config_next(maxc, maxc->next, CONF_PARAM,
         "MaxClientsPerClass", FALSE);
       continue;
@@ -1726,14 +1957,16 @@ static int auth_count_scoreboard(cmd_rec *cmd, char *user) {
       char maxn[20] = {'\0'};
 
       pr_event_generate("mod_auth.max-clients-per-class",
-        session.class ? session.class->cls_name : NULL);
+        session.conn_class->cls_name);
 
       snprintf(maxn, sizeof(maxn), "%u", *max);
       pr_response_send(R_530, "%s", sreplace(cmd->tmp_pool, maxstr, "%m", maxn,
         NULL));
+      (void) pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
+
       pr_log_auth(PR_LOG_NOTICE,
         "Connection refused (max clients %u per class %s).", *max,
-        session.class->cls_name);
+        session.conn_class->cls_name);
       pr_session_disconnect(&auth_module, PR_SESS_DISCONNECT_CONFIG_ACL,
         "Denied by MaxClientsPerClass");
     }
@@ -1758,6 +1991,8 @@ static int auth_count_scoreboard(cmd_rec *cmd, char *user) {
       snprintf(maxn, sizeof(maxn), "%u", *max);
       pr_response_send(R_530, "%s", sreplace(cmd->tmp_pool, maxstr, "%m", maxn,
         NULL));
+      (void) pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
+
       pr_log_auth(PR_LOG_NOTICE,
         "Connection refused (max clients per host %u).", *max);
       pr_session_disconnect(&auth_module, PR_SESS_DISCONNECT_CONFIG_ACL,
@@ -1783,6 +2018,8 @@ static int auth_count_scoreboard(cmd_rec *cmd, char *user) {
       snprintf(maxn, sizeof(maxn), "%u", *max);
       pr_response_send(R_530, "%s", sreplace(cmd->tmp_pool, maxstr, "%m", maxn,
         NULL));
+      (void) pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
+
       pr_log_auth(PR_LOG_NOTICE,
         "Connection refused (max clients per user %u).", *max);
       pr_session_disconnect(&auth_module, PR_SESS_DISCONNECT_CONFIG_ACL,
@@ -1807,6 +2044,8 @@ static int auth_count_scoreboard(cmd_rec *cmd, char *user) {
       snprintf(maxn, sizeof(maxn), "%u", *max);
       pr_response_send(R_530, "%s", sreplace(cmd->tmp_pool, maxstr, "%m", maxn,
         NULL));
+      (void) pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
+
       pr_log_auth(PR_LOG_NOTICE, "Connection refused (max clients %u).", *max);
       pr_session_disconnect(&auth_module, PR_SESS_DISCONNECT_CONFIG_ACL,
         "Denied by MaxClients");
@@ -1830,6 +2069,8 @@ static int auth_count_scoreboard(cmd_rec *cmd, char *user) {
       snprintf(maxn, sizeof(maxn), "%u", *max);
       pr_response_send(R_530, "%s", sreplace(cmd->tmp_pool, maxstr, "%m", maxn,
         NULL));
+      (void) pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
+
       pr_log_auth(PR_LOG_NOTICE, "Connection refused (max hosts per host %u).",
         *max);
       pr_session_disconnect(&auth_module, PR_SESS_DISCONNECT_CONFIG_ACL,
@@ -1870,7 +2111,7 @@ MODRET auth_user(cmd_rec *cmd) {
   unsigned char *anon_require_passwd = NULL, *login_passwd_prompt = NULL;
 
   if (logged_in)
-    return PR_ERROR_MSG(cmd, R_503, _("You are already logged in"));
+    return PR_ERROR_MSG(cmd, R_500, _("Bad sequence of commands"));
 
   if (cmd->argc < 2)
     return PR_ERROR_MSG(cmd, R_500, _("USER: command requires a parameter"));
@@ -1889,9 +2130,9 @@ MODRET auth_user(cmd_rec *cmd) {
   c = pr_auth_get_anon_config(cmd->tmp_pool, &user, NULL, NULL);
 
   /* Check for AccessDenyMsg */
-  if ((denymsg = get_param_ptr((c ? c->subset : cmd->server->conf),
-      "AccessDenyMsg", FALSE)) != NULL) {
-
+  denymsg = get_param_ptr((c ? c->subset : cmd->server->conf), "AccessDenyMsg",
+    FALSE);
+  if (denymsg != NULL) {
     if (strstr(denymsg, "%u") != NULL) {
       denymsg = sreplace(cmd->tmp_pool, denymsg, "%u", user, NULL);
     }
@@ -2181,6 +2422,26 @@ MODRET set_accessgrantmsg(cmd_rec *cmd) {
   return PR_HANDLED(cmd);
 }
 
+/* usage: AllowChrootSymlinks on|off */
+MODRET set_allowchrootsymlinks(cmd_rec *cmd) {
+  int b = -1;
+  config_rec *c = NULL;
+
+  CHECK_ARGS(cmd, 1);
+  CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
+
+  b = get_boolean(cmd, 1);
+  if (b == -1) {
+    CONF_ERROR(cmd, "expected Boolean parameter");
+  }
+
+  c = add_config_param(cmd->argv[0], 1, NULL);
+  c->argv[0] = pcalloc(c->pool, sizeof(int));
+  *((int *) c->argv[0]) = b;
+
+  return PR_HANDLED(cmd);
+}
+
 MODRET set_anonrequirepassword(cmd_rec *cmd) {
   int bool = -1;
   config_rec *c = NULL;
@@ -2274,15 +2535,18 @@ MODRET set_createhome(cmd_rec *cmd) {
   config_rec *c = NULL;
   uid_t cuid = 0;
   gid_t cgid = 0, hgid = -1;
+  unsigned long flags = 0UL;
 
-  if (cmd->argc-1 < 1)
+  if (cmd->argc-1 < 1) {
     CONF_ERROR(cmd, "wrong number of parameters");
+  }
 
   CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
 
   bool = get_boolean(cmd, 1);
-  if (bool == -1)
+  if (bool == -1) {
     CONF_ERROR(cmd, "expected Boolean parameter");
+  }
 
   /* No need to process the rest if bool is FALSE. */
   if (bool == FALSE) {
@@ -2322,22 +2586,26 @@ MODRET set_createhome(cmd_rec *cmd) {
 
         skel_path = cmd->argv[++i];
 
-        if (*skel_path != '/')
+        if (*skel_path != '/') {
           CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "skel path '",
             skel_path, "' is not a full path", NULL));
+        }
 
-        if (pr_fsio_stat(skel_path, &st) < 0)
+        if (pr_fsio_stat(skel_path, &st) < 0) {
           CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "unable to stat '",
             skel_path, "': ", strerror(errno), NULL));
+        }
 
-        if (!S_ISDIR(st.st_mode))
+        if (!S_ISDIR(st.st_mode)) {
           CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "'", skel_path,
             "' is not a directory", NULL));
+        }
 
         /* Must not be world-writable. */
-        if (st.st_mode & S_IWOTH)
+        if (st.st_mode & S_IWOTH) {
           CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "'", skel_path,
             "' is world-writable", NULL));
+        }
 
         /* Move the index past the skel parameter */
         i++;
@@ -2418,6 +2686,10 @@ MODRET set_createhome(cmd_rec *cmd) {
         /* Move the index past the homegid parameter */
         i++;
 
+      } else if (strcasecmp(cmd->argv[i], "NoRootPrivs") == 0) {
+        flags |= PR_MKHOME_FL_USE_USER_PRIVS;
+        i++;
+
       } else {
         CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "unknown parameter: '",
           cmd->argv[i], "'", NULL));
@@ -2425,8 +2697,8 @@ MODRET set_createhome(cmd_rec *cmd) {
     }
   }
 
-  c = add_config_param(cmd->argv[0], 7, NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL);
+  c = add_config_param(cmd->argv[0], 8, NULL, NULL, NULL, NULL,
+    NULL, NULL, NULL, NULL);
 
   c->argv[0] = pcalloc(c->pool, sizeof(unsigned char));
   *((unsigned char *) c->argv[0]) = bool;
@@ -2435,8 +2707,9 @@ MODRET set_createhome(cmd_rec *cmd) {
   c->argv[2] = pcalloc(c->pool, sizeof(mode_t));
   *((mode_t *) c->argv[2]) = dirmode;
 
-  if (skel_path)
+  if (skel_path) {
     c->argv[3] = pstrdup(c->pool, skel_path);
+  }
 
   c->argv[4] = pcalloc(c->pool, sizeof(uid_t));
   *((uid_t *) c->argv[4]) = cuid;
@@ -2444,6 +2717,8 @@ MODRET set_createhome(cmd_rec *cmd) {
   *((gid_t *) c->argv[5]) = cgid;
   c->argv[6] = pcalloc(c->pool, sizeof(gid_t));
   *((gid_t *) c->argv[6]) = hgid;
+  c->argv[7] = pcalloc(c->pool, sizeof(unsigned long));
+  *((unsigned long *) c->argv[7]) = flags;
  
   return PR_HANDLED(cmd);
 }
@@ -2893,20 +3168,30 @@ MODRET set_rootlogin(cmd_rec *cmd) {
   return PR_HANDLED(cmd);
 }
 
+/* usage: RootRevoke on|off|UseNonCompliantActiveTransfer */
 MODRET set_rootrevoke(cmd_rec *cmd) {
-  int bool = -1;
+  int root_revoke = -1;
   config_rec *c = NULL;
 
   CHECK_ARGS(cmd, 1);
   CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL|CONF_ANON);
 
-  bool = get_boolean(cmd, 1);
-  if (bool == -1)
-    CONF_ERROR(cmd, "expected Boolean parameter");
+  /* A RootRevoke value of 0 indicates 'false', 1 indicates 'true', and
+   * 2 indicates 'NonCompliantActiveTransfer'.
+   */
+  root_revoke = get_boolean(cmd, 1);
+  if (root_revoke == -1) {
+    if (strcasecmp(cmd->argv[1], "UseNonCompliantActiveTransfer") != 0 &&
+        strcasecmp(cmd->argv[1], "UseNonCompliantActiveTransfers") != 0) {
+      CONF_ERROR(cmd, "expected Boolean parameter");
+    }
+
+    root_revoke = 2;
+  }
 
   c = add_config_param(cmd->argv[0], 1, NULL);
   c->argv[0] = pcalloc(c->pool, sizeof(unsigned char));
-  *((unsigned char *) c->argv[0]) = (unsigned char) bool;
+  *((unsigned char *) c->argv[0]) = (unsigned char) root_revoke;
 
   c->flags |= CF_MERGEDOWN;
   return PR_HANDLED(cmd);
@@ -3143,6 +3428,7 @@ MODRET set_userpassword(cmd_rec *cmd) {
 static conftable auth_conftab[] = {
   { "AccessDenyMsg",		set_accessdenymsg,		NULL },
   { "AccessGrantMsg",		set_accessgrantmsg,		NULL },
+  { "AllowChrootSymlinks",	set_allowchrootsymlinks,	NULL },
   { "AnonRequirePassword",	set_anonrequirepassword,	NULL },
   { "AnonRejectPasswords",	set_anonrejectpasswords,	NULL },
   { "AuthAliasOnly",		set_authaliasonly,		NULL },
@@ -3184,6 +3470,7 @@ static cmdtable auth_cmdtab[] = {
   { LOG_CMD_ERR,C_PASS,	G_NONE,	auth_err_pass,  FALSE,  FALSE },
   { CMD,	C_ACCT,	G_NONE,	auth_acct,	FALSE,	FALSE,	CL_AUTH },
   { CMD,	C_REIN,	G_NONE,	auth_rein,	FALSE,	FALSE,	CL_AUTH },
+  { POST_CMD,	C_HOST,	G_NONE,	auth_post_host,	FALSE,	FALSE },
   { 0, NULL }
 };
 

@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2001-2011 The ProFTPD Project team
+ * Copyright (c) 2001-2012 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@
  */
 
 /* NetIO routines
- * $Id: netio.c,v 1.53 2011/09/21 14:48:41 castaglia Exp $
+ * $Id: netio.c,v 1.57 2012/12/03 23:11:09 castaglia Exp $
  */
 
 #include "conf.h"
@@ -180,6 +180,19 @@ static int core_netio_poll_cb(pr_netio_stream_t *nstrm) {
   tval.tv_usec = 0;
 
   res = select(nstrm->strm_fd + 1, rfdsp, wfdsp, NULL, &tval);
+  while (res < 0) {
+    int xerrno = errno;
+
+    /* Watch for EAGAIN, and handle it by delaying temporarily. */
+    if (xerrno == EAGAIN) {
+      errno = EINTR;
+      pr_signals_handle();
+      continue;
+    }
+
+    break; 
+  }
+
   return res;
 }
 
@@ -570,6 +583,7 @@ int pr_netio_poll(pr_netio_stream_t *nstrm) {
           session.sf_flags |= SF_ABORT;
         }
 
+        errno = nstrm->strm_errno;
         return -1;
 
       case 0:
@@ -622,9 +636,18 @@ int pr_netio_postopen(pr_netio_stream_t *nstrm) {
   return -1;
 }
 
-int pr_netio_printf(pr_netio_stream_t *nstrm, const char *fmt, ...) {
-  va_list msg;
+int pr_netio_vprintf(pr_netio_stream_t *nstrm, const char *fmt, va_list msg) {
   char buf[PR_RESPONSE_BUFFER_SIZE] = {'\0'};
+
+  vsnprintf(buf, sizeof(buf), fmt, msg);
+  buf[sizeof(buf)-1] = '\0';
+
+  return pr_netio_write(nstrm, buf, strlen(buf));
+}
+
+int pr_netio_printf(pr_netio_stream_t *nstrm, const char *fmt, ...) {
+  int res;
+  va_list msg;
 
   if (!nstrm) {
     errno = EINVAL;
@@ -632,11 +655,10 @@ int pr_netio_printf(pr_netio_stream_t *nstrm, const char *fmt, ...) {
   }
 
   va_start(msg, fmt);
-  vsnprintf(buf, sizeof(buf), fmt, msg);
+  res = pr_netio_vprintf(nstrm, fmt, msg);
   va_end(msg);
-  buf[sizeof(buf)-1] = '\0';
 
-  return pr_netio_write(nstrm, buf, strlen(buf));
+  return res;
 }
 
 int pr_netio_printf_async(pr_netio_stream_t *nstrm, char *fmt, ...) {

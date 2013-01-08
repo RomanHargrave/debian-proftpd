@@ -94,7 +94,7 @@ sub retr_ok_raw_active {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -155,8 +155,7 @@ sub retr_ok_raw_active {
   defined(my $pid = fork()) or die("Can't fork: $!");
   if ($pid) {
     eval {
-      my $client = ProFTPD::TestSuite::FTP->new('127.0.0.1', $port);
-
+      my $client = ProFTPD::TestSuite::FTP->new('127.0.0.1', $port, 1);
       $client->login($user, $passwd);
 
       my $conn = $client->retr_raw($test_file);
@@ -173,15 +172,7 @@ sub retr_ok_raw_active {
       $resp_code = $client->response_code();
       $resp_msg = $client->response_msg();
 
-      my $expected;
-
-      $expected = 226;
-      $self->assert($expected == $resp_code,
-        test_msg("Expected $expected, got $resp_code"));
-
-      $expected = "Transfer complete";
-      $self->assert($expected eq $resp_msg,
-        test_msg("Expected '$expected', got '$resp_msg'"));
+      $self->assert_transfer_ok($resp_code, $resp_msg);
     };
 
     if ($@) {
@@ -207,6 +198,9 @@ sub retr_ok_raw_active {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -221,7 +215,7 @@ sub retr_ok_raw_passive {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -304,15 +298,7 @@ sub retr_ok_raw_passive {
       $resp_code = $client->response_code();
       $resp_msg = $client->response_msg();
 
-      my $expected;
-
-      $expected = 226;
-      $self->assert($expected == $resp_code,
-        test_msg("Expected $expected, got $resp_code"));
-
-      $expected = "Transfer complete";
-      $self->assert($expected eq $resp_msg,
-        test_msg("Expected '$expected', got '$resp_msg'"));
+      $self->assert_transfer_ok($resp_code, $resp_msg);
     };
 
     if ($@) {
@@ -338,6 +324,9 @@ sub retr_ok_raw_passive {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -352,7 +341,7 @@ sub retr_ok_file {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -423,7 +412,7 @@ sub retr_ok_file {
   defined(my $pid = fork()) or die("Can't fork: $!");
   if ($pid) {
     eval {
-      my $client = ProFTPD::TestSuite::FTP->new('127.0.0.1', $port);
+      my $client = ProFTPD::TestSuite::FTP->new('127.0.0.1', $port, 1);
 
       $client->login($user, $passwd);
 
@@ -466,6 +455,9 @@ sub retr_ok_file {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -480,7 +472,7 @@ sub retr_fails_not_reg {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -588,6 +580,9 @@ sub retr_fails_not_reg {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -602,7 +597,7 @@ sub retr_fails_login_required {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $config = {
     PidFile => $pid_file,
@@ -679,6 +674,9 @@ sub retr_fails_login_required {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -693,7 +691,7 @@ sub retr_fails_no_path {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -800,6 +798,9 @@ sub retr_fails_no_path {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -814,7 +815,7 @@ sub retr_fails_enoent {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -925,6 +926,9 @@ sub retr_fails_enoent {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -939,7 +943,7 @@ sub retr_fails_enoent_glob {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -1049,6 +1053,9 @@ sub retr_fails_enoent_glob {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -1063,7 +1070,7 @@ sub retr_fails_eperm {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -1184,6 +1191,9 @@ sub retr_fails_eperm {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -1198,7 +1208,7 @@ sub retr_ok_dir_with_spaces {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -1290,15 +1300,7 @@ sub retr_ok_dir_with_spaces {
       $resp_code = $client->response_code();
       $resp_msg = $client->response_msg();
 
-      my $expected;
-
-      $expected = 226;
-      $self->assert($expected == $resp_code,
-        test_msg("Expected $expected, got $resp_code"));
-
-      $expected = "Transfer complete";
-      $self->assert($expected eq $resp_msg,
-        test_msg("Expected '$expected', got '$resp_msg'"));
+      $self->assert_transfer_ok($resp_code, $resp_msg);
     };
 
     if ($@) {
@@ -1324,6 +1326,9 @@ sub retr_ok_dir_with_spaces {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -1338,7 +1343,7 @@ sub retr_leading_whitespace {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -1428,18 +1433,10 @@ sub retr_leading_whitespace {
       $resp_code = $client->response_code();
       $resp_msg = $client->response_msg();
 
-      my $expected;
-
-      $expected = 226;
-      $self->assert($expected == $resp_code,
-        test_msg("Expected $expected, got $resp_code"));
-
-      $expected = "Transfer complete";
-      $self->assert($expected eq $resp_msg,
-        test_msg("Expected '$expected', got '$resp_msg'"));
+      $self->assert_transfer_ok($resp_code, $resp_msg);
 
       my $buflen = length($buf);
-      $expected = $test_sz;
+      my $expected = $test_sz;
       $self->assert($expected == $buflen,
         test_msg("Expected $expected, got $buflen"));
     };
@@ -1467,6 +1464,9 @@ sub retr_leading_whitespace {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -1481,7 +1481,7 @@ sub retr_bug3496 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/cmds.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/cmds.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $auth_user_file = File::Spec->rel2abs("$tmpdir/cmds.passwd");
   my $auth_group_file = File::Spec->rel2abs("$tmpdir/cmds.group");
@@ -1602,6 +1602,9 @@ sub retr_bug3496 {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 

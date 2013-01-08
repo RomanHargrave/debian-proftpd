@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2011 The ProFTPD Project team
+ * Copyright (c) 2001-2012 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* Unix authentication module for ProFTPD
- * $Id: mod_auth_unix.c,v 1.50 2011/05/23 21:11:56 castaglia Exp $
+ * $Id: mod_auth_unix.c,v 1.54 2012/11/27 17:27:51 castaglia Exp $
  */
 
 #include "conf.h"
@@ -106,6 +106,8 @@ extern int _pw_stayopen;
 
 module auth_unix_module;
 
+static const char *trace_channel = "auth";
+
 static FILE *pwdf = NULL;
 static FILE *grpf = NULL;
 
@@ -131,6 +133,10 @@ extern unsigned char persistent_passwd;
 #define AUTH_UNIX_OPT_MAGIC_TOKEN_CHROOT	0x0004
 
 static unsigned long auth_unix_opts = 0UL;
+
+/* Necessary prototypes */
+static void auth_unix_exit_ev(const void *, void *);
+static int auth_unix_sess_init(void);
 
 static void p_setpwent(void) {
   if (pwdf)
@@ -464,6 +470,9 @@ static char *_get_pw_info(pool *p, const char *u, time_t *lstchg, time_t *min,
   struct spwd *sp;
   char *cpw = NULL;
 
+  pr_trace_msg(trace_channel, 7,
+    "looking up user '%s' via Unix shadow mechanism", u);
+
   PRIVS_ROOT
 #ifdef HAVE_SETSPENT
   setspent();
@@ -502,11 +511,18 @@ static char *_get_pw_info(pool *p, const char *u, time_t *lstchg, time_t *min,
       *expire = SP_CVT_DAYS(sp->sp_expire);
     }
 #endif /* HAVE_SPWD_SP_EXPIRE */
+
+  } else {
+    pr_log_debug(DEBUG5, "mod_auth_unix: getspnam(3) for user '%s' error: %s",
+      u, strerror(errno));
   }
 
 #ifdef PR_USE_AUTO_SHADOW
   if (sp == NULL) {
     struct passwd *pw;
+
+    pr_trace_msg(trace_channel, 7,
+      "looking up user '%s' via Unix autoshadow mechanism", u);
 
     endspent();
     PRIVS_RELINQUISH
@@ -538,6 +554,10 @@ static char *_get_pw_info(pool *p, const char *u, time_t *lstchg, time_t *min,
       if (expire != NULL) {
         *expire = (time_t) -1;
       }
+
+    } else {
+      pr_log_debug(DEBUG5, "mod_auth_unix: getpwnam(3) for user '%s' error: %s",
+        u, strerror(errno));
     }
 
   } else {
@@ -567,6 +587,9 @@ static char *_get_pw_info(pool *p, const char *u, time_t *lstchg, time_t *min,
   * requires that we are root in order to have the password member
   * filled in.
   */
+
+  pr_trace_msg(trace_channel, 7,
+    "looking up user '%s' via normal Unix mechanism", u);
 
   PRIVS_ROOT
 #if !defined(HAVE_GETPRPWENT) || defined(COMSEC)
@@ -606,6 +629,10 @@ static char *_get_pw_info(pool *p, const char *u, time_t *lstchg, time_t *min,
 
     if (expire)
       *expire = (time_t) -1;
+
+  } else {
+    pr_log_debug(DEBUG5, "mod_auth_unix: getpwnam(3) for user '%s' error: %s",
+      u, strerror(errno));
   }
 
   endpwent();
@@ -1191,6 +1218,33 @@ MODRET pw_getgroups(cmd_rec *cmd) {
   return PR_DECLINED(cmd);
 }
 
+/* Command handlers
+ */
+
+MODRET auth_unix_post_host(cmd_rec *cmd) {
+
+  /* If the HOST command changed the main_server pointer, reinitialize
+   * ourselves.
+   */
+  if (session.prev_server != NULL) {
+    int res;
+
+    pr_event_unregister(&auth_unix_module, "core.exit", auth_unix_exit_ev);
+    auth_unix_opts = 0UL;
+
+    res = auth_unix_sess_init();
+    if (res < 0) {
+      pr_session_disconnect(&auth_unix_module,
+        PR_SESS_DISCONNECT_SESSION_INIT_FAILED, NULL);
+    }
+  }
+
+  return PR_DECLINED(cmd);
+}
+
+/* Configuration handlers
+ */
+
 /* usage: AuthUnixOptions opt1 ... */
 MODRET set_authunixoptions(cmd_rec *cmd) {
   config_rec *c;
@@ -1285,6 +1339,11 @@ static conftable auth_unix_conftab[] = {
   { NULL,			NULL,				NULL }
 };
 
+static cmdtable auth_unix_cmdtab[] = {
+  { POST_CMD,	C_HOST,	G_NONE,	auth_unix_post_host,	FALSE, FALSE },
+  { 0, NULL }
+};
+
 static authtable auth_unix_authtab[] = {
   { 0,  "setpwent",	pw_setpwent },
   { 0,  "endpwent",	pw_endpwent },
@@ -1320,7 +1379,7 @@ module auth_unix_module = {
   auth_unix_conftab,
 
   /* Module command handler table */
-  NULL,
+  auth_unix_cmdtab,
 
   /* Module authentication handler table */
   auth_unix_authtab,

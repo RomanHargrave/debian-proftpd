@@ -4,6 +4,7 @@ use lib qw(t/lib);
 use base qw(ProFTPD::TestSuite::Child);
 use strict;
 
+use Carp;
 use File::Spec;
 use IO::Handle;
 
@@ -55,6 +56,16 @@ my $TESTS = {
     test_class => [qw(forking)],
   },
 
+  ban_on_event_client_connect_rate => {
+    order => ++$order,
+    test_class => [qw(forking)],
+  },
+
+  ban_sighup_bug3751 => {
+    order => ++$order,
+    test_class => [qw(bug forking os_linux)],
+  },
+
 };
 
 sub new {
@@ -65,6 +76,46 @@ sub list_tests {
   return testsuite_get_runnable_tests($TESTS);
 }
 
+sub get_server_pid {
+  my $pid_file = shift;
+
+  my $pid;
+  if (open(my $fh, "< $pid_file")) {
+    $pid = <$fh>;
+    chomp($pid);
+    close($fh);
+
+  } else {
+    croak("Can't read $pid_file: $!");
+  }
+
+  return $pid;
+}
+
+sub server_open_fds {
+  my $pid_file = shift;
+
+  my $pid = get_server_pid($pid_file);
+
+  my $proc_dir = "/proc/$pid/fd";
+  if (opendir(my $dirh, $proc_dir)) {
+    my $count = 0;
+
+    # Only count entries whose names are numbers
+    while (my $dent = readdir($dirh)) {
+      if ($dent =~ /^\d+$/) {
+        $count++;
+      }
+    }
+ 
+    closedir($dirh); 
+    return $count;
+
+  } else {
+    croak("Can't open directory '$proc_dir': $!");
+  }
+}
+
 sub ban_on_event_max_login_attempts {
   my $self = shift;
   my $tmpdir = $self->{tmpdir};
@@ -73,7 +124,7 @@ sub ban_on_event_max_login_attempts {
   my $pid_file = File::Spec->rel2abs("$tmpdir/ban.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/ban.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $ban_tab = File::Spec->rel2abs("$tmpdir/ban.tab");
 
@@ -82,6 +133,7 @@ sub ban_on_event_max_login_attempts {
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -100,7 +152,7 @@ sub ban_on_event_max_login_attempts {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $config = {
     PidFile => $pid_file,
@@ -112,7 +164,7 @@ sub ban_on_event_max_login_attempts {
     AuthUserFile => $auth_user_file,
     AuthGroupFile => $auth_group_file,
 
-    MaxLoginAttempts => 1,
+    MaxLoginAttempts => 2,
 
     IfModules => {
       'mod_ban.c' => {
@@ -151,16 +203,13 @@ sub ban_on_event_max_login_attempts {
     eval {
       my $client = ProFTPD::TestSuite::FTP->new('127.0.0.1', $port);
 
-      my ($resp_code, $resp_msg);
-
       eval { $client->login($user, 'foo') };
       unless ($@) {
         die("Login succeeded unexpectedly");
-
-      } else {
-        $resp_code = $client->response_code();
-        $resp_msg = $client->response_msg();
       }
+
+      my $resp_code = $client->response_code();
+      my $resp_msg = $client->response_msg();
 
       my $expected;
 
@@ -175,11 +224,10 @@ sub ban_on_event_max_login_attempts {
       eval { $client->login($user, 'foo') };
       unless ($@) {
         die("Login succeeded unexpectedly");
-
-      } else {
-        $resp_code = $client->response_code();
-        $resp_msg = $client->response_msg();
       }
+
+      $resp_code = $client->response_code();
+      $resp_msg = $client->response_msg();
 
       $expected = 530;
       $self->assert($expected == $resp_code,
@@ -228,6 +276,9 @@ sub ban_on_event_max_login_attempts {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -242,7 +293,7 @@ sub ban_message {
   my $pid_file = File::Spec->rel2abs("$tmpdir/ban.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/ban.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $ban_tab = File::Spec->rel2abs("$tmpdir/ban.tab");
 
@@ -251,6 +302,7 @@ sub ban_message {
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -269,7 +321,7 @@ sub ban_message {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $config = {
     PidFile => $pid_file,
@@ -279,7 +331,7 @@ sub ban_message {
     AuthUserFile => $auth_user_file,
     AuthGroupFile => $auth_group_file,
 
-    MaxLoginAttempts => 1,
+    MaxLoginAttempts => 2,
 
     IfModules => {
       'mod_ban.c' => {
@@ -320,16 +372,13 @@ sub ban_message {
     eval {
       my $client = ProFTPD::TestSuite::FTP->new('127.0.0.1', $port);
 
-      my ($resp_code, $resp_msg);
-
       eval { $client->login($user, 'foo') };
       unless ($@) {
         die("Login succeeded unexpectedly");
-
-      } else {
-        $resp_code = $client->response_code();
-        $resp_msg = $client->response_msg();
       }
+
+      my $resp_code = $client->response_code();
+      my $resp_msg = $client->response_msg();
 
       my $expected;
 
@@ -344,11 +393,10 @@ sub ban_message {
       eval { $client->login($user, 'foo') };
       unless ($@) {
         die("Login succeeded unexpectedly");
-
-      } else {
-        $resp_code = $client->response_code();
-        $resp_msg = $client->response_msg();
       }
+
+      $resp_code = $client->response_code();
+      $resp_msg = $client->response_msg();
 
       $expected = 530;
       $self->assert($expected == $resp_code,
@@ -395,6 +443,9 @@ sub ban_message {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -409,7 +460,7 @@ sub ban_ifclass_engine_on {
   my $pid_file = File::Spec->rel2abs("$tmpdir/ban.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/ban.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $ban_tab = File::Spec->rel2abs("$tmpdir/ban.tab");
 
@@ -418,6 +469,7 @@ sub ban_ifclass_engine_on {
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -436,7 +488,7 @@ sub ban_ifclass_engine_on {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $config = {
     PidFile => $pid_file,
@@ -446,7 +498,7 @@ sub ban_ifclass_engine_on {
     AuthUserFile => $auth_user_file,
     AuthGroupFile => $auth_group_file,
 
-    MaxLoginAttempts => 1,
+    MaxLoginAttempts => 2,
 
     Class => {
       test => {
@@ -581,6 +633,9 @@ EOI
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -595,7 +650,7 @@ sub ban_ifclass_engine_off {
   my $pid_file = File::Spec->rel2abs("$tmpdir/ban.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/ban.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $ban_tab = File::Spec->rel2abs("$tmpdir/ban.tab");
 
@@ -604,6 +659,7 @@ sub ban_ifclass_engine_off {
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -622,7 +678,7 @@ sub ban_ifclass_engine_off {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $config = {
     PidFile => $pid_file,
@@ -745,6 +801,9 @@ EOI
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -759,7 +818,7 @@ sub ban_max_logins_exceeded_bug3281 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/ban.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/ban.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $ban_tab = File::Spec->rel2abs("$tmpdir/ban.tab");
 
@@ -768,6 +827,7 @@ sub ban_max_logins_exceeded_bug3281 {
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -786,7 +846,7 @@ sub ban_max_logins_exceeded_bug3281 {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $config = {
     PidFile => $pid_file,
@@ -798,7 +858,7 @@ sub ban_max_logins_exceeded_bug3281 {
     AuthUserFile => $auth_user_file,
     AuthGroupFile => $auth_group_file,
 
-    MaxLoginAttempts => 1,
+    MaxLoginAttempts => 2,
 
     IfModules => {
       'mod_ban.c' => {
@@ -922,6 +982,9 @@ sub ban_max_logins_exceeded_bug3281 {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -936,7 +999,7 @@ sub ban_timeout_login_exceeded_bug3281 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/ban.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/ban.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $ban_tab = File::Spec->rel2abs("$tmpdir/ban.tab");
 
@@ -945,6 +1008,7 @@ sub ban_timeout_login_exceeded_bug3281 {
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -963,7 +1027,7 @@ sub ban_timeout_login_exceeded_bug3281 {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
 
   my $timeout_login = 1;
 
@@ -1088,6 +1152,9 @@ sub ban_timeout_login_exceeded_bug3281 {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -1102,7 +1169,7 @@ sub ban_engine_vhost_bug3355 {
   my $pid_file = File::Spec->rel2abs("$tmpdir/ban.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/ban.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $ban_tab = File::Spec->rel2abs("$tmpdir/ban.tab");
 
@@ -1111,6 +1178,7 @@ sub ban_engine_vhost_bug3355 {
 
   my $user = 'proftpd';
   my $passwd = 'test';
+  my $group = 'ftpd';
   my $home_dir = File::Spec->rel2abs($tmpdir);
   my $uid = 500;
   my $gid = 500;
@@ -1129,7 +1197,9 @@ sub ban_engine_vhost_bug3355 {
 
   auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
     '/bin/bash');
-  auth_group_write($auth_group_file, 'ftpd', $gid, $user);
+  auth_group_write($auth_group_file, $group, $gid, $user);
+
+  my $max_login_attempts = 2;
 
   my $config = {
     PidFile => $pid_file,
@@ -1142,7 +1212,7 @@ sub ban_engine_vhost_bug3355 {
     AuthUserFile => $auth_user_file,
     AuthGroupFile => $auth_group_file,
 
-    MaxLoginAttempts => 1,
+    MaxLoginAttempts => $max_login_attempts,
 
     IfModules => {
       'mod_ban.c' => {
@@ -1170,7 +1240,7 @@ sub ban_engine_vhost_bug3355 {
   Port $vhost_port
   AuthUserFile $auth_user_file
   AuthGroupFile $auth_group_file
-  MaxLoginAttempts 1
+  MaxLoginAttempts $max_login_attempts
   <IfModule mod_ban.c>
     BanEngine off
   </IfModule>
@@ -1271,6 +1341,9 @@ EOC
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
@@ -1285,7 +1358,7 @@ sub ban_unhandled_cmd {
   my $pid_file = File::Spec->rel2abs("$tmpdir/ban.pid");
   my $scoreboard_file = File::Spec->rel2abs("$tmpdir/ban.scoreboard");
 
-  my $log_file = File::Spec->rel2abs('tests.log');
+  my $log_file = test_get_logfile();
 
   my $ban_tab = File::Spec->rel2abs("$tmpdir/ban.tab");
 
@@ -1449,9 +1522,290 @@ sub ban_unhandled_cmd {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
     die($ex);
   }
 
+  unlink($log_file);
+}
+
+sub ban_on_event_client_connect_rate {
+  my $self = shift;
+  my $tmpdir = $self->{tmpdir};
+
+  my $config_file = "$tmpdir/ban.conf";
+  my $pid_file = File::Spec->rel2abs("$tmpdir/ban.pid");
+  my $scoreboard_file = File::Spec->rel2abs("$tmpdir/ban.scoreboard");
+
+  my $log_file = test_get_logfile();
+
+  my $ban_tab = File::Spec->rel2abs("$tmpdir/ban.tab");
+
+  my $auth_user_file = File::Spec->rel2abs("$tmpdir/ban.passwd");
+  my $auth_group_file = File::Spec->rel2abs("$tmpdir/ban.group");
+
+  my $user = 'proftpd';
+  my $passwd = 'test';
+  my $group = 'ftpd';
+  my $home_dir = File::Spec->rel2abs($tmpdir);
+  my $uid = 500;
+  my $gid = 500;
+  
+  # Make sure that, if we're running as root, that the home directory has
+  # permissions/privs set for the account we create
+  if ($< == 0) {
+    unless (chmod(0755, $home_dir)) {
+      die("Can't set perms on $home_dir to 0755: $!");
+    }
+
+    unless (chown($uid, $gid, $home_dir)) {
+      die("Can't set owner of $home_dir to $uid/$gid: $!");
+    }
+  }
+
+  auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
+    '/bin/bash');
+  auth_group_write($auth_group_file, $group, $gid, $user);
+
+  my $config = {
+    PidFile => $pid_file,
+    ScoreboardFile => $scoreboard_file,
+    SystemLog => $log_file,
+    TraceLog => $log_file,
+    Trace => 'event:10',
+
+    AuthUserFile => $auth_user_file,
+    AuthGroupFile => $auth_group_file,
+
+    IfModules => {
+      'mod_ban.c' => {
+        BanEngine => 'on',
+        BanLog => $log_file,
+
+        # This says to ban a client which connects more than twice in the
+        # last 1 minute will be banned for 5 secs
+        BanOnEvent => 'ClientConnectRate 2/00:01:00 00:00:05',
+
+        BanTable => $ban_tab,
+      },
+
+      'mod_delay.c' => {
+        DelayEngine => 'off',
+      },
+    },
+  };
+
+  my ($port, $config_user, $config_group) = config_write($config_file, $config);
+
+  # Open pipes, for use between the parent and child processes.  Specifically,
+  # the child will indicate when it's done with its test by writing a message
+  # to the parent.
+  my ($rfh, $wfh);
+  unless (pipe($rfh, $wfh)) {
+    die("Can't open pipe: $!");
+  }
+
+  my $ex;
+
+  # Fork child
+  $self->handle_sigchld();
+  defined(my $pid = fork()) or die("Can't fork: $!");
+  if ($pid) {
+    eval {
+      my $client = ProFTPD::TestSuite::FTP->new('127.0.0.1', $port);
+
+      eval { $client->login($user, 'foo') };
+      unless ($@) {
+        die("Login succeeded unexpectedly");
+      }
+
+      my $resp_code = $client->response_code();
+      my $resp_msg = $client->response_msg();
+
+      my $expected;
+
+      $expected = 530;
+      $self->assert($expected == $resp_code,
+        test_msg("Expected $expected, got $resp_code"));
+
+      $expected = "Login incorrect.";
+      $self->assert($expected eq $resp_msg,
+        test_msg("Expected '$expected', got '$resp_msg'"));
+
+      eval { $client->login($user, 'foo') };
+      unless ($@) {
+        die("Login succeeded unexpectedly");
+      }
+
+      $resp_code = $client->response_code();
+      $resp_msg = $client->response_msg();
+
+      $expected = 530;
+      $self->assert($expected == $resp_code,
+        test_msg("Expected $expected, got $resp_code"));
+
+      $expected = "Login incorrect.";
+      $self->assert($expected eq $resp_msg,
+        test_msg("Expected '$expected', got '$resp_msg'"));
+
+      # Now try again with the correct info; we should be banned.  Note
+      # that we have to create a separate connection for this.
+
+      eval { $client = ProFTPD::TestSuite::FTP->new('127.0.0.1', $port,
+        undef, 0) };
+      unless ($@) {
+        die("Connect succeeded unexpectedly");
+      }
+
+      my $conn_ex = ProFTPD::TestSuite::FTP::get_connect_exception();
+
+      $expected = "";
+      $self->assert($expected eq $conn_ex,
+        test_msg("Expected '$expected', got '$conn_ex'"));
+    };
+
+    if ($@) {
+      $ex = $@;
+    }
+
+    $wfh->print("done\n");
+    $wfh->flush();
+
+  } else {
+    eval { server_wait($config_file, $rfh) };
+    if ($@) {
+      warn($@);
+      exit 1;
+    }
+
+    exit 0;
+  }
+
+  # Stop server
+  server_stop($pid_file);
+
+  $self->assert_child_ok($pid);
+
+  if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
+    die($ex);
+  }
+
+  unlink($log_file);
+}
+
+sub ban_sighup_bug3751 {
+  my $self = shift;
+  my $tmpdir = $self->{tmpdir};
+
+  my $config_file = "$tmpdir/ban.conf";
+  my $pid_file = File::Spec->rel2abs("$tmpdir/ban.pid");
+  my $scoreboard_file = File::Spec->rel2abs("$tmpdir/ban.scoreboard");
+
+  my $log_file = test_get_logfile();
+
+  my $ban_tab = File::Spec->rel2abs("$tmpdir/ban.tab");
+
+  my $auth_user_file = File::Spec->rel2abs("$tmpdir/ban.passwd");
+  my $auth_group_file = File::Spec->rel2abs("$tmpdir/ban.group");
+
+  my $user = 'proftpd';
+  my $passwd = 'test';
+  my $group = 'ftpd';
+  my $home_dir = File::Spec->rel2abs($tmpdir);
+  my $uid = 500;
+  my $gid = 500;
+  
+  # Make sure that, if we're running as root, that the home directory has
+  # permissions/privs set for the account we create
+  if ($< == 0) {
+    unless (chmod(0755, $home_dir)) {
+      die("Can't set perms on $home_dir to 0755: $!");
+    }
+
+    unless (chown($uid, $gid, $home_dir)) {
+      die("Can't set owner of $home_dir to $uid/$gid: $!");
+    }
+  }
+
+  auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
+    '/bin/bash');
+  auth_group_write($auth_group_file, $group, $gid, $user);
+
+  my $config = {
+    PidFile => $pid_file,
+    ScoreboardFile => $scoreboard_file,
+    SystemLog => $log_file,
+    TraceLog => $log_file,
+    Trace => 'event:10',
+
+    AuthUserFile => $auth_user_file,
+    AuthGroupFile => $auth_group_file,
+
+    MaxLoginAttempts => 2,
+
+    IfModules => {
+      'mod_ban.c' => {
+        BanEngine => 'on',
+        BanLog => $log_file,
+
+        # This says to ban a client which exceeds the MaxLoginAttempts
+        # limit once within the last 1 minute will be banned for 5 secs
+        BanOnEvent => 'MaxLoginAttempts 1/00:01:00 00:00:05',
+
+        BanTable => $ban_tab,
+      },
+
+      'mod_delay.c' => {
+        DelayEngine => 'off',
+      },
+    },
+  };
+
+  my ($port, $config_user, $config_group) = config_write($config_file, $config);
+
+  # Start the server
+  server_start($config_file);
+
+  # Use proc(5) filesystem to count the number of open fds in the daemon
+  my $orig_nfds = server_open_fds($pid_file);
+  if ($ENV{TEST_VERBOSE}) {
+    print STDERR "Found $orig_nfds open fds after server startup\n";
+  }
+
+  # Restart the server
+  server_restart($pid_file);
+  sleep(1);
+
+  # Count the open fds again, make sure we haven't leaked any
+  my $restart_nfds = server_open_fds($pid_file);
+  if ($ENV{TEST_VERBOSE}) {
+    print STDERR "Found $restart_nfds open fds after server restart #1\n";
+  }
+
+  $self->assert($orig_nfds == $restart_nfds,
+    test_msg("Expected $orig_nfds open fds, found $restart_nfds"));
+
+  # Restart the server
+  server_restart($pid_file);
+  sleep(1);
+
+  # And count the open fds one more time, to make doubly sure we are not
+  # leaking fds.
+  $restart_nfds = server_open_fds($pid_file);
+  if ($ENV{TEST_VERBOSE}) {
+    print STDERR "Found $restart_nfds open fds after server restart #2\n";
+  }
+
+  $self->assert($orig_nfds == $restart_nfds,
+    test_msg("Expected $orig_nfds open fds, found $restart_nfds"));
+
+  # Stop server
+  server_stop($pid_file);
   unlink($log_file);
 }
 

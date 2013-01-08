@@ -1,7 +1,7 @@
 /*
  * ProFTPD: mod_wrap2 -- tcpwrappers-like access control
  *
- * Copyright (c) 2000-2011 TJ Saunders
+ * Copyright (c) 2000-2012 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -150,7 +150,7 @@ static int wrap2_openlog(void) {
 
   pr_signals_block();
   PRIVS_ROOT
-  res = pr_log_openfile(wrap2_logname, &wrap2_logfd, 0640);
+  res = pr_log_openfile(wrap2_logname, &wrap2_logfd, PR_LOG_SYSTEM_MODE);
   PRIVS_RELINQUISH
   pr_signals_unblock();
 
@@ -1844,6 +1844,12 @@ MODRET wrap2_post_pass_err(cmd_rec *cmd) {
   if (!wrap2_engine)
     return PR_DECLINED(cmd);
 
+  /* Clear the values from the session struct as well, specifically
+   * session.user.  Failure to do so caused Bug#3727.
+   */
+  session.user = NULL;
+  session.group = NULL;
+   
   wrap2_ctxt = NULL;
   wrap2_allow_table = NULL;
   wrap2_deny_table = NULL;
@@ -1939,8 +1945,15 @@ static int wrap2_sess_init(void) {
   pr_event_register(&wrap2_module, "core.exit", wrap2_exit_ev, NULL);
 
   c = find_config(main_server->conf, CONF_PARAM, "WrapOptions", FALSE);
-  if (c) {
-    wrap2_opts = *((unsigned long *) c->argv[0]);
+  while (c != NULL) {
+    unsigned long opts;
+
+    pr_signals_handle();
+
+    opts = *((unsigned long *) c->argv[0]);
+    wrap2_opts |= opts;
+
+    c = find_config_next(c, c->next, CONF_PARAM, "WrapOptions", FALSE);
   }
 
   if (wrap2_opts & WRAP_OPT_CHECK_ON_CONNECT) {

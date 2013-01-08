@@ -1,7 +1,7 @@
 /*
  * ProFTPD: mod_ban -- a module implementing ban lists using the Controls API
  *
- * Copyright (c) 2004-2011 TJ Saunders
+ * Copyright (c) 2004-2012 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  * This is mod_ban, contrib software for proftpd 1.2.x/1.3.x.
  * For more information contact TJ Saunders <tj@castaglia.org>.
  *
- * $Id: mod_ban.c,v 1.54 2011/05/23 23:23:44 castaglia Exp $
+ * $Id: mod_ban.c,v 1.59 2012/02/28 18:14:42 castaglia Exp $
  */
 
 #include "conf.h"
@@ -387,8 +387,12 @@ static struct ban_data *ban_get_shm(pr_fh_t *tabfh) {
   /* Get a key for this path. */
   key = ftok(tabfh->fh_path, BAN_PROJ_ID);
   if (key == (key_t) -1) {
+    int xerrno = errno;
+
     (void) pr_log_writefile(ban_logfd, MOD_BAN_VERSION,
-      "unable to get key for '%s': %s", tabfh->fh_path, strerror(errno));
+      "unable to get key for '%s': %s", tabfh->fh_path, strerror(xerrno));
+
+    errno = xerrno;
     return NULL;
   }
 
@@ -413,6 +417,7 @@ static struct ban_data *ban_get_shm(pr_fh_t *tabfh) {
   data = (struct ban_data *) shmat(shmid, NULL, 0);
   if (data == NULL) {
     int xerrno = errno;
+
     (void) pr_log_writefile(ban_logfd, MOD_BAN_VERSION,
       "unable to attach to shm: %s", strerror(xerrno));
 
@@ -748,7 +753,7 @@ static void ban_send_mesg(pool *p, const char *user, const char *rule_mesg) {
     if (strstr(mesg, "%c")) {
       const char *class;
 
-      class = session.class ? session.class->cls_name : "(none)";
+      class = session.conn_class ? session.conn_class->cls_name : "(none)";
       mesg = sreplace(p, mesg, "%c", class, NULL);
     }
 
@@ -2079,8 +2084,6 @@ MODRET ban_post_pass(cmd_rec *cmd) {
 
 /* usage: BanCache driver */
 MODRET set_bancache(cmd_rec *cmd) {
-  config_rec *c;
-
   if (cmd->argc-1 < 1 ||
       cmd->argc-1 > 3) {
     CONF_ERROR(cmd, "wrong number of parameters");
@@ -2090,17 +2093,17 @@ MODRET set_bancache(cmd_rec *cmd) {
 
 #ifdef PR_USE_MEMCACHE
   if (strcmp(cmd->argv[1], "memcache") != 0) {
-#else
-  if (TRUE) {
-#endif /* !PR_USE_MEMCACHE */
-    CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "unsupported BanCache driver '",
-      cmd->argv[1], "'", NULL));
+    config_rec *c;
+
+    c = add_config_param(cmd->argv[0], 1, NULL);
+    c->argv[0] = pstrdup(c->pool, cmd->argv[1]);
+
+    return PR_HANDLED(cmd);
   }
+#endif /* !PR_USE_MEMCACHE */
 
-  c = add_config_param(cmd->argv[0], 1, NULL);
-  c->argv[0] = pstrdup(c->pool, cmd->argv[1]);
-
-  return PR_HANDLED(cmd);
+  CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "unsupported BanCache driver '",
+    cmd->argv[1], "'", NULL));
 }
 
 /* usage: BanCacheOptions MatchServer */
@@ -2717,6 +2720,7 @@ static void ban_mod_unload_ev(const void *event_data, void *user_data) {
 
 static void ban_postparse_ev(const void *event_data, void *user_data) {
   struct ban_data *lists;
+  int xerrno;
 
   if (ban_engine != TRUE)
     return;
@@ -2728,6 +2732,7 @@ static void ban_postparse_ev(const void *event_data, void *user_data) {
 
     PRIVS_ROOT
     res = pr_log_openfile(ban_log, &ban_logfd, 0660);
+    xerrno = errno;
     PRIVS_RELINQUISH
 
     switch (res) {
@@ -2736,7 +2741,7 @@ static void ban_postparse_ev(const void *event_data, void *user_data) {
 
       case -1:
         pr_log_debug(DEBUG1, MOD_BAN_VERSION ": unable to open BanLog '%s': %s",
-          ban_log, strerror(errno));
+          ban_log, strerror(xerrno));
         break;
 
       case PR_LOG_SYMLINK:
@@ -2760,13 +2765,29 @@ static void ban_postparse_ev(const void *event_data, void *user_data) {
 
   PRIVS_ROOT
   ban_tabfh = pr_fsio_open(ban_table, O_RDWR|O_CREAT); 
+  xerrno = errno;
   PRIVS_RELINQUISH
 
-  if (!ban_tabfh) {
+  if (ban_tabfh == NULL) {
     pr_log_pri(PR_LOG_NOTICE, MOD_BAN_VERSION
-      ": unable to open BanTable '%s': %s", ban_table, strerror(errno));
+      ": unable to open BanTable '%s': %s", ban_table, strerror(xerrno));
     pr_session_disconnect(&ban_module, PR_SESS_DISCONNECT_BAD_CONFIG, NULL);
   }
+
+  if (ban_tabfh->fh_fd <= STDERR_FILENO) {
+    int usable_fd;
+
+    usable_fd = pr_fs_get_usable_fd(ban_tabfh->fh_fd);
+    if (usable_fd < 0) {
+      pr_log_debug(DEBUG0, MOD_BAN_VERSION
+        "warning: unable to find good fd for BanTable %s: %s", ban_table,
+        strerror(errno));
+
+    } else {
+      close(ban_tabfh->fh_fd);
+      ban_tabfh->fh_fd = usable_fd;
+    }
+  } 
 
   /* Get the shm for storing all of our ban info. */
   lists = ban_get_shm(ban_tabfh);
@@ -2819,39 +2840,21 @@ static void ban_restart_ev(const void *event_data, void *user_data) {
   pr_event_unregister(&ban_module, "mod_auth.max-users-per-host", NULL);
   pr_event_unregister(&ban_module, "mod_ban.client-connect-rate", NULL);
 
-  /* "Bounce" the log file descriptor */
+  /* Close the BanLog file descriptor; it will be reopened by the postparse
+   * event listener.
+   */
   close(ban_logfd);
   ban_logfd = -1;
 
-  if (ban_log &&
-      strcasecmp(ban_log, "none") != 0) {
-    int res;
-
-    PRIVS_ROOT
-    res = pr_log_openfile(ban_log, &ban_logfd, 0660);
-    PRIVS_RELINQUISH
-
-    switch (res) {
-      case 0:
-        break;
-
-      case -1:
-        pr_log_debug(DEBUG1, MOD_BAN_VERSION ": unable to open BanLog '%s': %s",
-          ban_log, strerror(errno));
-        break;
-
-      case PR_LOG_SYMLINK:
-        pr_log_debug(DEBUG1, MOD_BAN_VERSION ": unable to open BanLog '%s': %s",
-          ban_log, "is a symlink");
-        break;
-
-      case PR_LOG_WRITABLE_DIR:
-        pr_log_debug(DEBUG1, MOD_BAN_VERSION ": unable to open BanLog '%s': %s",
-          ban_log, "parent directory is world-writable");
-        break;
-    }
+  /* Close the BanTable file descriptor; it will be reopened by the postparse
+   * event listener.
+   */
+  if (ban_tabfh != NULL) {
+    pr_fsio_close(ban_tabfh);
+    ban_tabfh = NULL;
   }
 
+  /* Remove the timer. */
   if (ban_timerno > 0) {
     (void) pr_timer_remove(ban_timerno, &ban_module);
     ban_timerno = -1;
@@ -3017,14 +3020,14 @@ static int ban_sess_init(void) {
   }
 
   /* Check banned class list */
-  if (session.class != NULL) {
+  if (session.conn_class != NULL) {
     if (ban_list_exists(tmp_pool, BAN_TYPE_CLASS, main_server->sid,
-        session.class->cls_name, &rule_mesg) == 0) {
+        session.conn_class->cls_name, &rule_mesg) == 0) {
       (void) pr_log_writefile(ban_logfd, MOD_BAN_VERSION,
         "login from class '%s' denied due to class ban",
-        session.class->cls_name);
+        session.conn_class->cls_name);
       pr_log_pri(PR_LOG_INFO, MOD_BAN_VERSION
-        ": Login denied: class '%s' banned", session.class->cls_name);
+        ": Login denied: class '%s' banned", session.conn_class->cls_name);
 
       ban_send_mesg(tmp_pool, "(none)", rule_mesg); 
       destroy_pool(tmp_pool);

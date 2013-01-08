@@ -1,4 +1,4 @@
-<!-- $Id: TLS.html,v 1.30 2011/05/11 16:09:24 castaglia Exp $ -->
+<!-- $Id: TLS.html,v 1.34 2012/12/27 19:15:44 castaglia Exp $ -->
 <!-- $Source: /cvsroot/proftp/proftpd/doc/howto/TLS.html,v $ -->
 
 <html>
@@ -29,7 +29,7 @@ from SourceForge.
 Example <a href="../contrib/mod_tls.html"><code>mod_tls</code></a> configuration:
 <pre>
   &lt;IfModule mod_dso.c&gt;
-    <font color=green># If mod_tls was built as a shared/DSO module, load it
+    <font color=green># If mod_tls was built as a shared/DSO module, load it</font>
     LoadModule mod_tls.c
   &lt;/IfModule&gt;
 
@@ -315,6 +315,35 @@ As you can see, the level of granularity used by <code>ssldump</code> is on
 the level of each SSL/TLS packet; while useful in some cases, I suspect that
 using <code>openssl s_client</code> will provide most of the information you
 will want in figuring out your certificate and verification issues.
+
+<p><a name="TLSClientAuth"></a>
+<b>TLS Client Auth/Mutual Auth</b><br>
+Like most web servers, when <code>mod_tls</code> is used, it does not
+require that the connecting client present a certificate for verification
+by default.  That is, <code>mod_tls</code> does not require "client auth"
+or "mutual auth" by default.  To require that clients present a valid
+certificate, you would use the <a href="../contrib/mod_tls.html#TLSVerifyClient"><code>TLSVerifyClient</code></a> directive like so:
+<pre>
+  &lt;IfModule mod_tls.c&gt;
+    TLSEngine on
+    ...
+    <font color=green># Verify clients that want to use FTP over TLS</font>
+    TLSVerifyClient on
+  &lt;/IfModule&gt;
+</pre>
+
+<p>
+With this directive enabled in your configuration, if a client connects
+and performs the SSL/TLS handshake but does <b>not</b> present a valid
+certificate, then the TLSLog would contain error messages like this:
+<pre>
+  mod_tls/2.4.3[12065]: TLS/TLS-C requested, starting TLS handshake
+  mod_tls/2.4.3[12065]: unable to accept TLS connection: protocol error: 
+    (1) error:140890C7:SSL routines:SSL3_GET_CLIENT_CERTIFICATE:peer did not return a certificate
+  mod_tls/2.4.3[12065]: TLS/TLS-C negotiation failed on control channel
+</pre>
+The client failed to provide a valid certificate, and so the connection
+was rejected.
 
 <p><a name="FAQ"></a>
 <b>Frequently Asked Questions</b><br>
@@ -609,6 +638,19 @@ if, like above, there is &quot;TLSRequired on&quot; in your
 <code>proftpd.conf</code>.  This case also indicates a disagreement between
 the client's security expectations and the security policy you have configured
 on the server.
+
+<p>
+In order to accept a &quot;PROT C&quot; FTP command, your <code>mod_tls</code>
+configuration would need to use a <code>TLSRequired</code> value other than
+<em>required</em>, <i>e.g.</i> something like:
+<pre>
+  # We only require SSL/TLS protection during authentication
+  TLSRequired auth
+
+  # We will accept SSL/TLS protection for the control channel if the
+  # client wants to use it, but NOT for data transfers
+  TLSRequired !data
+</pre>
 
 <p><a name="TLSErrorAfterLargeUpload">
 <font color=red>Question</font>: Using FTPS, after uploading a very large file,
@@ -1049,8 +1091,22 @@ To do this, you would use a combination of
 </pre>
 
 <p>
+<font color=red>Question</font>: I have configured my <code>proftpd</code>
+server for FTPS.  When I use FileZilla to try to connect to it, though, I
+see this error in the FileZilla logs:
+<pre>
+  GnuTLS error -9: A TLS packet with unexpected length was received
+</pre>
+Is there a ProFTPD directive to fix this error?<br>
+<font color=blue>Answer</font>: In most cases, the above client error indicates
+an <i>error unrelated to SSL/TLS</i> on your server.  Check the proftpd
+<a href="Debugging.html">debug</a> logging, the
+<a href="../contrib/mod_sql.html#SQLLogFile"><code>SQLLogFile</code></a> if
+you are using the <code>mod_sql</code> module, <i>etc</i>.
+
+<p>
 <hr>
-Last Updated: <i>$Date: 2011/05/11 16:09:24 $</i><br>
+Last Updated: <i>$Date: 2012/12/27 19:15:44 $</i><br>
 <hr>
 
 </body>

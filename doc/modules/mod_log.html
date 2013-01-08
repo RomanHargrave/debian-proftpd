@@ -1,4 +1,4 @@
-<!-- $Id: mod_log.html,v 1.8 2011/03/29 17:40:53 castaglia Exp $ -->
+<!-- $Id: mod_log.html,v 1.11 2012/04/04 06:10:19 castaglia Exp $ -->
 <!-- $Source: /cvsroot/proftp/proftpd/doc/modules/mod_log.html,v $ -->
 
 <html>
@@ -96,7 +96,7 @@ This table shows the supported command classes:
 
   <tr>
     <td><code>ALL</code></td>
-    <td>All commands (<i>default</i>)</td>
+    <td>All commands <i>except</i> the <code>EXIT</code> pseudo-command (<i>default</i>)</td>
   </tr>
 
   <tr>
@@ -156,7 +156,10 @@ This table shows the supported command classes:
 
   <tr>
     <td><code>EXIT</code></td>
-    <td>Logs the configured <code>LogFormat</code> at session exit</td>
+    <td>Logs the configured <code>LogFormat</code> at session exit.<br>
+        <b>NOTE</b>: <code>EXIT</code> is <b>not</b> part of the
+        <code>ALL</code> command class, in order to preserve
+        backward-compatible <code>ALL</code> behavior.</td>
   </tr>
 </table>
 
@@ -194,6 +197,13 @@ directive.  Once created, the format can be referenced by the specified
 any combination of letters, numbers and symbols. The special character '%' is
 used to start a meta sequence/variable (see below). To insert a literal '%'
 character, use "%%".
+
+<p>
+The default <code>LogFormat</code> is:
+<pre>
+  "%h %l %u %t \"%r\" %s %b"
+</pre>
+which produces log entries in the <a href="http://www.w3.org/Daemon/User/Config/Logging.html#common-logfile-format">Common Log Format</a>.
 
 <p>
 The following meta sequences/variables are available and are replaced as
@@ -333,7 +343,7 @@ indicated when logging.
 
   <tr>
     <td>&nbsp;<code>%s</code>&nbsp;</td>
-    <td>Numeric FTP response code (status)</td>
+    <td>Numeric FTP response code (status); see <a href="http://www.faqs.org/rfcs/rfc959.html">RFC 959</a> Section 4.2.1</td>
   </tr>
 
   <tr>
@@ -354,6 +364,16 @@ indicated when logging.
   <tr>
     <td>&nbsp;<code>%T</code>&nbsp;</td>
     <td>Time taken to send/receive file, in seconds</td>
+  </tr>
+
+  <tr>
+    <td>&nbsp;<code>%{transfer-failure}</code>&nbsp;</td>
+    <td>Reason for transfer failure (if applicable), or "-"</td>
+  </tr>
+
+  <tr>
+    <td>&nbsp;<code>%{transfer-status}</code>&nbsp;</td>
+    <td>Status of data transfer: "success", "failed", "cancelled", "timeout", or "-"</td>
   </tr>
 
   <tr>
@@ -449,12 +469,12 @@ The <code>mod_log</code> module is compiled by default.
 <hr><br>
 
 Author: <i>$Author: castaglia $</i><br>
-Last Updated: <i>$Date: 2011/03/29 17:40:53 $</i><br>
+Last Updated: <i>$Date: 2012/04/04 06:10:19 $</i><br>
 
 <br><hr>
 
 <font size=2><b><i>
-&copy; Copyright 2002-2011<br>
+&copy; Copyright 2002-2012<br>
  All Rights Reserved<br>
 </i></b></font>
 

@@ -8,7 +8,8 @@ use Getopt::Long;
 use Test::Harness qw(&runtests $verbose);
 
 my $opts = {};
-GetOptions($opts, 'h|help', 'C|class=s@', 'K|keep-tmpfiles', 'V|verbose');
+GetOptions($opts, 'h|help', 'C|class=s@', 'K|keep-tmpfiles', 'F|file-pattern=s',
+  'V|verbose');
 
 if ($opts->{h}) {
   usage();
@@ -92,15 +93,19 @@ if (scalar(@ARGV) > 0) {
     t/commands/mlst.t
     t/commands/mff.t
     t/commands/mfmt.t
+    t/commands/host.t
+    t/commands/site/chgrp.t
     t/commands/site/chmod.t
     t/config/accessdenymsg.t
     t/config/accessgrantmsg.t
+    t/config/allowfilter.t
     t/config/allowoverwrite.t
     t/config/anonrejectpasswords.t
     t/config/anonrequirepassword.t
     t/config/authaliasonly.t
     t/config/authgroupfile.t
     t/config/authorder.t
+    t/config/authuserfile.t
     t/config/authusingalias.t
     t/config/classes.t
     t/config/commandbuffersize.t
@@ -108,6 +113,7 @@ if (scalar(@ARGV) > 0) {
     t/config/defaultchdir.t
     t/config/defaultroot.t
     t/config/deleteabortedstores.t
+    t/config/denyfilter.t
     t/config/dirfakegroup.t
     t/config/dirfakemode.t
     t/config/dirfakeuser.t
@@ -116,16 +122,21 @@ if (scalar(@ARGV) > 0) {
     t/config/displayfiletransfer.t 
     t/config/displaylogin.t
     t/config/displayquit.t
+    t/config/envvars.t
+    t/config/factsoptions.t
     t/config/groupowner.t
     t/config/hiddenstores.t
     t/config/hidefiles.t
     t/config/hidegroup.t
     t/config/hidenoaccess.t
     t/config/hideuser.t
+    t/config/ifdefine.t
     t/config/include.t
     t/config/listoptions.t
     t/config/maxclients.t
+    t/config/maxclientsperclass.t
     t/config/maxclientsperhost.t
+    t/config/maxclientsperuser.t
     t/config/maxcommandrate.t
     t/config/maxconnectionsperhost.t
     t/config/maxinstances.t
@@ -140,6 +151,7 @@ if (scalar(@ARGV) > 0) {
     t/config/requirevalidshell.t
     t/config/rewritehome.t
     t/config/rlimitmemory.t
+    t/config/rootrevoke.t
     t/config/serveradmin.t
     t/config/serverident.t
     t/config/showsymlinks.t
@@ -153,6 +165,7 @@ if (scalar(@ARGV) > 0) {
     t/config/trace.t
     t/config/traceoptions.t
     t/config/transferrate.t
+    t/config/umask.t
     t/config/useftpusers.t
     t/config/useglobbing.t
     t/config/useralias.t
@@ -174,6 +187,8 @@ if (scalar(@ARGV) > 0) {
     t/config/limit/filters.t
     t/config/limit/subdirs.t
     t/logging/extendedlog.t
+    t/logging/serverlog.t
+    t/logging/systemlog.t
     t/logging/transferlog.t
     t/signals/term.t
     t/signals/hup.t
@@ -232,6 +247,11 @@ if (scalar(@ARGV) > 0) {
     't/modules/mod_exec.t' => {
       order => ++$order,
       test_class => [qw(mod_exec)],
+    },
+
+    't/modules/mod_geoip.t' => {
+      order => ++$order,
+      test_class => [qw(mod_geoip)],
     },
 
     't/modules/mod_ifversion.t' => {
@@ -300,9 +320,19 @@ if (scalar(@ARGV) > 0) {
       test_class => [qw(mod_exec mod_sftp)],
     },
 
+    't/modules/mod_sftp/fips.t' => {
+      order => ++$order,
+      test_class => [qw(feat_openssl_fips mod_sftp)],
+    },
+
     't/modules/mod_sftp/rewrite.t' => {
       order => ++$order,
       test_class => [qw(mod_rewrite mod_sftp)],
+    },
+
+    't/modules/mod_sftp/sql.t' => {
+      order => ++$order,
+      test_class => [qw(mod_sftp mod_sql_sqlite)],
     },
 
     't/modules/mod_sftp/wrap2.t' => {
@@ -338,6 +368,11 @@ if (scalar(@ARGV) > 0) {
     't/modules/mod_sql_passwd.t' => {
       order => ++$order,
       test_class => [qw(mod_sql_passwd mod_sql_sqlite)],
+    },
+
+    't/modules/mod_sql_passwd/fips.t' => {
+      order => ++$order,
+      test_class => [qw(feat_openssl_fips mod_sql_passwd mod_sql_sqlite mod_sftp)],
     },
 
     't/modules/mod_sql_odbc.t' => {
@@ -402,6 +437,22 @@ if (defined($opts->{C})) {
 } else {
   # Disable all 'inprogress' and 'slow' tests by default
   $ENV{PROFTPD_TEST_DISABLE_CLASS} = 'inprogress:slow';
+}
+
+if (defined($opts->{F})) {
+  # Using the provided string as a regex, and run only the tests whose
+  # files match the pattern
+
+  my $file_pattern = $opts->{F};
+
+  my $filtered_files = [];
+  foreach my $test_file (@$test_files) {
+    if ($test_file =~ /$file_pattern/) {
+      push(@$filtered_files, $test_file);
+    }
+  }
+
+  $test_files = $filtered_files;
 }
 
 runtests(@$test_files) if scalar(@$test_files) > 0;

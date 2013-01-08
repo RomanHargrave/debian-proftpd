@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2011 The ProFTPD Project team
+ * Copyright (c) 2001-2012 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* Authentication front-end for ProFTPD
- * $Id: auth.c,v 1.88 2011/05/23 21:22:24 castaglia Exp $
+ * $Id: auth.c,v 1.93 2012/09/06 17:13:36 castaglia Exp $
  */
 
 #include "conf.h"
@@ -265,6 +265,14 @@ static modret_t *dispatch_auth(cmd_rec *cmd, char *match, module **m) {
 
   start_tab = pr_stash_get_symbol(PR_SYM_AUTH, match, NULL,
     &cmd->stash_index);
+  if (start_tab == NULL) {
+    int xerrno = errno;
+
+    pr_trace_msg(trace_channel, 1, "error finding start symbol for '%s': %s",
+      match, strerror(xerrno));
+    return PR_ERROR_MSG(cmd, NULL, strerror(xerrno));
+  }
+
   iter_tab = start_tab;
 
   while (iter_tab) {
@@ -315,6 +323,7 @@ static modret_t *dispatch_auth(cmd_rec *cmd, char *match, module **m) {
       /* We have looped back to the start.  Break out now and do not loop
        * around again (and again, and again...)
        */
+      pr_trace_msg(trace_channel, 15, "reached end of symbols for '%s'", match);
       mr = PR_DECLINED(cmd);
       break;
     }
@@ -394,8 +403,10 @@ struct passwd *pr_auth_getpwent(pool *p) {
   cmd = make_cmd(p, 0);
   mr = dispatch_auth(cmd, "getpwent", NULL);
 
-  if (MODRET_ISHANDLED(mr) && MODRET_HASDATA(mr))
+  if (MODRET_ISHANDLED(mr) &&
+      MODRET_HASDATA(mr)) {
     res = mr->data;
+  }
 
   if (cmd->tmp_pool) {
     destroy_pool(cmd->tmp_pool);
@@ -428,8 +439,10 @@ struct group *pr_auth_getgrent(pool *p) {
   cmd = make_cmd(p, 0);
   mr = dispatch_auth(cmd, "getgrent", NULL);
 
-  if (MODRET_ISHANDLED(mr) && MODRET_HASDATA(mr))
+  if (MODRET_ISHANDLED(mr) &&
+      MODRET_HASDATA(mr)) {
     res = mr->data;
+  }
 
   if (cmd->tmp_pool) {
     destroy_pool(cmd->tmp_pool);
@@ -459,8 +472,9 @@ struct passwd *pr_auth_getpwnam(pool *p, const char *name) {
   mr = dispatch_auth(cmd, "getpwnam", &m);
 
   if (MODRET_ISHANDLED(mr) &&
-      MODRET_HASDATA(mr))
+      MODRET_HASDATA(mr)) {
     res = mr->data;
+  }
 
   if (cmd->tmp_pool) {
     destroy_pool(cmd->tmp_pool);
@@ -545,8 +559,10 @@ struct passwd *pr_auth_getpwuid(pool *p, uid_t uid) {
   cmd = make_cmd(p, 1, (void *) &uid);
   mr = dispatch_auth(cmd, "getpwuid", NULL);
 
-  if (MODRET_ISHANDLED(mr) && MODRET_HASDATA(mr))
+  if (MODRET_ISHANDLED(mr) &&
+      MODRET_HASDATA(mr)) {
     res = mr->data;
+  }
 
   if (cmd->tmp_pool) {
     destroy_pool(cmd->tmp_pool);
@@ -583,8 +599,10 @@ struct group *pr_auth_getgrnam(pool *p, const char *name) {
   cmd = make_cmd(p, 1, name);
   mr = dispatch_auth(cmd, "getgrnam", NULL);
 
-  if (MODRET_ISHANDLED(mr) && MODRET_HASDATA(mr))
+  if (MODRET_ISHANDLED(mr) &&
+      MODRET_HASDATA(mr)) {
     res = mr->data;
+  }
 
   if (cmd->tmp_pool) {
     destroy_pool(cmd->tmp_pool);
@@ -618,8 +636,10 @@ struct group *pr_auth_getgrgid(pool *p, gid_t gid) {
   cmd = make_cmd(p, 1, (void *) &gid);
   mr = dispatch_auth(cmd, "getgrgid", NULL);
 
-  if (MODRET_ISHANDLED(mr) && MODRET_HASDATA(mr))
+  if (MODRET_ISHANDLED(mr) &&
+      MODRET_HASDATA(mr)) {
     res = mr->data;
+  }
 
   if (cmd->tmp_pool) {
     destroy_pool(cmd->tmp_pool);
@@ -713,11 +733,12 @@ int pr_auth_authenticate(pool *p, const char *name, const char *pw) {
 
   mr = dispatch_auth(cmd, "auth", m ? &m : NULL);
 
-  if (MODRET_ISHANDLED(mr))
+  if (MODRET_ISHANDLED(mr)) {
     res = MODRET_HASDATA(mr) ? PR_AUTH_RFC2228_OK : PR_AUTH_OK;
 
-  else if (MODRET_ISERROR(mr))
+  } else if (MODRET_ISERROR(mr)) {
     res = MODRET_ERROR(mr);
+  }
 
   if (cmd->tmp_pool) {
     destroy_pool(cmd->tmp_pool);
@@ -836,8 +857,9 @@ int pr_auth_check(pool *p, const char *cpw, const char *name, const char *pw) {
 
   mr = dispatch_auth(cmd, "check", m ? &m : NULL);
 
-  if (MODRET_ISHANDLED(mr))
+  if (MODRET_ISHANDLED(mr)) {
     res = MODRET_HASDATA(mr) ? PR_AUTH_RFC2228_OK : PR_AUTH_OK;
+  }
 
   if (cmd->tmp_pool) {
     destroy_pool(cmd->tmp_pool);
@@ -855,11 +877,12 @@ int pr_auth_requires_pass(pool *p, const char *name) {
   cmd = make_cmd(p, 1, name);
   mr = dispatch_auth(cmd, "requires_pass", NULL);
 
-  if (MODRET_ISHANDLED(mr))
+  if (MODRET_ISHANDLED(mr)) {
     res = FALSE;
 
-  else if (MODRET_ISERROR(mr))
+  } else if (MODRET_ISERROR(mr)) {
     res = MODRET_ERROR(mr);
+  }
 
   if (cmd->tmp_pool) {
     destroy_pool(cmd->tmp_pool);
@@ -995,10 +1018,12 @@ uid_t pr_auth_name2uid(pool *p, const char *name) {
   cmd = make_cmd(p, 1, name);
   mr = dispatch_auth(cmd, "name2uid", NULL);
 
-  if (MODRET_ISHANDLED(mr))
+  if (MODRET_ISHANDLED(mr)) {
     res = *((uid_t *) mr->data);
-  else
+
+  } else {
     errno = EINVAL;
+  }
 
   if (cmd->tmp_pool) {
     destroy_pool(cmd->tmp_pool);
@@ -1016,10 +1041,12 @@ gid_t pr_auth_name2gid(pool *p, const char *name) {
   cmd = make_cmd(p, 1, name);
   mr = dispatch_auth(cmd, "name2gid", NULL);
 
-  if (MODRET_ISHANDLED(mr))
+  if (MODRET_ISHANDLED(mr)) {
     res = *((gid_t *) mr->data);
-  else
+
+  } else {
     errno = EINVAL;
+  }
 
   if (cmd->tmp_pool) {
     destroy_pool(cmd->tmp_pool);
@@ -1048,7 +1075,8 @@ int pr_auth_getgroups(pool *p, const char *name, array_header **group_ids,
 
   mr = dispatch_auth(cmd, "getgroups", NULL);
 
-  if (MODRET_ISHANDLED(mr) && MODRET_HASDATA(mr)) {
+  if (MODRET_ISHANDLED(mr) &&
+      MODRET_HASDATA(mr)) {
     res = *((int *) mr->data);
 
     /* Note: the number of groups returned should, barring error,
@@ -1099,7 +1127,7 @@ int pr_auth_getgroups(pool *p, const char *name, array_header **group_ids,
 /* This is one messy function.  Yuck.  Yay legacy code. */
 config_rec *pr_auth_get_anon_config(pool *p, char **login_name,
     char **user_name, char **anon_name) {
-  config_rec *c = NULL, *topc = NULL, *anon_c = NULL;
+  config_rec *c = NULL, *topc = NULL;
   char *config_user_name, *config_anon_name = NULL;
   unsigned char is_alias = FALSE, *auth_alias_only = NULL;
 
@@ -1197,7 +1225,6 @@ config_rec *pr_auth_get_anon_config(pool *p, char **login_name,
 
   } else {
     find_config_set_top(c);
-    anon_c = c;
   }
 
   if (c) {
@@ -1221,8 +1248,8 @@ config_rec *pr_auth_get_anon_config(pool *p, char **login_name,
   }
 
   if (!is_alias) {
-    /* Yes, we do want to be using c, not anon_c, here.  Otherwise, we
-     * risk a regression of Bug#3501.
+    /* Yes, we do want to be using c here.  Otherwise, we risk a regression
+     * of Bug#3501.
      */
 
     auth_alias_only = get_param_ptr(c ? c->subset : main_server->conf,
@@ -1242,8 +1269,9 @@ config_rec *pr_auth_get_anon_config(pool *p, char **login_name,
         FALSE);
       if (*login_name &&
           auth_alias_only &&
-          *auth_alias_only == TRUE)
+          *auth_alias_only == TRUE) {
         *login_name = NULL;
+      }
 
       if ((!login_name || !c) &&
           anon_name) {
@@ -1378,7 +1406,7 @@ int pr_auth_chroot(const char *path) {
   now = time(NULL);
   (void) pr_localtime(NULL, &now);
 
-  pr_event_generate("core.chroot", NULL);
+  pr_event_generate("core.chroot", path);
 
   PRIVS_ROOT
   res = pr_fsio_chroot(path);

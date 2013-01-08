@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2006-2011 The ProFTPD Project team
+ * Copyright (c) 2006-2012 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@
  */
 
 /* Trace functions
- * $Id: trace.c,v 1.36 2011/09/05 19:19:55 castaglia Exp $
+ * $Id: trace.c,v 1.40 2012/08/22 23:52:37 castaglia Exp $
  */
 
 
@@ -109,8 +109,7 @@ static int trace_write(const char *channel, int level, const char *msg,
     now = time(NULL);
     tm = pr_localtime(NULL, &now);
 
-    strftime(buf, sizeof(buf), "%b %d %H:%M:%S", tm);
-    buf[sizeof(buf)-1] = '\0';
+    strftime(buf, sizeof(buf)-1, "%b %d %H:%M:%S", tm);
 
   } else {
     struct timeval now;
@@ -120,7 +119,7 @@ static int trace_write(const char *channel, int level, const char *msg,
 
     tm = pr_localtime(NULL, (const time_t *) &(now.tv_sec));
 
-    strftime(buf, sizeof(buf), "%b %d %H:%M:%S", tm);
+    strftime(buf, sizeof(buf)-1, "%b %d %H:%M:%S", tm);
 
     buflen = strlen(buf);
 
@@ -362,8 +361,20 @@ int pr_trace_set_file(const char *path) {
 int pr_trace_set_levels(const char *channel, int min_level, int max_level) {
 
   if (channel == NULL) {
-    errno = EINVAL;
-    return -1;
+    void *v;
+
+    if (trace_tab == NULL) {
+      errno = EINVAL;
+      return -1;
+    }
+
+    v = pr_table_remove(trace_tab, channel, NULL);
+    if (v == NULL) {
+      errno = EINVAL;
+      return -1;
+    }
+
+    return 0;
   }
 
   if (min_level > max_level) {
@@ -434,6 +445,23 @@ int pr_trace_set_levels(const char *channel, int min_level, int max_level) {
 
 int pr_trace_set_options(unsigned long opts) {
   trace_opts = opts;
+  return 0;
+}
+
+int pr_trace_use_stderr(int use_stderr) {
+  if (use_stderr) {
+    int res;
+
+    res = dup(STDERR_FILENO);
+    if (res < 0) {
+      return -1;
+    }
+
+    /* Avoid a file descriptor leak by closing any existing fd. */
+    (void) close(trace_logfd);
+    trace_logfd = res;
+  }
+
   return 0;
 }
 

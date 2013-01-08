@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2008-2011 The ProFTPD Project team
+ * Copyright (c) 2008-2012 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,11 +23,14 @@
  */
 
 /* String manipulation functions
- * $Id: str.h,v 1.6 2011/05/23 20:35:35 castaglia Exp $
+ * $Id: str.h,v 1.8 2012/02/24 07:08:02 castaglia Exp $
  */
 
 #ifndef PR_STR_H
 #define PR_STR_H
+
+/* Default maximum number of replacements that will do in a given string. */
+#define PR_STR_MAX_REPLACEMENTS                 8
 
 char *sstrcat(char *, const char *, size_t);
 char *sreplace(pool *, char *, ...);
@@ -37,8 +40,11 @@ char *pstrcat(pool *, ...);
 char *pstrdup(pool *, const char *);
 char *pstrndup(pool *, const char *, size_t);
 
+/* Newer version of sreplace(), with more control and better error reporting. */
+char *pr_str_replace(pool *, unsigned int, char *, ...);
 char *pr_str_strip(pool *, char *);
 char *pr_str_strip_end(char *, char *);
+int pr_str_get_nbytes(const char *, const char *, off_t *);
 char *pr_str_get_word(char **, int);
 
 #define PR_STR_FL_PRESERVE_COMMENTS		0x0001

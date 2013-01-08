@@ -2,7 +2,7 @@
  * ProFTPD: mod_sftp_pam -- a module which provides an SSH2
  *                          "keyboard-interactive" driver using PAM
  *
- * Copyright (c) 2008-2011 TJ Saunders
+ * Copyright (c) 2008-2012 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,7 +26,7 @@
  * This is mod_sftp_pam, contrib software for proftpd 1.3.x and above.
  * For more information contact TJ Saunders <tj@castaglia.org>.
  *
- * $Id: mod_sftp_pam.c,v 1.10 2011/05/23 20:56:40 castaglia Exp $
+ * $Id: mod_sftp_pam.c,v 1.13 2012/08/16 01:25:02 castaglia Exp $
  * $Libraries: -lpam $
  */
 
@@ -298,8 +298,15 @@ static int sftppam_driver_open(sftp_kbdint_driver_t *driver, const char *user) {
   sstrncpy(sftppam_user, user, sftppam_userlen);
 
   c = find_config(main_server->conf, CONF_PARAM, "SFTPPAMOptions", FALSE);
-  if (c != NULL) {
-    sftppam_opts = *((unsigned long *) c->argv[0]);
+  while (c != NULL) {
+    unsigned long opts;
+
+    pr_signals_handle();
+
+    opts = *((unsigned long *) c->argv[0]);
+    sftppam_opts |= opts;
+
+    c = find_config_next(c, c->next, CONF_PARAM, "SFTPPAMOptions", FALSE);
   }
  
 #ifdef SOLARIS2
@@ -364,9 +371,11 @@ static int sftppam_driver_open(sftp_kbdint_driver_t *driver, const char *user) {
   *((unsigned char *) c->argv[0]) = FALSE;
 
   if (pr_auth_remove_auth_only_module("mod_auth_pam.c") < 0) {
-    pr_log_pri(PR_LOG_NOTICE, MOD_SFTP_PAM_VERSION
-      ": error removing 'mod_auth_pam.c' from the auth-only module list: %s",
-      strerror(errno));
+    if (errno != ENOENT) {
+      pr_log_pri(PR_LOG_NOTICE, MOD_SFTP_PAM_VERSION
+        ": error removing 'mod_auth_pam.c' from the auth-only module list: %s",
+        strerror(errno));
+    }
   }
 
   if (pr_auth_add_auth_only_module("mod_sftp_pam.c") < 0) {
@@ -401,7 +410,7 @@ static int sftppam_driver_authenticate(sftp_kbdint_driver_t *driver,
         sftppam_auth_code = PR_AUTH_BADPWD;
     }
 
-    pr_trace_msg(trace_channel, 1,
+    (void) pr_log_writefile(sftp_logfd, MOD_SFTP_PAM_VERSION,
       "PAM authentication error (%d) for user '%s': %s", res, user,
       pam_strerror(sftppam_pamh, res));
 

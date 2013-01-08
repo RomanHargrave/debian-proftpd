@@ -2,7 +2,7 @@
  * ProFTPD: mod_sql -- SQL frontend
  * Copyright (c) 1998-1999 Johnie Ingram.
  * Copyright (c) 2001 Andrew Houghton.
- * Copyright (c) 2004-2011 TJ Saunders
+ * Copyright (c) 2004-2013 TJ Saunders
  *  
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@
  * the resulting executable, without including the source code for OpenSSL in
  * the source distribution.
  *
- * $Id: mod_sql.c,v 1.218 2011/10/04 05:27:18 castaglia Exp $
+ * $Id: mod_sql.c,v 1.233 2013/01/03 22:16:05 castaglia Exp $
  */
 
 #include "conf.h"
@@ -1446,6 +1446,9 @@ static struct passwd *sql_getpasswd(cmd_rec *cmd, struct passwd *p) {
         /* Assume the query only returned 1 row. */
         sd->fnum = ah->nelts;
 
+        sql_log(DEBUG_INFO,
+          "custom SQLUserInfo query '%s' returned %d columns for user '%s'",
+          cmap.usercustom, sd->fnum, realname);
         if (sd->fnum) {
           sd->rnum = 1;
           sd->data = (char **) ah->elts;
@@ -2154,7 +2157,7 @@ static const char *resolve_long_tag(cmd_rec *cmd, char *tag) {
   const char *long_tag = NULL;
   size_t taglen;
 
-  if (strcmp(tag, "uid") == 0) {
+  if (strncmp(tag, "uid", 4) == 0) {
     char buf[64];
 
     memset(buf, '\0', sizeof(buf));
@@ -2164,7 +2167,7 @@ static const char *resolve_long_tag(cmd_rec *cmd, char *tag) {
   }
 
   if (long_tag == NULL &&
-      strcmp(tag, "gid") == 0) {
+      strncmp(tag, "gid", 4) == 0) {
     char buf[64];
 
     memset(buf, '\0', sizeof(buf));
@@ -2174,7 +2177,7 @@ static const char *resolve_long_tag(cmd_rec *cmd, char *tag) {
   }
 
   if (long_tag == NULL &&
-      strcmp(tag, "protocol") == 0) {
+      strncmp(tag, "protocol", 9) == 0) {
     long_tag = pr_session_get_protocol(0);
   }
 
@@ -2222,8 +2225,156 @@ static const char *resolve_long_tag(cmd_rec *cmd, char *tag) {
     long_tag = pstrdup(cmd->tmp_pool, time_str);
   }
 
+  if (long_tag == NULL &&
+      strncmp(tag, "transfer-failure", 17) == 0) {
+
+    /* If the current command is one that incurs a data transfer, then we
+     * need to do more work.  If not, it's an easy substitution.
+     */
+    if (session.curr_cmd_id == PR_CMD_APPE_ID ||
+        session.curr_cmd_id == PR_CMD_LIST_ID ||
+        session.curr_cmd_id == PR_CMD_MLSD_ID ||
+        session.curr_cmd_id == PR_CMD_NLST_ID ||
+        session.curr_cmd_id == PR_CMD_RETR_ID ||
+        session.curr_cmd_id == PR_CMD_STOR_ID ||
+        session.curr_cmd_id == PR_CMD_STOU_ID) {
+      const char *proto;
+
+      proto = pr_session_get_protocol(0);
+
+      if (strncmp(proto, "ftp", 4) == 0 ||
+          strncmp(proto, "ftps", 5) == 0) {
+
+        if (XFER_ABORTED) {
+          long_tag = pstrdup(cmd->tmp_pool, "-");
+
+        } else {
+          int res;
+          char *resp_code = NULL, *resp_msg = NULL;
+
+          /* Get the last response code/message.  We use heuristics here to
+           * determine when to use "failed" versus "success".
+           */
+          res = pr_response_get_last(cmd->tmp_pool, &resp_code, &resp_msg);
+          if (res == 0) {
+            if (*resp_code != '2' &&
+                *resp_code != '1') {
+              char *ptr;
+
+              /* Parse out/prettify the resp_msg here */
+              ptr = strchr(resp_msg, '.');
+              if (ptr != NULL) {
+                long_tag = pstrdup(cmd->tmp_pool, ptr + 2);
+
+              } else {
+                long_tag = pstrdup(cmd->tmp_pool, resp_msg);
+              }
+
+            } else {
+              long_tag = pstrdup(cmd->tmp_pool, "-");
+            }
+
+          } else {
+            long_tag = pstrdup(cmd->tmp_pool, "-");
+          }
+        }
+
+      } else {
+        /* Currently, for failed SFTP/SCP transfers, we can't properly
+         * populate the failure reason.  Maybe in the future.
+         */
+        long_tag = pstrdup(cmd->tmp_pool, "-");
+      }
+
+    } else {
+      long_tag = pstrdup(cmd->tmp_pool, "-");
+    }
+  }
+
+  if (long_tag == NULL &&
+      strncmp(tag, "transfer-status", 16) == 0) {
+
+    /* If the current command is one that incurs a data transfer, then we
+     * need to do more work.  If not, it's an easy substitution.
+     */
+    if (session.curr_cmd_id == PR_CMD_ABOR_ID ||
+        session.curr_cmd_id == PR_CMD_APPE_ID ||
+        session.curr_cmd_id == PR_CMD_LIST_ID ||
+        session.curr_cmd_id == PR_CMD_MLSD_ID ||
+        session.curr_cmd_id == PR_CMD_NLST_ID ||
+        session.curr_cmd_id == PR_CMD_RETR_ID ||
+        session.curr_cmd_id == PR_CMD_STOR_ID ||
+        session.curr_cmd_id == PR_CMD_STOU_ID) {
+      const char *proto;
+
+      proto = pr_session_get_protocol(0);
+
+      if (strncmp(proto, "ftp", 4) == 0 ||
+          strncmp(proto, "ftps", 5) == 0) {
+
+        if (!(XFER_ABORTED)) {
+          int res;
+          char *resp_code = NULL, *resp_msg = NULL;
+
+          /* Get the last response code/message.  We use heuristics here to
+           * determine when to use "failed" versus "success".
+           */
+          res = pr_response_get_last(cmd->tmp_pool, &resp_code, &resp_msg);
+          if (res == 0) {
+            if (*resp_code == '2') {
+              if (pr_cmd_cmp(cmd, PR_CMD_ABOR_ID) != 0) {
+                long_tag = pstrdup(cmd->tmp_pool, "success");
+
+              } else {
+                /* We're handling the ABOR command, so obviously the value
+                 * should be 'cancelled'.
+                 */
+                long_tag = pstrdup(cmd->tmp_pool, "cancelled");
+              }
+
+            } else if (*resp_code == '1') {
+              /* If the first digit of the response code is 1, then the response
+               * code (for a data transfer command) is probably 150, which means
+               * that the transfer was still in progress (didn't complete with
+               * a 2xx/4xx response code) when we are called here, which in turn
+               * means a timeout kicked in.
+               */
+              long_tag = pstrdup(cmd->tmp_pool, "timeout");
+
+            } else {
+              long_tag = pstrdup(cmd->tmp_pool, "failed");
+            }
+
+          } else {
+            long_tag = pstrdup(cmd->tmp_pool, "success");
+          }
+
+        } else {
+          long_tag = pstrdup(cmd->tmp_pool, "cancelled");
+        }
+
+      } else {
+        /* mod_sftp stashes a note for us in the command notes if the
+         * transfer failed.
+         */
+        char *status;
+
+        status = pr_table_get(cmd->notes, "mod_sftp.file-status", NULL);
+        if (status == NULL) {
+          long_tag = pstrdup(cmd->tmp_pool, "success");
+
+        } else {
+          long_tag = pstrdup(cmd->tmp_pool, "failed");
+        }
+      }
+
+    } else {
+      long_tag = pstrdup(cmd->tmp_pool, "-");
+    }
+  }
+
   pr_trace_msg(trace_channel, 15, "returning long tag '%s' for tag '%s'",
-    long_tag, tag);
+    long_tag ? long_tag : "<null>", tag);
   return long_tag;
 }
 
@@ -2281,7 +2432,7 @@ static char *resolve_short_tag(cmd_rec *cmd, char tag) {
 
     case 'c':
       argp = arg;
-      sstrncpy(argp, session.class ? session.class->cls_name : "-",
+      sstrncpy(argp, session.conn_class ? session.conn_class->cls_name : "-",
         sizeof(arg));
       break;
 
@@ -2367,6 +2518,19 @@ static char *resolve_short_tag(cmd_rec *cmd, char tag) {
       if (pr_cmd_cmp(cmd, PR_CMD_RNTO_ID) == 0) {
         sstrncpy(argp, dir_abs_path(cmd->tmp_pool, cmd->arg, TRUE),
           sizeof(arg));
+
+      } else if (pr_cmd_cmp(cmd, PR_CMD_RETR_ID) == 0) {
+        char *path;
+
+        path = pr_table_get(cmd->notes, "mod_xfer.retr-path", NULL);
+        sstrncpy(arg, dir_abs_path(cmd->tmp_pool, path, TRUE), sizeof(arg));
+
+      } else if (pr_cmd_cmp(cmd, PR_CMD_APPE_ID) == 0 ||
+                 pr_cmd_cmp(cmd, PR_CMD_STOR_ID) == 0) {
+        char *path;
+
+        path = pr_table_get(cmd->notes, "mod_xfer.store-path", NULL);
+        sstrncpy(arg, dir_abs_path(cmd->tmp_pool, path, TRUE), sizeof(arg));
 
       } else if (session.xfer.p &&
                  session.xfer.path) {
@@ -2577,7 +2741,7 @@ static char *resolve_short_tag(cmd_rec *cmd, char tag) {
 
       login_user = pr_table_get(session.notes, "mod_auth.orig-user", NULL);
       if (login_user == NULL) {
-        login_user = "root";
+        login_user = "-";
       }
 
       sstrncpy(argp, login_user, sizeof(arg));
@@ -2587,18 +2751,11 @@ static char *resolve_short_tag(cmd_rec *cmd, char tag) {
     case 'u': {
       argp = arg;
 
-      if (session.user == NULL) {
-        char *u;
-
-        u = get_param_ptr(main_server->conf, "UserName", FALSE);
-        if (u == NULL) {
-          u = "root";
-        }
-
-        sstrncpy(argp, u, sizeof(arg));
+      if (session.user != NULL) {
+        sstrncpy(argp, session.user, sizeof(arg));
 
       } else {
-        sstrncpy(argp, session.user, sizeof(arg));
+        sstrncpy(argp, "-", sizeof(arg));
       }
 
       break;
@@ -2844,13 +3001,8 @@ MODRET process_sqllog(cmd_rec *cmd, config_rec *c, const char *label,
   char *qname = NULL;
   char *type = NULL;
   modret_t *mr = NULL;
-  int ignore_errors = FALSE;
 
   qname = c->argv[0];
-
-  if (flags & SQL_LOG_FL_IGNORE_ERRORS) {
-    ignore_errors = TRUE;
-  }
 
   sql_log(DEBUG_FUNC, ">>> %s (%s)", label, c->name);
 
@@ -3355,6 +3507,9 @@ MODRET errinfo_master(cmd_rec *cmd) {
     memset(outs, '\0', sizeof(outs));
     outsp = outs;
 
+    pr_trace_msg(trace_channel, 15, "processing SQLShowInfo ERR_%s '%s'",
+      cmd->argv[0], cmd->argv[1]);
+
     for (tmp = c->argv[1]; *tmp; ) {
       pr_signals_handle();
 
@@ -3370,9 +3525,10 @@ MODRET errinfo_master(cmd_rec *cmd) {
             query = ++tmp;
 	    
           /* get the name of the query */
-	  while (*tmp && *tmp != '}') 
+	  while (*tmp && *tmp != '}') {
             tmp++;
-	    
+          }
+
           query = pstrndup(cmd->tmp_pool, query, (tmp - query));
 
           /* make sure it's a SELECT query */
@@ -3387,8 +3543,14 @@ MODRET errinfo_master(cmd_rec *cmd) {
 
             } else {
               sd = (sql_data_t *) mr->data;
+
+              pr_trace_msg(trace_channel, 13,
+                "SQLShowInfo ERR_%s query '%s' returned row count %lu",
+                cmd->argv[0], query, sd->rnum);
+
               if (sd->rnum == 0 ||
                   sd->data[0] == NULL) {
+
                 /* If no data was returned, show nothing.  Just continue
                  * on to the next SQLShowInfo.
                  */
@@ -3456,8 +3618,9 @@ MODRET errinfo_master(cmd_rec *cmd) {
           break;
         }
 
-        if (*tmp != '\0')
+        if (*tmp != '\0') {
           tmp++;
+        }
       }
     }
       
@@ -3469,7 +3632,22 @@ MODRET errinfo_master(cmd_rec *cmd) {
        * flushing the added lines out to the client.
        */
       resp_code = c->argv[0];
-      pr_response_add(resp_code, "%s", outs);
+
+      if (*resp_code == '4' ||
+          *resp_code == '5') {
+        pr_trace_msg(trace_channel, 15,
+          "adding error response code %s, msg '%s' for SQLShowInfo ERR_%s",
+          resp_code, outs, cmd->argv[0]);
+
+        pr_response_add_err(resp_code, "%s", outs);
+
+      } else {
+        pr_trace_msg(trace_channel, 15,
+          "adding response code %s, msg '%s' for SQLShowInfo ERR_%s", resp_code,
+          outs, cmd->argv[0]);
+
+        pr_response_add(resp_code, "%s", outs);
+      }
     }
 
     sql_log(DEBUG_FUNC, "<<< errinfo_master (%s)", name);
@@ -3597,8 +3775,9 @@ MODRET errinfo_master(cmd_rec *cmd) {
           break;
         }
 
-        if (*tmp != '\0')
+        if (*tmp != '\0') {
           tmp++;
+        }
       }
     }
       
@@ -3610,7 +3789,22 @@ MODRET errinfo_master(cmd_rec *cmd) {
        * flushing the added lines out to the client.
        */
       resp_code = c->argv[0];
-      pr_response_add(resp_code, "%s", outs);
+
+      if (*resp_code == '4' ||
+          *resp_code == '5') {
+        pr_trace_msg(trace_channel, 15,
+          "adding error response code %s, msg '%s' for SQLShowInfo ERR_*",
+          resp_code, outs);
+
+        pr_response_add_err(resp_code, "%s", outs);
+
+      } else {
+        pr_trace_msg(trace_channel, 15,
+          "adding response code %s, msg '%s' for SQLShowInfo ERR_*", resp_code,
+          outs);
+
+        pr_response_add(resp_code, "%s", outs);
+      }
     }
 
     sql_log(DEBUG_FUNC, "<<< errinfo_master (%s)", name);
@@ -5383,7 +5577,7 @@ static int sql_openlog(void) {
 
   pr_signals_block();
   PRIVS_ROOT
-  res = pr_log_openfile(sql_logfile, &sql_logfd, 0640);
+  res = pr_log_openfile(sql_logfile, &sql_logfd, PR_LOG_SYSTEM_MODE);
   PRIVS_RELINQUISH
   pr_signals_unblock();
 
@@ -5854,9 +6048,16 @@ static int sql_sess_init(void) {
     FALSE);
 
   pr_sql_opts = 0UL;
-  ptr = get_param_ptr(main_server->conf, "SQLOptions", FALSE);
-  if (ptr != NULL) {
-    pr_sql_opts = *((unsigned long *) ptr);
+  c = find_config(main_server->conf, CONF_PARAM, "SQLOptions", FALSE);
+  while (c != NULL) {
+    unsigned long opts;
+
+    pr_signals_handle();
+
+    opts = *((unsigned long *) c->argv[0]);
+    pr_sql_opts |= opts;
+
+    c = find_config_next(c, c->next, CONF_PARAM, "SQLOptions", FALSE);
   }
  
   ptr = get_param_ptr(main_server->conf, "SQLUserTable", FALSE);
@@ -6084,7 +6285,8 @@ static int sql_sess_init(void) {
   ptr = get_param_ptr(main_server->conf, "SQLAuthTypes", FALSE);
   cmap.auth_list = ptr;
 
-  if (cmap.auth_list == NULL) {
+  if (cmap.auth_list == NULL &&
+      cmap.authmask != 0) {
     sql_log(DEBUG_INFO, "%s", "error: no SQLAuthTypes configured");
   }
 

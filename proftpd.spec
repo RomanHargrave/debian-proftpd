@@ -1,4 +1,4 @@
-# $Id: proftpd.spec,v 1.79.2.2 2011/11/11 17:24:45 castaglia Exp $
+# $Id: proftpd.spec,v 1.85 2013/01/04 22:16:41 castaglia Exp $
 
 # Module List:
 #
@@ -22,6 +22,9 @@
 #   mod_site_misc
 #   mod_sql
 #   mod_sql_passwd
+#   mod_wrap2
+#   mod_wrap2_file
+#   mod_wrap2_sql
 #
 # Dynamic modules with additional build or runtime dependencies, not built by default
 #
@@ -35,23 +38,24 @@
 #   mod_tls (needs openssl [--with ssl])
 #   mod_tls_shmcache (needs openssl [--with ssl])
 #   mod_wrap (needs tcp_wrappers [--with wrap])
-#   mod_wrap2 (needs tcp_wrappers [--with wrap])
-#   mod_wrap2_file (needs tcp_wrappers [--with wrap])
-#   mod_wrap2_sql (needs tcp_wrappers [--with wrap])
 #
 # Note: ALL optional features can be enabled using --with everything
 # RHEL5 and clones don't have suitably recent versions of pcre/libmemcached
 # so use --with rhel5 to inhibit those features when using --with everything
 
-%global proftpd_version           1.3.4a
+%global proftpd_version	1.3.5
 
-# When doing a stable or maint release, comment out this line.  When doing an
-# RC, define it to be e.g. 'rc2'.
-#%global release_cand_version     rc1
+# When doing a stable or maint release, this line is to be commented out.
+# When doing an RC, define it to be e.g. 'rc2'.
+#
+# NOTE: rpmbuild is really bloody stupid, and CANNOT handle a leading '#'
+# character followed by a '%' character.  
+%global release_cand_version	rc1
 
 %global usecvsversion             0%{?_with_cvs:1}
-%global proftpd_cvs_version_main  1.3.4a
-%global proftpd_cvs_version_date  20110525
+
+%global proftpd_cvs_version_main	1.3.5
+%global proftpd_cvs_version_date  20130104
 
 # Handle optional functionality
 #
@@ -102,7 +106,7 @@ BuildRequires: postgresql-devel
 BuildRequires: openssl-devel
 %endif
 #
-# --with wrap (for mod_wrap, mod_wrap2, mod_wrap2_file, mod_wrap2_sql)
+# --with wrap (for mod_wrap)
 %if 0%{?_with_wrap:1}
 # This header file might be in package tcp_wrappers or tcp_wrappers-devel
 BuildRequires: /usr/include/tcpd.h
@@ -148,7 +152,7 @@ Requires(post):         /sbin/chkconfig
 Requires(preun):        /sbin/service, /sbin/chkconfig
 Requires(postun):       /sbin/service
 %endif
-BuildRequires:          pkgconfig, pam-devel, ncurses-devel, zlib-devel
+BuildRequires:          gettext, pkgconfig, pam-devel, ncurses-devel, zlib-devel
 BuildRequires:          libacl-devel, libcap-devel
 Provides:               ftpserver
 Obsoletes:              proftpd-core < %{version}-%{release}, proftpd-standalone < %{version}-%{release}, proftpd-inetd < %{version}-%{release}
@@ -214,6 +218,7 @@ Group:          Development/Libraries
 Requires:       proftpd = %{version}-%{release}
 # devel package requires the same devel packages as were build-required
 # for the main package
+Requires:       gcc, libtool
 Requires:       libacl-devel
 Requires:       libcap-devel
 Requires:       pkgconfig
@@ -285,7 +290,10 @@ STANDARD_MODULE_LIST="  mod_auth_pam            \
                         mod_rewrite             \
                         mod_shaper              \
                         mod_site_misc           \
-                        mod_sql                 "
+                        mod_sql                 \
+                        mod_wrap2               \
+                        mod_wrap2_file          \
+                        mod_wrap2_sql           "
 
 OPTIONAL_MODULE_LIST="                          \
 %{?_with_ldap:          mod_ldap}               \
@@ -299,10 +307,7 @@ OPTIONAL_MODULE_LIST="                          \
 %{?_with_ssl:           mod_tls}                \
 %{?_with_ssl:           mod_tls_shmcache}       \
 %{?_with_ssl:%{?_with_memcache:mod_tls_memcache}} \
-%{?_with_wrap:          mod_wrap}               \
-%{?_with_wrap:          mod_wrap2}              \
-%{?_with_wrap:          mod_wrap2_file}         \
-%{?_with_wrap:          mod_wrap2_sql}          "
+%{?_with_wrap:          mod_wrap}               "
 
 MODULE_LIST=$(echo ${STANDARD_MODULE_LIST} ${OPTIONAL_MODULE_LIST} mod_ifsession | tr -s '[:space:]' ':' | sed 's/:$//')
 
@@ -369,6 +374,9 @@ install -p -m 644 contrib/dist/rpm/proftpd.logrotate %{buildroot}/etc/logrotate.
 # Create anonymous ftp area
 mkdir -p %{buildroot}%{_localstatedir}/ftp/pub/
 
+# Find translations
+%find_lang proftpd
+
 # We do not want this dangling symlink to make it into the RPM
 rm -f contrib/README.mod_sql
 
@@ -426,8 +434,7 @@ fi
 rm -rf %{buildroot}
 rm -rf %{_builddir}/%{name}-%{version}
 
-%files
-%defattr(-,root,root)
+%files -f proftpd.lang
 %{_bindir}/ftpdctl
 %{_sbindir}/ftpscrub
 %{_sbindir}/ftpshut
@@ -459,6 +466,9 @@ rm -rf %{_builddir}/%{name}-%{version}
 %{?_with_ssl:%{_libexecdir}/proftpd/mod_tls.so}
 %{?_with_ssl:%{?_with_memcache:%{_libexecdir}/proftpd/mod_tls_memcache.so}}
 %{?_with_ssl:%{_libexecdir}/proftpd/mod_tls_shmcache.so}
+%{_libexecdir}/proftpd/mod_wrap2.so
+%{_libexecdir}/proftpd/mod_wrap2_file.so
+%{_libexecdir}/proftpd/mod_wrap2_sql.so
 %exclude %{_libexecdir}/proftpd/*.a
 %exclude %{_libexecdir}/proftpd/*.la
 %dir %{rundir}/
@@ -490,7 +500,6 @@ rm -rf %{_builddir}/%{name}-%{version}
 
 %if 0%{?_with_ldap:1}
 %files ldap
-%defattr(-,root,root)
 %doc README.LDAP contrib/mod_quotatab_ldap.ldif contrib/mod_quotatab_ldap.schema
 %{_libexecdir}/proftpd/mod_ldap.so
 %{_libexecdir}/proftpd/mod_quotatab_ldap.so
@@ -498,33 +507,25 @@ rm -rf %{_builddir}/%{name}-%{version}
 
 %if 0%{?_with_mysql:1}
 %files mysql
-%defattr(-,root,root)
 %{_libexecdir}/proftpd/mod_sql_mysql.so
 %endif
 
 %if 0%{?_with_postgresql:1}
 %files postgresql
-%defattr(-,root,root)
 %{_libexecdir}/proftpd/mod_sql_postgres.so
 %endif
 
 %if 0%{?_with_wrap:1}
 %files wrap
-%defattr(-,root,root)
 %{_libexecdir}/proftpd/mod_wrap.so
-%{_libexecdir}/proftpd/mod_wrap2.so
-%{_libexecdir}/proftpd/mod_wrap2_file.so
-%{_libexecdir}/proftpd/mod_wrap2_sql.so
 %endif
 
 %files devel
-%defattr(-,root,root)
 %{_bindir}/prxs
 %{_includedir}/proftpd/
 %{_libdir}/pkgconfig/proftpd.pc
 
 %files utils
-%defattr(-,root,root)
 %doc contrib/xferstats.holger-preiss
 %{_bindir}/ftpquota
 %{_bindir}/ftpasswd
@@ -540,6 +541,17 @@ rm -rf %{_builddir}/%{name}-%{version}
 %{_mandir}/man1/ftpwho.1*
 
 %changelog
+* Tue Jul 31 2012 Paul Howarth <paul@city-fan.org>
+- Package translations and BR: gettext to make sure we get them
+- Drop %%defattr, redundant since rpm 4.4
+
+* Tue Jan 10 2012 Paul Howarth <paul@city-fan.org>
+- devel package requires gcc and libtool (for prxs)
+
+* Fri Nov 11 2011 Paul Howarth <paul@city-fan.org>
+- mod_wrap2 and friends don't need tcp_wrappers, so move them from the wrap
+  subpackage to the main package
+
 * Tue Oct  4 2011 Paul Howarth <paul@city-fan.org>
 - Upstream RPM package refactored to support Red Hat/Fedora based distributions
   from EL-5 onwards:
