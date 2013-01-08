@@ -199,7 +199,7 @@ if [ -e "/etc/init.d/proftpd" ]; then
 	    proftpd -t >/dev/null 2>&1
     	if [ $? = 0 ]; then
 		set -e
-		invoke-rc.d proftpd start
+		invoke-rc.d proftpd start || true
 	else
 		echo "Cannot start proftpd, please check syntax of your configuration file $CONF"
 	fi

@@ -13,7 +13,7 @@ then
     rm -rf /var/log/proftpd
     rm -f /etc/logrotate.d/proftpd-basic
     userdel --remove --force proftpd || true
-    userdel --remove --force ftp || true
+    userdel ftp || true
     update-rc.d proftpd remove >/dev/null || exit $?
 fi
 
