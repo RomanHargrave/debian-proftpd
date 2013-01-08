@@ -1,3 +1,12 @@
+proftpd-dfsg (1.3.3a-6squeeze5) stable-security; urgency=low
+
+  * [SECURITY] 3841.dpatch. This patch fixes a possible race condition in the
+  handling of the MKD/XMKD FTP commands, when the UserOwner directive is 
+  involved, and the attacker is on the same physical machine as a running
+  proftpd. This is CVE-2012-6095.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Tue, 08 Jan 2013 10:27:27 +0100
+
 proftpd-dfsg (1.3.3a-6squeeze4) stable-security; urgency=low
 
   * [SECURITY] 3711.dpatch. This patch fixes a response pool use-after-free
