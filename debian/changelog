@@ -11,7 +11,8 @@ proftpd-dfsg (1.3.5~rc1-1) experimental; urgency=low
   * Now `ftp' user is only removed in postrm purge, without removing 
     its home dir. (closes: #655514)
   * Missing memcache enabling renders mod_tls_memcache unusable even
-    if present. That triggered the missing libmemcached-dev b-d.
+    if present. That triggered the missing libmemcached-dev b-d and
+    requires a new mod_memcache module and package.
   * Removed it/ru as standalone locale directories. Reason to have them is
     lost in time and currently wrong. This is also connected with #600596
     for those languages. Sigh.
