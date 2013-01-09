@@ -1,15 +1,20 @@
 proftpd-dfsg (1.3.5~rc1-1) experimental; urgency=low
 
   * New upstream pre-release.
-    (closes: #697526, #691618)
-  * Refreshed main patchset for 1.3.5 source tree.
+    (closes: #697526, #691618, #600596)
+  * Refreshed main patchset for 1.3.5 source tree. CVE-2012-6095 provided
+    by 3841 dropped.
   * Added mod_geoip module among contributed module and a new binary
     package to depend on GeoIP library.
   * Now all calls of /etc/init.d/proftpd or invoke-rc.d cannot fail anymore.
     (closes: #622126)
-  * Now `ftp' user is only removed in postrmi purge, without removing 
+  * Now `ftp' user is only removed in postrm purge, without removing 
     its home dir. (closes: #655514)
-  * 
+  * Missing memcache enabling renders mod_tls_memcache unusable even
+    if present.
+  * Removed it/ru as standalone locale directories. Reason to have them is
+    lost in time and currently wrong. This is also connected with #600596
+    for those languages. Sigh.
 
  -- Francesco Paolo Lovergine <frankie@debian.org>  Tue, 08 Jan 2013 15:42:27 +0100
 
