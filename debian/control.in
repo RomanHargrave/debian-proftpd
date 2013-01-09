@@ -20,7 +20,8 @@ Build-Depends: autotools-dev,
                libwrap0-dev,
                unixodbc-dev,
                zlib1g-dev,
-               libgeoip-dev
+               libgeoip-dev,
+               libmemcached-dev
 Homepage: http://www.proftpd.org/
 Vcs-Git: git://git.debian.org/pkg-proftpd/proftpd-dfsg.git
 Vcs-Browser: http://git.debian.org/?p=pkg-proftpd/proftpd-dfsg.git
