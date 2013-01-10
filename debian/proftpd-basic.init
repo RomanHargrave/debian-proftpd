@@ -109,7 +109,7 @@ signal()
         	log_end_msg 0
     	else
 		SIGNAL="KILL"
-		start-stop-daemon --stop --signal $SIGNAL --quiet --pidfile "$PIDFILE"
+		start-stop-daemon --stop --signal $SIGNAL --quiet --pidfile "$PIDFILE" --retry=TERM/10/KILL/5
     		if [ $? != 0 ]; then
         		log_end_msg 1
         		[ $2 != 0 ] || exit 0
@@ -175,7 +175,6 @@ case "$1" in
     force-reload|restart)
 	if [ "x$RUN" = "xyes" ] ; then
 	    signal stop 1
-	    sleep 2
 	    start
 	else
 	    if [ "x$INETD" = "xyes" ] ; then
