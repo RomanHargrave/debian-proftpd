@@ -10,6 +10,9 @@ proftpd-dfsg (1.3.5~rc1-2) experimental; urgency=low
     the update-inetd tool superfluous.
     (closes: #626527)
   * Added Suggests for the new -geoip module.
+  * New patch: `contrib_hardening_flags' adds hardening flags to contrib/ modules.
+    (Thanks Simon Ruderich for the patch).
+    (closes: #668196)
 
  -- Francesco Paolo Lovergine <frankie@debian.org>  Thu, 10 Jan 2013 10:57:37 +0100
 

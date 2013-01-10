@@ -10,3 +10,4 @@ mod_cap
 odbc
 silent
 use_hypen_in_manpage
+contrib_hardening_flags
