@@ -35,7 +35,6 @@ Depends: adduser,
          netbase (>= 4.13),
          sed (>= 4.1.5),
          ucf (>= 0.30),
-         update-inetd,
          ${misc:Depends},
          ${shlibs:Depends}
 Conflicts: ftp-server

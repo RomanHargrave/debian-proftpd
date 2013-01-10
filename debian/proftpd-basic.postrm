@@ -4,7 +4,10 @@ set -e
 
 if [ "$1" = "disappear" -o "$1" = "remove" ]
 then
-    update-inetd --disable ftp
+    if [ -x /usr/sbin/update-inetd ]
+    then
+        update-inetd --disable ftp
+    fi
 fi
 
 if [ "$1" = "purge" ]
