@@ -48,7 +48,8 @@ Suggests: openbsd-inetd | inet-superserver,
           proftpd-mod-mysql,
           proftpd-mod-odbc,
           proftpd-mod-pgsql,
-          proftpd-mod-sqlite
+          proftpd-mod-sqlite,
+          proftpd-mod-geoip
 Description: Versatile, virtual-hosting FTP daemon - binaries
  ProFTPD is a powerful modular FTP/SFTP/FTPS server. This File Transfer
  Protocol daemon supports also hidden directories, virtual hosts, and
