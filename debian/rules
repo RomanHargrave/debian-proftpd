@@ -68,7 +68,7 @@ install: build
 	dh_prep
 	
 	$(MAKE) DESTDIR=$(CURDIR)/debian/tmp INSTALL_STRIP="$(INSTALL_STRIP)" install
-	find $(CURDIR)/debian/tmp -type f \( -executable -o -name \*.so\* \) -exec hardening-check {} + 
+	find $(CURDIR)/debian/tmp -type f \( -executable -o -name \*.so\* \) -exec hardening-check {} + || true
 
 configure: configure-stamp
 configure-stamp: 
