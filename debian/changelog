@@ -1,4 +1,4 @@
-proftpd-dfsg (1.3.4a-4) UNRELEASED; urgency=low
+proftpd-dfsg (1.3.4a-4) unstable; urgency=low
 
   * Memcache missing enabling at configuration time prevented mod_tls_memcache working. 
   * Removed it/ru moving of locale directories. That hack is lost in time and
