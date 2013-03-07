@@ -5,9 +5,9 @@ Forwarded: not needed
 
 Index: proftpd-dfsg/src/dirtree.c
 ===================================================================
---- proftpd-dfsg.orig/src/dirtree.c	2013-01-08 15:42:19.000000000 +0100
-+++ proftpd-dfsg/src/dirtree.c	2013-01-08 15:46:50.000000000 +0100
-@@ -3156,9 +3156,6 @@
+--- proftpd-dfsg.orig/src/dirtree.c	2013-03-07 10:26:35.000000000 +0100
++++ proftpd-dfsg/src/dirtree.c	2013-03-07 10:26:35.000000000 +0100
+@@ -3219,9 +3219,6 @@
        }
      }
  
