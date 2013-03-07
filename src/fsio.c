@@ -1,8 +1,8 @@
 /*
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
- * Copyright (C) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (C) 2001-2012 The ProFTPD Project
+ * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
+ * Copyright (c) 2001-2013 The ProFTPD Project
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* ProFTPD virtual/modular file-system support
- * $Id: fsio.c,v 1.113 2013/01/03 18:08:44 castaglia Exp $
+ * $Id: fsio.c,v 1.134 2013/02/27 17:32:10 castaglia Exp $
  */
 
 #include "conf.h"
@@ -33,9 +33,17 @@
 
 #ifdef HAVE_SYS_STATVFS_H
 # include <sys/statvfs.h>
-#elif defined(HAVE_SYS_VFS_H)
+#endif
+
+#ifdef HAVE_SYS_VFS_H
 # include <sys/vfs.h>
-#elif defined(HAVE_SYS_MOUNT_H)
+#endif
+
+#ifdef HAVE_SYS_PARAM_H
+# include <sys/param.h>
+#endif
+
+#ifdef HAVE_SYS_MOUNT_H
 # include <sys/mount.h>
 #endif
 
@@ -45,6 +53,13 @@
 
 #ifdef HAVE_ACL_LIBACL_H
 # include <acl/libacl.h>
+#endif
+
+/* For determining whether a file is on an NFS filesystem.  Note that
+ * this value is Linux specific.  See Bug#3874 for details.
+ */
+#ifndef NFS_SUPER_MAGIC
+# define NFS_SUPER_MAGIC	0x6969
 #endif
 
 typedef struct fsopendir fsopendir_t;
@@ -80,6 +95,13 @@ static unsigned char chk_fs_map = FALSE;
 /* Virtual working directory */
 static char vwd[PR_TUNABLE_PATH_MAX + 1] = "/";
 static char cwd[PR_TUNABLE_PATH_MAX + 1] = "/";
+
+/* Runtime enabling/disabling of mkdtemp(3) use. */
+#ifdef HAVE_MKDTEMP
+static int use_mkdtemp = TRUE;
+#else
+static int use_mkdtemp = FALSE;
+#endif /* HAVE_MKDTEMP */
 
 /* Runtime enabling/disabling of encoding of paths. */
 static int use_encoding = TRUE;
@@ -333,6 +355,7 @@ static int fs_cmp(const void *a, const void *b) {
 /* Statcache stuff */
 typedef struct {
   char sc_path[PR_TUNABLE_PATH_MAX+1];
+  size_t sc_pathlen;
   struct stat sc_stat;
   int sc_errno;
   int sc_retval;
@@ -349,14 +372,15 @@ static int cache_stat(pr_fs_t *fs, const char *path, struct stat *sbuf,
   int res = -1;
   char pathbuf[PR_TUNABLE_PATH_MAX + 1] = {'\0'};
   int (*mystat)(pr_fs_t *, const char *, struct stat *) = NULL;
+  size_t pathlen;
 
   /* Sanity checks */
-  if (!fs) {
+  if (fs == NULL) {
     errno = EINVAL;
     return -1;
   }
 
-  if (!path) {
+  if (path == NULL) {
     errno = ENOENT;
     return -1;
   }
@@ -389,8 +413,11 @@ static int cache_stat(pr_fs_t *fs, const char *path, struct stat *sbuf,
     mystat = fs->lstat ? fs->lstat : sys_lstat;
   }
 
+  pathlen = strlen(pathbuf);
+
   /* Can the last cached stat be used? */
-  if (strcmp(pathbuf, statcache.sc_path) == 0) {
+  if (pathlen == statcache.sc_pathlen &&
+      strncmp(pathbuf, statcache.sc_path, pathlen + 1) == 0) {
 
     /* Update the given struct stat pointer with the cached info */
     memcpy(sbuf, &statcache.sc_stat, sizeof(struct stat));
@@ -407,6 +434,7 @@ static int cache_stat(pr_fs_t *fs, const char *path, struct stat *sbuf,
   memset(statcache.sc_path, '\0', sizeof(statcache.sc_path));
   sstrncpy(statcache.sc_path, pathbuf, sizeof(statcache.sc_path));
   memcpy(&statcache.sc_stat, sbuf, sizeof(struct stat));
+  statcache.sc_pathlen = pathlen;
   statcache.sc_errno = errno;
   statcache.sc_retval = res;
 
@@ -2132,6 +2160,26 @@ char *pr_fs_decode_path(pool *p, const char *path) {
   if (res == NULL) {
     pr_trace_msg("encode", 1, "error decoding path '%s': %s", path,
       strerror(errno));
+
+    if (pr_trace_get_level("encode") >= 14) {
+      /* Write out the path we tried (and failed) to decode, in hex. */
+      register unsigned int i;
+      unsigned char *raw_path;
+      size_t pathlen, raw_pathlen;
+
+      pathlen = strlen(path);
+      raw_pathlen = (pathlen * 5) + 1;
+      raw_path = pcalloc(p, raw_pathlen + 1);
+
+      for (i = 0; i < pathlen; i++) {
+        snprintf((char *) (raw_path + (i * 5)), (raw_pathlen - 1) - (i * 5),
+          "0x%02x ", (unsigned char) path[i]);
+      }
+
+      pr_trace_msg("encode", 14, "unable to decode path (raw bytes): %s",
+        raw_path);
+    } 
+
     return (char *) path;
   }
 
@@ -2155,6 +2203,26 @@ char *pr_fs_encode_path(pool *p, const char *path) {
   if (res == NULL) {
     pr_trace_msg("encode", 1, "error encoding path '%s': %s", path,
       strerror(errno));
+
+    if (pr_trace_get_level("encode") >= 14) {
+      /* Write out the path we tried (and failed) to encode, in hex. */
+      register unsigned int i; 
+      unsigned char *raw_path;
+      size_t pathlen, raw_pathlen;
+      
+      pathlen = strlen(path);
+      raw_pathlen = (pathlen * 5) + 1;
+      raw_path = pcalloc(p, raw_pathlen + 1);
+
+      for (i = 0; i < pathlen; i++) {
+        snprintf((char *) (raw_path + (i * 5)), (raw_pathlen - 1) - (i * 5),
+          "0x%02x ", (unsigned char) path[i]);
+      }
+
+      pr_trace_msg("encode", 14, "unable to encode path (raw bytes): %s",
+        raw_path);
+    } 
+
     return (char *) path;
   }
 
@@ -2550,6 +2618,18 @@ int pr_fsio_mkdir(const char *path, mode_t mode) {
   return res;
 }
 
+int pr_fsio_set_use_mkdtemp(int value) {
+  int prev_value;
+
+  prev_value = use_mkdtemp;
+
+#ifdef HAVE_MKDTEMP
+  use_mkdtemp = value;
+#endif /* HAVE_MKDTEMP */
+
+  return prev_value;
+}
+
 /* "safe mkdir" variant of mkdir(2), uses mkdtemp(3), lchown(2), and
  * rename(2) to create a directory which cannot be hijacked by a symlink
  * race (hopefully) before the UserOwner/GroupOwner ownership changes are
@@ -2557,53 +2637,84 @@ int pr_fsio_mkdir(const char *path, mode_t mode) {
  */
 int pr_fsio_smkdir(pool *p, const char *path, mode_t mode, uid_t uid,
     gid_t gid) {
-  int res;
+  int res, parent_suid = FALSE, parent_sgid = FALSE, use_root_privs = TRUE,
+    xerrno = 0;
   char *tmpl_path;
-#ifdef HAVE_MKDTEMP
-  mode_t mask, *dir_umask;
-  char *dst_dir, *tmpl, *ptr;
-  size_t tmpl_len;
-  struct stat st;
-#endif /* HAVE_MKDTEMP */
+  char *dst_dir, *tmpl;
+  size_t dst_dirlen, tmpl_len;
 
   if (path == NULL) {
     errno = EINVAL;
     return -1;
   }
 
+  pr_trace_msg(trace_channel, 9,
+    "smkdir: path '%s', mode %04o, UID %lu, GID %lu", path, mode,
+    (unsigned long) uid, (unsigned long) gid);
+
 #ifdef HAVE_MKDTEMP
-  ptr = strrchr(path, '/');
-  if (ptr == NULL) {
-    errno = EINVAL;
-    return -1;
-  }
+  if (use_mkdtemp == TRUE) {
+    char *ptr;
+    struct stat st;
 
-  dst_dir = pstrndup(p, path, (ptr - path));
-  res = lstat(dst_dir, &st);
-  if (res < 0) {
-    return -1;
-  }
+    ptr = strrchr(path, '/');
+    if (ptr == NULL) {
+      errno = EINVAL;
+      return -1;
+    }
 
-  if (!S_ISDIR(st.st_mode) &&
-      !S_ISLNK(st.st_mode)) {
-    errno = EPERM;
-    return -1;
-  }
+    if (ptr != path) {
+      dst_dirlen = (ptr - path);
+      dst_dir = pstrndup(p, path, dst_dirlen);
 
-  /* Allocate enough space for the temporary name: the length of the
-   * destination directory, a slash, 9 X's, 3 for the prefix, and 1 for the
-   * trailing NUL.
-   */
-  tmpl_len = strlen(path) + 14;
-  tmpl = pcalloc(p, tmpl_len);
-  snprintf(tmpl, tmpl_len-1, "%s/dstXXXXXXXXX", dst_dir);
+    } else {
+      dst_dirlen = 1;
+      dst_dir = "/";
+    }
 
-  /* Use mkdtemp(3) to create the temporary directory (in the same destination
-   * directory as the target path).
-   */
-  tmpl_path = mkdtemp(tmpl);
-  if (tmpl_path == NULL) {
-    return -1;
+    res = lstat(dst_dir, &st);
+    if (res < 0) {
+      return -1;
+    }
+
+    if (!S_ISDIR(st.st_mode) &&
+        !S_ISLNK(st.st_mode)) {
+      errno = EPERM;
+      return -1;
+    }
+
+    if (st.st_mode & S_ISUID) {
+      parent_suid = TRUE;
+    }
+
+    if (st.st_mode & S_ISGID) {
+      parent_sgid = TRUE;
+    }
+
+    /* Allocate enough space for the temporary name: the length of the
+     * destination directory, a slash, 9 X's, 3 for the prefix, and 1 for the
+     * trailing NUL.
+     */
+    tmpl_len = dst_dirlen + 14;
+    tmpl = pcalloc(p, tmpl_len);
+    snprintf(tmpl, tmpl_len-1, "%s/dstXXXXXXXXX",
+      dst_dirlen > 1 ? dst_dir : "");
+
+    /* Use mkdtemp(3) to create the temporary directory (in the same destination
+     * directory as the target path).
+     */
+    tmpl_path = mkdtemp(tmpl);
+    if (tmpl_path == NULL) {
+      return -1;
+    }
+
+  } else {
+    res = pr_fsio_mkdir(path, mode);
+    if (res < 0) {
+      return -1;
+    }
+
+    tmpl_path = pstrdup(p, path);
   }
 #else
 
@@ -2616,8 +2727,6 @@ int pr_fsio_smkdir(pool *p, const char *path, mode_t mode, uid_t uid,
 #endif /* HAVE_MKDTEMP */
 
   if (uid != (uid_t) -1) {
-    int xerrno;
-
     PRIVS_ROOT
     res = pr_fsio_lchown(tmpl_path, uid, gid);
     xerrno = errno;
@@ -2640,7 +2749,6 @@ int pr_fsio_smkdir(pool *p, const char *path, mode_t mode, uid_t uid,
 
   } else if (gid != (gid_t) -1) {
     register unsigned int i;
-    int use_root_privs = TRUE, xerrno;
 
     /* Check if session.fsgid is in session.gids.  If not, use root privs.  */
     for (i = 0; i < session.gids->nelts; i++) {
@@ -2673,43 +2781,69 @@ int pr_fsio_smkdir(pool *p, const char *path, mode_t mode, uid_t uid,
     }
   }
 
-#ifdef HAVE_MKDTEMP
-  /* Use chmod(2) to set the permission that we want.
-   *
-   * mkdtemp(3) creates a directory with 0700 perms; we are given the
-   * target mode (modulo the configured Umask).
-   */
-  dir_umask = get_param_ptr(CURRENT_CONF, "DirUmask", FALSE);
-  if (dir_umask) {
-    mask = *dir_umask;
+  if (use_mkdtemp == TRUE) {
+    mode_t mask, *dir_umask, perms;
 
-  } else {
-    mask = (mode_t) 0022;
+    /* Use chmod(2) to set the permission that we want.
+     *
+     * mkdtemp(3) creates a directory with 0700 perms; we are given the
+     * target mode (modulo the configured Umask).
+     */
+    dir_umask = get_param_ptr(CURRENT_CONF, "DirUmask", FALSE);
+    if (dir_umask) {
+      mask = *dir_umask;
+
+    } else {
+      mask = (mode_t) 0022;
+    }
+
+    perms = (mode & ~mask);
+
+    if (parent_suid) {
+      perms |= S_ISUID;
+    }
+
+    if (parent_sgid) {
+      perms |= S_ISGID;
+    }
+
+    if (use_root_privs) {
+      PRIVS_ROOT
+    }
+
+    res = chmod(tmpl_path, perms);
+    xerrno = errno;
+
+    if (use_root_privs) {
+      PRIVS_RELINQUISH
+    }
+
+    if (res < 0) {
+      pr_log_pri(PR_LOG_WARNING, "%schmod(%s) failed: %s",
+        use_root_privs ? "root " : "", tmpl_path, strerror(xerrno));
+
+      (void) rmdir(tmpl_path);
+
+      errno = xerrno;
+      return -1;
+    }
+
+    /* Use rename(2) to move the temporary directory into place at the
+     * target path.
+     */
+    res = rename(tmpl_path, path);
+    if (res < 0) {
+      xerrno = errno;
+
+      pr_log_pri(PR_LOG_WARNING, "renaming '%s' to '%s' failed: %s", tmpl_path,
+        path, strerror(xerrno));
+
+      (void) rmdir(tmpl_path);
+
+      errno = xerrno;
+      return -1;
+    }
   }
-
-  res = chmod(tmpl_path, mode & ~mask);
-  if (res < 0) {
-    int xerrno = errno;
-
-    (void) rmdir(tmpl_path);
-
-    errno = xerrno;
-    return -1;
-  }
-
-  /* Use rename(2) to move the temporary directory into place at the
-   * target path.
-   */
-  res = rename(tmpl_path, path);
-  if (res < 0) {
-    int xerrno = errno;
-
-    (void) rmdir(tmpl_path);
-
-    errno = xerrno;
-    return -1;
-  }
-#endif /* HAVE_MKDTEMP */
 
   return 0;
 }
@@ -3935,19 +4069,22 @@ char *pr_fsio_getline(char *buf, int buflen, pr_fh_t *fh,
            * Advance past any leading whitespace, to see if the first
            * non-whitespace character is the comment character.
            */
-          for (bufp = buf; *bufp && isspace((int) *bufp); bufp++);
+          for (bufp = buf; *bufp && PR_ISSPACE(*bufp); bufp++);
 
-          if (*bufp == '#')
+          if (*bufp == '#') {
              continue;
+          }
  
-        } else
+        } else {
           return start;
+        }
       }
     }
 
     /* Be careful of reading too much. */
-    if (buflen - inlen == 0)
+    if (buflen - inlen == 0) {
       return buf;
+    }
 
     buf += inlen;
     buflen -= inlen;
@@ -4062,7 +4199,9 @@ static off_t get_fs_size(size_t nblocks, size_t blocksz) {
   return (res_lo >> 10) | (res_hi << 6);
 }
 
-static int fs_getsize(char *path, off_t *fs_size) {
+static int fs_getsize(int fd, char *path, off_t *fs_size) {
+  int res = -1;
+
 # if defined(HAVE_SYS_STATVFS_H)
 
 #  if defined(_FILE_OFFSET_BITS) && _FILE_OFFSET_BITS == 64 && \
@@ -4080,18 +4219,37 @@ static int fs_getsize(char *path, off_t *fs_size) {
   struct statvfs fs;
 #  endif /* LFS && !Solaris 2.5.1 && !Solaris 2.6 && !Solaris 2.7 */
 
-  pr_trace_msg(trace_channel, 18, "using statvfs() on '%s'", path);
-  if (statvfs(path, &fs) < 0) {
+  if (path != NULL) {
+    pr_trace_msg(trace_channel, 18, "using statvfs() on '%s'", path);
+
+  } else {
+    pr_trace_msg(trace_channel, 18, "using statvfs() on fd %d", fd);
+  }
+
+  if (path != NULL) {
+    res = statvfs(path, &fs);
+
+  } else {
+    res = fstatvfs(fd, &fs);
+  }
+
+  if (res < 0) {
     int xerrno = errno;
 
-    pr_trace_msg(trace_channel, 3, "statvfs() error using '%s': %s",
-      path, strerror(xerrno));
+    if (path != NULL) {
+      pr_trace_msg(trace_channel, 3, "statvfs() error using '%s': %s",
+        path, strerror(xerrno));
+
+    } else {
+      pr_trace_msg(trace_channel, 3, "statvfs() error using fd %d: %s",
+        fd, strerror(xerrno));
+    }
 
     errno = xerrno;
     return -1;
   }
 
-  /* The getc_fs_size() function is only useful for 32-bit numbers;
+  /* The get_fs_size() function is only useful for 32-bit numbers;
    * if either of our two values are in datatypes larger than 4 bytes,
    * we'll use typecasting.
    */
@@ -4112,12 +4270,31 @@ static int fs_getsize(char *path, off_t *fs_size) {
 # elif defined(HAVE_SYS_VFS_H)
   struct statfs fs;
 
-  pr_trace_msg(trace_channel, 18, "using statfs() on '%s'", path);
-  if (statfs(path, &fs) < 0) {
+  if (path != NULL) {
+    pr_trace_msg(trace_channel, 18, "using statfs() on '%s'", path);
+
+  } else {
+    pr_trace_msg(trace_channel, 18, "using statfs() on fd %d", fd);
+  }
+
+  if (path != NULL) {
+    res = statfs(path, &fs);
+
+  } else {
+    res = fstatfs(fd, &fs);
+  }
+
+  if (res < 0) {
     int xerrno = errno;
 
-    pr_trace_msg(trace_channel, 3, "statfs() error using '%s': %s",
-      path, strerror(xerrno));
+    if (path != NULL) {
+      pr_trace_msg(trace_channel, 3, "statfs() error using '%s': %s",
+        path, strerror(xerrno));
+
+    } else {
+      pr_trace_msg(trace_channel, 3, "statfs() error using fd %d: %s",
+        fd, strerror(xerrno));
+    }
 
     errno = xerrno;
     return -1;
@@ -4144,12 +4321,31 @@ static int fs_getsize(char *path, off_t *fs_size) {
 # elif defined(HAVE_STATFS)
   struct statfs fs;
 
-  pr_trace_msg(trace_channel, 18, "using statfs() on '%s'", path);
-  if (statfs(path, &fs) < 0) {
+  if (path != NULL) {
+    pr_trace_msg(trace_channel, 18, "using statfs() on '%s'", path);
+
+  } else {
+    pr_trace_msg(trace_channel, 18, "using statfs() on fd %d", fd);
+  }
+
+  if (path != NULL) {
+    res = statfs(path, &fs);
+
+  } else {
+    res = fstatfs(fd, &fs);
+  }
+
+  if (res < 0) {
     int xerrno = errno;
 
-    pr_trace_msg(trace_channel, 3, "statfs() error using '%s': %s",
-      path, strerror(xerrno));
+    if (path != NULL) {
+      pr_trace_msg(trace_channel, 3, "statfs() error using '%s': %s",
+        path, strerror(xerrno));
+
+    } else {
+      pr_trace_msg(trace_channel, 3, "statfs() error using fd %d: %s",
+        fd, strerror(xerrno));
+    }
 
     errno = xerrno;
     return -1;
@@ -4194,7 +4390,64 @@ off_t pr_fs_getsize(char *path) {
 #endif /* !HAVE_STATFS && !HAVE_SYS_STATVFS && !HAVE_SYS_VFS */
 
 int pr_fs_getsize2(char *path, off_t *fs_size) {
-  return fs_getsize(path, fs_size);
+  return fs_getsize(-1, path, fs_size);
+}
+
+int pr_fs_fgetsize(int fd, off_t *fs_size) {
+  return fs_getsize(fd, NULL, fs_size);
+}
+
+int pr_fs_is_nfs(const char *path) {
+#ifdef HAVE_STATFS
+  struct statfs fs;
+  int res = FALSE;
+
+  if (path == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  pr_trace_msg(trace_channel, 18, "using statfs() on '%s'", path);
+  if (statfs(path, &fs) < 0) {
+    int xerrno = errno;
+
+    pr_trace_msg(trace_channel, 3, "statfs() error using '%s': %s",
+      path, strerror(xerrno));
+
+    errno = xerrno;
+    return -1;
+  }
+
+# if defined(HAVE_STATFS_F_FSTYPENAME)
+  pr_trace_msg(trace_channel, 12,
+    "path '%s' resides on a filesystem of type '%s'", path, fs.f_fstypename);
+  if (strcasecmp(fs.f_fstypename, "nfs") == 0) {
+    res = TRUE;
+  }
+# elif defined(HAVE_STATFS_F_TYPE)
+  /* Probably a Linux system. */
+  if (fs.f_type == NFS_SUPER_MAGIC) {
+    pr_trace_msg(trace_channel, 12,
+      "path '%s' resides on an NFS_SUPER_MAGIC filesystem (type 0x%08x)", path,
+      fs.f_type);
+    res = TRUE;
+
+  } else {
+    pr_trace_msg(trace_channel, 12,
+      "path '%s' resides on a filesystem of type 0x%08x (not NFS_SUPER_MAGIC)",
+      path, fs.f_type);
+  }
+# else
+  pr_trace_msg(trace_channel, 12,
+    "unable to determine filesystem type for path '%s'", path);
+# endif /* No HAVE_STATFS_F_FSTYPENAME or HAVE_STATFS_F_TYPE */
+
+  return res;
+
+#else
+  errno = ENOSYS;
+  return -1;
+#endif /* HAVE_STATFS */
 }
 
 int pr_fsio_puts(const char *buf, pr_fh_t *fh) {
@@ -4325,6 +4578,9 @@ int init_fs(void) {
     pr_fsio_chdir("/", FALSE);
     pr_fs_setcwd("/");
   }
+
+  /* Prepare the stat cache as well. */
+  memset(&statcache, '\0', sizeof(statcache));
 
   return 0;
 }

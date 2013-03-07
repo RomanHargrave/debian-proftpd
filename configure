@@ -2092,8 +2092,8 @@ ac_compiler_gnu=$ac_cv_c_compiler_gnu
 
 
 
-ac_core_modules="mod_core.o mod_xfer.o mod_auth_unix.o mod_auth_file.o mod_auth.o mod_ls.o mod_log.o mod_site.o mod_delay.o mod_facts.o"
-ac_build_core_modules="modules/mod_core.o modules/mod_xfer.o modules/mod_auth_unix.o modules/mod_auth_file.o modules/mod_auth.o modules/mod_ls.o modules/mod_log.o modules/mod_site.o modules/mod_delay.o modules/mod_facts.o"
+ac_core_modules="mod_core.o mod_xfer.o mod_rlimit.o mod_auth_unix.o mod_auth_file.o mod_auth.o mod_ls.o mod_log.o mod_site.o mod_delay.o mod_facts.o"
+ac_build_core_modules="modules/mod_core.o modules/mod_xfer.o modules/mod_rlimit.o modules/mod_auth_unix.o modules/mod_auth_file.o modules/mod_auth.o modules/mod_ls.o modules/mod_log.o modules/mod_site.o modules/mod_delay.o modules/mod_facts.o"
 
 ac_aux_dir=
 for ac_dir in ./ "$srcdir"/./; do
@@ -6224,7 +6224,7 @@ if (eval "$ac_cpp conftest.$ac_ext") 2>&5 |
 else
   ac_cv_header_stdc=no
 fi
-rm -f conftest*
+rm -f -r conftest*
 
 fi
 
@@ -6245,7 +6245,7 @@ if (eval "$ac_cpp conftest.$ac_ext") 2>&5 |
 else
   ac_cv_header_stdc=no
 fi
-rm -f conftest*
+rm -f -r conftest*
 
 fi
 
@@ -15459,7 +15459,7 @@ cat >>confdefs.h <<_ACEOF
 _ACEOF
 ;;
 esac
-rm -f conftest*
+rm -f -r conftest*
   if test $ac_cv_sys_file_offset_bits = unknown; then
     { echo "$as_me:$LINENO: checking for _LARGE_FILES value needed for large files" >&5
 echo $ECHO_N "checking for _LARGE_FILES value needed for large files... $ECHO_C" >&6; }
@@ -15580,7 +15580,7 @@ cat >>confdefs.h <<_ACEOF
 _ACEOF
 ;;
 esac
-rm -f conftest*
+rm -f -r conftest*
   fi
 fi
 
@@ -16865,7 +16865,7 @@ if test x"$enable_memcache" = xyes; then
   ac_build_static_modules="$ac_build_static_modules modules/mod_memcache.o"
 fi
 
-ac_unshareable_modules="mod_auth mod_auth_unix mod_core mod_dso mod_ls mod_xfer mod_log mod_site mod_cap mod_ctrls"
+ac_unshareable_modules="mod_auth mod_rlimit mod_auth_unix mod_core mod_dso mod_ls mod_xfer mod_log mod_site mod_cap mod_ctrls"
 
 
 # Check whether --with-shared was given.
@@ -22715,7 +22715,7 @@ if (eval "$ac_cpp conftest.$ac_ext") 2>&5 |
 else
   ac_cv_header_stdc=no
 fi
-rm -f conftest*
+rm -f -r conftest*
 
 fi
 
@@ -22736,7 +22736,7 @@ if (eval "$ac_cpp conftest.$ac_ext") 2>&5 |
 else
   ac_cv_header_stdc=no
 fi
-rm -f conftest*
+rm -f -r conftest*
 
 fi
 
@@ -24909,7 +24909,7 @@ else
 echo "${ECHO_T}no" >&6; }
 
 fi
-rm -f conftest*
+rm -f -r conftest*
 
 
 
@@ -25338,7 +25338,7 @@ done
 
 
 
-for ac_header in sys/statvfs.h sys/un.h sys/vfs.h sys/select.h termios.h
+for ac_header in sys/statfs.h sys/statvfs.h sys/un.h sys/vfs.h sys/select.h
 do
 as_ac_Header=`echo "ac_cv_header_$ac_header" | $as_tr_sh`
 if { as_var=$as_ac_Header; eval "test \"\${$as_var+set}\" = set"; }; then
@@ -25482,7 +25482,8 @@ done
 
 
 
-for ac_header in dirent.h ndir.h sys/ndir.h sys/dir.h vmsdir.h
+
+for ac_header in termios.h dirent.h ndir.h sys/ndir.h sys/dir.h vmsdir.h
 do
 as_ac_Header=`echo "ac_cv_header_$ac_header" | $as_tr_sh`
 if { as_var=$as_ac_Header; eval "test \"\${$as_var+set}\" = set"; }; then
@@ -26432,7 +26433,7 @@ if (eval "$ac_cpp conftest.$ac_ext") 2>&5 |
 else
   ac_cv_type_uid_t=no
 fi
-rm -f conftest*
+rm -f -r conftest*
 
 fi
 { echo "$as_me:$LINENO: result: $ac_cv_type_uid_t" >&5
@@ -26789,7 +26790,7 @@ if (eval "$ac_cpp conftest.$ac_ext") 2>&5 |
 else
   ac_cv_type_getgroups=int
 fi
-rm -f conftest*
+rm -f -r conftest*
 
 fi
 fi
@@ -26835,10 +26836,10 @@ if (eval "$ac_cpp conftest.$ac_ext") 2>&5 |
 else
   pr_cv_header_timer_t="no"
 fi
-rm -f conftest*
+rm -f -r conftest*
 
 fi
-rm -f conftest*
+rm -f -r conftest*
 
 fi
 { echo "$as_me:$LINENO: result: $pr_cv_header_timer_t" >&5
@@ -31054,7 +31055,7 @@ if (eval "$ac_cpp conftest.$ac_ext") 2>&5 |
 else
   pr_cv_header_utmaxtype="no"
 fi
-rm -f conftest*
+rm -f -r conftest*
 
 fi
 { echo "$as_me:$LINENO: result: $pr_cv_header_utmaxtype" >&5
@@ -31079,7 +31080,7 @@ if (eval "$ac_cpp conftest.$ac_ext") 2>&5 |
 else
   pr_cv_header_ut_host="no"
 fi
-rm -f conftest*
+rm -f -r conftest*
 
 fi
 { echo "$as_me:$LINENO: result: $pr_cv_header_ut_host" >&5
@@ -31104,7 +31105,7 @@ if (eval "$ac_cpp conftest.$ac_ext") 2>&5 |
 else
   pr_cv_header_ut_exit="no"
 fi
-rm -f conftest*
+rm -f -r conftest*
 
 fi
 { echo "$as_me:$LINENO: result: $pr_cv_header_ut_exit" >&5
@@ -31163,7 +31164,7 @@ if (eval "$ac_cpp conftest.$ac_ext") 2>&5 |
 else
   pr_cv_header_syslog_log_cron="no"
 fi
-rm -f conftest*
+rm -f -r conftest*
 
 fi
 { echo "$as_me:$LINENO: result: $pr_cv_header_syslog_log_cron" >&5
@@ -31193,7 +31194,7 @@ if (eval "$ac_cpp conftest.$ac_ext") 2>&5 |
 else
   pr_cv_header_syslog_log_ftp="no"
 fi
-rm -f conftest*
+rm -f -r conftest*
 
 fi
 { echo "$as_me:$LINENO: result: $pr_cv_header_syslog_log_ftp" >&5
@@ -31460,7 +31461,7 @@ if (eval "$ac_cpp conftest.$ac_ext") 2>&5 |
 else
   ac_cv_os_cray=no
 fi
-rm -f conftest*
+rm -f -r conftest*
 
 fi
 { echo "$as_me:$LINENO: result: $ac_cv_os_cray" >&5
@@ -31739,7 +31740,7 @@ if (eval "$ac_cpp conftest.$ac_ext") 2>&5 |
 else
   ac_cv_prog_gcc_traditional=no
 fi
-rm -f conftest*
+rm -f -r conftest*
 
 
   if test $ac_cv_prog_gcc_traditional = no; then
@@ -31756,7 +31757,7 @@ if (eval "$ac_cpp conftest.$ac_ext") 2>&5 |
   $EGREP "$ac_pattern" >/dev/null 2>&1; then
   ac_cv_prog_gcc_traditional=yes
 fi
-rm -f conftest*
+rm -f -r conftest*
 
   fi
 fi
@@ -34117,6 +34118,266 @@ if test $ac_cv_member_struct_sockaddr_in_sin_len = yes; then
 
 cat >>confdefs.h <<\_ACEOF
 #define SIN_LEN 1
+_ACEOF
+
+fi
+
+
+{ echo "$as_me:$LINENO: checking for struct statfs.f_fstypename" >&5
+echo $ECHO_N "checking for struct statfs.f_fstypename... $ECHO_C" >&6; }
+if test "${ac_cv_member_struct_statfs_f_fstypename+set}" = set; then
+  echo $ECHO_N "(cached) $ECHO_C" >&6
+else
+  cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+
+    #if HAVE_SYS_TYPES_H
+    # include <sys/types.h>
+    #endif
+    #if HAVE_SYS_PARAM_H
+    # include <sys/param.h>
+    #endif
+    #if HAVE_SYS_MOUNT_H
+    # include <sys/mount.h>
+    #endif
+    #if HAVE_SYS_VFS_H
+    # include <sys/vfs.h>
+    #endif
+
+
+int
+main ()
+{
+static struct statfs ac_aggr;
+if (ac_aggr.f_fstypename)
+return 0;
+  ;
+  return 0;
+}
+_ACEOF
+rm -f conftest.$ac_objext
+if { (ac_try="$ac_compile"
+case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_compile") 2>conftest.er1
+  ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } && {
+	 test -z "$ac_c_werror_flag" ||
+	 test ! -s conftest.err
+       } && test -s conftest.$ac_objext; then
+  ac_cv_member_struct_statfs_f_fstypename=yes
+else
+  echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+	cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+
+    #if HAVE_SYS_TYPES_H
+    # include <sys/types.h>
+    #endif
+    #if HAVE_SYS_PARAM_H
+    # include <sys/param.h>
+    #endif
+    #if HAVE_SYS_MOUNT_H
+    # include <sys/mount.h>
+    #endif
+    #if HAVE_SYS_VFS_H
+    # include <sys/vfs.h>
+    #endif
+
+
+int
+main ()
+{
+static struct statfs ac_aggr;
+if (sizeof ac_aggr.f_fstypename)
+return 0;
+  ;
+  return 0;
+}
+_ACEOF
+rm -f conftest.$ac_objext
+if { (ac_try="$ac_compile"
+case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_compile") 2>conftest.er1
+  ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } && {
+	 test -z "$ac_c_werror_flag" ||
+	 test ! -s conftest.err
+       } && test -s conftest.$ac_objext; then
+  ac_cv_member_struct_statfs_f_fstypename=yes
+else
+  echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+	ac_cv_member_struct_statfs_f_fstypename=no
+fi
+
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+fi
+
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+fi
+{ echo "$as_me:$LINENO: result: $ac_cv_member_struct_statfs_f_fstypename" >&5
+echo "${ECHO_T}$ac_cv_member_struct_statfs_f_fstypename" >&6; }
+if test $ac_cv_member_struct_statfs_f_fstypename = yes; then
+
+cat >>confdefs.h <<\_ACEOF
+#define HAVE_STATFS_F_FSTYPENAME 1
+_ACEOF
+
+fi
+
+
+{ echo "$as_me:$LINENO: checking for struct statfs.f_type" >&5
+echo $ECHO_N "checking for struct statfs.f_type... $ECHO_C" >&6; }
+if test "${ac_cv_member_struct_statfs_f_type+set}" = set; then
+  echo $ECHO_N "(cached) $ECHO_C" >&6
+else
+  cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+
+    #if HAVE_SYS_TYPES_H
+    # include <sys/types.h>
+    #endif
+    #if HAVE_SYS_PARAM_H
+    # include <sys/param.h>
+    #endif
+    #if HAVE_SYS_MOUNT_H
+    # include <sys/mount.h>
+    #endif
+    #if HAVE_SYS_VFS_H
+    # include <sys/vfs.h>
+    #endif
+
+
+int
+main ()
+{
+static struct statfs ac_aggr;
+if (ac_aggr.f_type)
+return 0;
+  ;
+  return 0;
+}
+_ACEOF
+rm -f conftest.$ac_objext
+if { (ac_try="$ac_compile"
+case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_compile") 2>conftest.er1
+  ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } && {
+	 test -z "$ac_c_werror_flag" ||
+	 test ! -s conftest.err
+       } && test -s conftest.$ac_objext; then
+  ac_cv_member_struct_statfs_f_type=yes
+else
+  echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+	cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+
+    #if HAVE_SYS_TYPES_H
+    # include <sys/types.h>
+    #endif
+    #if HAVE_SYS_PARAM_H
+    # include <sys/param.h>
+    #endif
+    #if HAVE_SYS_MOUNT_H
+    # include <sys/mount.h>
+    #endif
+    #if HAVE_SYS_VFS_H
+    # include <sys/vfs.h>
+    #endif
+
+
+int
+main ()
+{
+static struct statfs ac_aggr;
+if (sizeof ac_aggr.f_type)
+return 0;
+  ;
+  return 0;
+}
+_ACEOF
+rm -f conftest.$ac_objext
+if { (ac_try="$ac_compile"
+case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval "echo \"\$as_me:$LINENO: $ac_try_echo\"") >&5
+  (eval "$ac_compile") 2>conftest.er1
+  ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } && {
+	 test -z "$ac_c_werror_flag" ||
+	 test ! -s conftest.err
+       } && test -s conftest.$ac_objext; then
+  ac_cv_member_struct_statfs_f_type=yes
+else
+  echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+	ac_cv_member_struct_statfs_f_type=no
+fi
+
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+fi
+
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+fi
+{ echo "$as_me:$LINENO: result: $ac_cv_member_struct_statfs_f_type" >&5
+echo "${ECHO_T}$ac_cv_member_struct_statfs_f_type" >&6; }
+if test $ac_cv_member_struct_statfs_f_type = yes; then
+
+cat >>confdefs.h <<\_ACEOF
+#define HAVE_STATFS_F_TYPE 1
 _ACEOF
 
 fi
@@ -36658,7 +36919,7 @@ if (eval "$ac_cpp conftest.$ac_ext") 2>&5 |
 else
   have_psstrings="no"
 fi
-rm -f conftest*
+rm -f -r conftest*
 
     if test "$have_psstrings" = "yes"; then
 	cat >>confdefs.h <<\_ACEOF
@@ -36753,7 +37014,7 @@ if (eval "$ac_cpp conftest.$ac_ext") 2>&5 |
 else
   pf_cv_argv_type="writeable"
 fi
-rm -f conftest*
+rm -f -r conftest*
 
 fi
 { echo "$as_me:$LINENO: result: $pf_cv_argv_type" >&5
@@ -36976,12 +37237,12 @@ if test x"$pr_use_mysql" = xyes; then
   saved_libs="$LIBS"
   saved_cppflags="$CPPFLAGS"
 
-  # fiddle with CPPFLAGS, LDFLAGS
+  # Fiddle with CPPFLAGS, LDFLAGS
   CPPFLAGS="$CPPFLAGS $ac_build_addl_includes"
-  LDFLAGS="$LDFLAGS -lm -lmysqlclient -lz"
+  LDFLAGS="$LDFLAGS $ac_build_addl_libdirs"
 
     LIBS=`echo "$LIBS" | sed -e 's/-lsupp//g'`;
-  LIBS="$LIBS $ac_build_addl_libdirs"
+  LIBS="$LIBS -lm -lmysqlclient -lz"
 
   # For Bug#3669, we need to check for make_scrambled_password_323.
   { echo "$as_me:$LINENO: checking for MySQL's make_scrambled_password_323" >&5
@@ -37505,10 +37766,10 @@ echo $ECHO_N "checking for Postgres's PQescapeStringConn... $ECHO_C" >&6; }
 
   # fiddle with CPPFLAGS, LDFLAGS
   CPPFLAGS="$CPPFLAGS $ac_build_addl_includes"
-  LDFLAGS="$LDFLAGS -lm -lpq"
+  LDFLAGS="$LDFLAGS $ac_build_addl_libdirs"
 
     LIBS=`echo "$LIBS" | sed -e 's/-lsupp//g'`;
-  LIBS="$LIBS $ac_build_addl_libdirs"
+  LIBS="$LIBS -lm -lpq"
 
   cat >conftest.$ac_ext <<_ACEOF
 /* confdefs.h.  */
@@ -39604,7 +39865,7 @@ do
     cat >>$CONFIG_STATUS <<_ACEOF
     # First, check the format of the line:
     cat >"\$tmp/defines.sed" <<\\CEOF
-/^[	 ]*#[	 ]*undef[	 ][	 ]*$ac_word_re[	 ]*\$/b def
+/^[	 ]*#[	 ]*undef[	 ][	 ]*$ac_word_re[	 ]*/b def
 /^[	 ]*#[	 ]*define[	 ][	 ]*$ac_word_re[(	 ]/b def
 b
 :def

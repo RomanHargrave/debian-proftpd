@@ -25,7 +25,7 @@
  */
 
 /* Core FTPD module
- * $Id: mod_core.c,v 1.439 2013/01/04 20:12:09 castaglia Exp $
+ * $Id: mod_core.c,v 1.450 2013/02/15 22:50:54 castaglia Exp $
  */
 
 #include "conf.h"
@@ -48,6 +48,9 @@ extern modret_t *site_dispatch(cmd_rec*);
 #define PR_BYTES_BAD_UNITS	-1
 #define PR_BYTES_BAD_FORMAT	-2
 
+/* Maximum number of parameters for OPTS commands (see Bug#3870). */
+#define PR_OPTS_MAX_PARAM_COUNT		8
+
 module core_module;
 char AddressCollisionCheck = TRUE;
 
@@ -61,62 +64,6 @@ static const char *trace_log = NULL;
 /* Necessary prototypes. */
 static int core_sess_init(void);
 static void reset_server_auth_order(void);
-
-static ssize_t get_num_bytes(char *nbytes_str) {
-  ssize_t nbytes = 0;
-  unsigned long inb;
-  char units, junk;
-  int result;
-
-  /* Scan in the given argument, checking for the leading number-of-bytes
-   * as well as a trailing G, M, K, or B (case-insensitive).  The junk
-   * variable is catch arguments like "2g2" or "number-letter-whatever".
-   *
-   * NOTE: There is no portable way to scan in an ssize_t, so we do unsigned
-   * long and cast it.  This probably places a 32-bit limit on rlimit values.
-   */
-  if ((result = sscanf(nbytes_str, "%lu%c%c", &inb, &units, &junk)) == 2) {
-
-    if (units != 'G' && units != 'g' &&
-        units != 'M' && units != 'm' &&
-        units != 'K' && units != 'k' &&
-        units != 'B' && units != 'b')
-      return PR_BYTES_BAD_UNITS;
-
-    nbytes = (ssize_t)inb;
-
-    /* Calculate the actual bytes, multiplying by the given units.  Doing
-     * it this way means that <math.h> and -lm aren't required.
-     */
-    if (units == 'G' || units == 'g')
-      nbytes *= (1024 * 1024 * 1024);
-
-    if (units == 'M' || units == 'm')
-      nbytes *= (1024 * 1024);
-
-    if (units == 'K' || units == 'k')
-      nbytes *= 1024;
-
-    /* Silently ignore units of 'B' and 'b', as they don't affect
-     * the requested number of bytes anyway.
-     */
-
-    /* NB: should we check for a maximum numeric value of calculated bytes?
-     *  Probably not, as it varies (int to rlim_t) from platform to
-     *  platform)...at least, not yet.
-     */
-    return nbytes;
-
-  } else if (result == 1) {
-
-    /* No units given.  Return the number of bytes as is. */
-    return (ssize_t) inb;
-  }
-
-  /* Default return value: the given argument was badly formatted.
-   */
-  return PR_BYTES_BAD_FORMAT;
-}
 
 /* These are for handling any configured MaxCommandRate. */
 static unsigned long core_cmd_count = 0UL;
@@ -303,20 +250,23 @@ MODRET start_ifmodule(cmd_rec *cmd) {
       sizeof(buf))) != NULL) {
     char *bufp;
 
-    /* Advance past any leading whitespace. */
-    for (bufp = config_line; *bufp && isspace((int) *bufp); bufp++);
+    pr_signals_handle();
 
-    if (strncasecmp(bufp, "<IfModule", 9) == 0)
+    /* Advance past any leading whitespace. */
+    for (bufp = config_line; *bufp && PR_ISSPACE(*bufp); bufp++);
+
+    if (strncasecmp(bufp, "<IfModule", 9) == 0) {
       ifmodule_ctx_count++;
 
-    if (strcasecmp(bufp, "</IfModule>") == 0)
+    } else if (strcasecmp(bufp, "</IfModule>") == 0) {
       ifmodule_ctx_count--;
+    }
   }
 
-  /* If there are still unclosed <IfModule> sections, signal an error.
-   */
-  if (ifmodule_ctx_count)
+  /* If there are still unclosed <IfModule> sections, signal an error. */
+  if (ifmodule_ctx_count) {
     CONF_ERROR(cmd, "unclosed <IfModule> context");
+  }
 
   return PR_HANDLED(cmd);
 }
@@ -1411,13 +1361,13 @@ MODRET set_trace(cmd_rec *cmd) {
 
       res = pr_trace_parse_levels(ptr + 1, &min_level, &max_level);
       if (res < 0) {
-        CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "error parsing level ", ptr + 1,
-          " for channel '", channel, "': ", strerror(errno), NULL));
+        CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "error parsing level \"",
+          ptr + 1, "\" for channel '", channel, "': ", strerror(errno), NULL));
       }
 
       if (pr_trace_set_levels(channel, min_level, max_level) < 0) {
-        CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "error setting level ", ptr + 1,
-          " for channel '", channel, "': ", strerror(errno), NULL));
+        CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "error setting level \"",
+          ptr + 1, "\" for channel '", channel, "': ", strerror(errno), NULL));
       }
 
       *ptr = ':';
@@ -1713,424 +1663,6 @@ MODRET set_regexoptions(cmd_rec *cmd) {
   *((unsigned long *) c->argv[1]) = match_limit_recursion;
 
   return PR_HANDLED(cmd);
-}
-
-MODRET set_rlimitcpu(cmd_rec *cmd) {
-#ifdef RLIMIT_CPU
-  /* Make sure the directive has between 1 and 3 parameters */
-  if (cmd->argc-1 < 1 || cmd->argc-1 > 3)
-    CONF_ERROR(cmd, "wrong number of parameters");
-
-  /* The context check for this directive depends on the first parameter.
-   * For backwards compatibility, this parameter may be a number, or it
-   * may be "daemon", "session", or "none".  If it happens to be
-   * "daemon", then this directive should be in the CONF_ROOT context only.
-   * Otherwise, it can appear in the full range of server contexts.
-   */
-
-  if (strncmp(cmd->argv[1], "daemon", 7) == 0) {
-    CHECK_CONF(cmd, CONF_ROOT);
-
-  } else {
-    CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
-  }
-
-  /* Handle the newer format, which uses "daemon" or "session" or "none"
-   * as the first parameter.
-   */
-  if (strncmp(cmd->argv[1], "daemon", 7) == 0 ||
-      strncmp(cmd->argv[1], "session", 8) == 0) {
-    config_rec *c = NULL;
-    struct rlimit *rlim = pcalloc(cmd->server->pool, sizeof(struct rlimit));
-
-    /* Retrieve the current values */
-    if (getrlimit(RLIMIT_CPU, rlim) < 0)
-      pr_log_pri(PR_LOG_ERR, "error: getrlimit(RLIMIT_CPU): %s",
-        strerror(errno));
-
-    if (strcasecmp("max", cmd->argv[2]) == 0) {
-      rlim->rlim_cur = RLIM_INFINITY;
-
-    } else {
-
-      /* Check that the non-max argument is a number, and error out if not.
-       */
-      char *tmp = NULL;
-      unsigned long num = strtoul(cmd->argv[2], &tmp, 10);
-
-      if (tmp && *tmp)
-        CONF_ERROR(cmd, "badly formatted argument");
-
-      rlim->rlim_cur = num;
-    }
-
-    /* Handle the optional "hard limit" parameter, if present. */
-    if (cmd->argc-1 == 3) {
-      if (strcasecmp("max", cmd->argv[3]) == 0) {
-        rlim->rlim_max = RLIM_INFINITY;
-
-      } else {
-
-        /* Check that the non-max argument is a number, and error out if not.
-         */
-        char *tmp = NULL;
-        unsigned long num = strtoul(cmd->argv[3], &tmp, 10);
-
-        if (tmp && *tmp)
-          CONF_ERROR(cmd, "badly formatted argument");
-
-        rlim->rlim_max = num;
-      }
-    }
-
-    c = add_config_param(cmd->argv[0], 2, (void *) rlim, NULL);
-    c->argv[1] = pstrdup(c->pool, cmd->argv[1]);
-
-  /* Handle the older format, which will have a number as the first
-   * parameter.
-   */
-  } else {
-    struct rlimit *rlim = pcalloc(cmd->server->pool, sizeof(struct rlimit));
-
-    /* Retrieve the current values */
-    if (getrlimit(RLIMIT_CPU, rlim) < 0)
-      pr_log_pri(PR_LOG_ERR, "error: getrlimit(RLIMIT_CPU): %s",
-        strerror(errno));
-
-    if (strcasecmp("max", cmd->argv[1]) == 0) {
-      rlim->rlim_cur = RLIM_INFINITY;
-
-    } else {
-
-      /* Check that the non-max argument is a number, and error out if not.
-       */
-      char *tmp = NULL;
-      long num = strtol(cmd->argv[1], &tmp, 10);
-
-      if (tmp && *tmp)
-        CONF_ERROR(cmd, "badly formatted argument");
-
-      rlim->rlim_cur = num;
-    }
-
-    /* Handle the optional "hard limit" parameter, if present. */
-    if (cmd->argc-1 == 2) {
-      if (strcasecmp("max", cmd->argv[2]) == 0) {
-        rlim->rlim_max = RLIM_INFINITY;
-
-      } else {
-
-        /* Check that the non-max argument is a number, and error out if not.
-         */
-        char *tmp = NULL;
-        long num = strtol(cmd->argv[2], &tmp, 10);
-
-        if (tmp && *tmp)
-          CONF_ERROR(cmd, "badly formatted argument");
-
-        rlim->rlim_max = num;
-      }
-    }
-
-    add_config_param(cmd->argv[0], 2, (void *) rlim, NULL);
-  }
-
-  return PR_HANDLED(cmd);
-#else
-  CONF_ERROR(cmd, "RLimitCPU is not supported on this platform");
-#endif
-}
-
-MODRET set_rlimitmemory(cmd_rec *cmd) {
-#if defined(RLIMIT_DATA) || defined(RLIMIT_AS) || defined(RLIMIT_VMEM)
-  /* Make sure the directive has between 1 and 3 parameters */
-  if (cmd->argc-1 < 1 || cmd->argc-1 > 3)
-    CONF_ERROR(cmd, "wrong number of parameters");
-
-  /* The context check for this directive depends on the first parameter.
-   * For backwards compatibility, this parameter may be a number, or it
-   * may be "daemon", "session", or "none".  If it happens to be
-   * "daemon", then this directive should be in the CONF_ROOT context only.
-   * Otherwise, it can appear in the full range of server contexts.
-   */
-
-  if (strncmp(cmd->argv[1], "daemon", 7) == 0) {
-    CHECK_CONF(cmd, CONF_ROOT);
-
-  } else {
-    CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
-  }
-
-  /* Handle the newer format, which uses "daemon" or "session" or "none"
-   * as the first parameter.
-   */
-  if (strncmp(cmd->argv[1], "daemon", 7) == 0 ||
-      strncmp(cmd->argv[1], "session", 8) == 0) {
-    config_rec *c = NULL;
-    struct rlimit *rlim = pcalloc(cmd->server->pool, sizeof(struct rlimit));
-
-    /* Retrieve the current values */
-#if defined(RLIMIT_DATA)
-    if (getrlimit(RLIMIT_DATA, rlim) == -1)
-      pr_log_pri(PR_LOG_ERR, "error: getrlimit(RLIMIT_DATA): %s",
-        strerror(errno));
-#elif defined(RLIMIT_AS)
-    if (getrlimit(RLIMIT_AS, rlim) == -1)
-      pr_log_pri(PR_LOG_ERR, "error: getrlimit(RLIMIT_AS): %s",
-        strerror(errno));
-#elif defined(RLIMIT_VMEM)
-    if (getrlimit(RLIMIT_VMEM, rlim) == -1)
-      pr_log_pri(PR_LOG_ERR, "error: getrlimit(RLIMIT_VMEM): %s",
-        strerror(errno));
-#endif
-
-    if (strcasecmp("max", cmd->argv[2]) == 0) {
-      rlim->rlim_cur = RLIM_INFINITY;
-
-    } else {
-      rlim->rlim_cur = get_num_bytes(cmd->argv[2]);
-
-      /* Check for bad return values. */
-      if (rlim->rlim_cur == PR_BYTES_BAD_UNITS) {
-        CONF_ERROR(cmd, "unknown units used");
-      }
-
-      if (rlim->rlim_cur == PR_BYTES_BAD_FORMAT) {
-        CONF_ERROR(cmd, "badly formatted parameter");
-      }
-    }
-
-    /* Handle the optional "hard limit" parameter, if present. */
-    if (cmd->argc-1 == 3) {
-      if (strcasecmp("max", cmd->argv[3]) == 0) {
-        rlim->rlim_max = RLIM_INFINITY;
-
-      } else {
-        rlim->rlim_max = get_num_bytes(cmd->argv[3]);
-
-        /* Check for bad return values. */
-        if (rlim->rlim_max == PR_BYTES_BAD_UNITS) {
-          CONF_ERROR(cmd, "unknown units used");
-        }
-
-        if (rlim->rlim_max == PR_BYTES_BAD_FORMAT) {
-          CONF_ERROR(cmd, "badly formatted parameter");
-        }
-      }
-    }
-
-    c = add_config_param(cmd->argv[0], 2, (void *) rlim, NULL);
-    c->argv[1] = pstrdup(c->pool, cmd->argv[1]);
-
-  /* Handle the older format, which will have a number as the first
-   * parameter.
-   */
-  } else {
-    struct rlimit *rlim = pcalloc(cmd->server->pool, sizeof(struct rlimit));
-
-    /* Retrieve the current values */
-#if defined(RLIMIT_DATA)
-    if (getrlimit(RLIMIT_DATA, rlim) < 0)
-      pr_log_pri(PR_LOG_ERR, "error: getrlimit(RLIMIT_DATA): %s",
-        strerror(errno));
-#elif defined(RLIMIT_AS)
-    if (getrlimit(RLIMIT_AS, rlim) < 0)
-      pr_log_pri(PR_LOG_ERR, "error: getrlimit(RLIMIT_AS): %s",
-        strerror(errno));
-#elif defined(RLIMIT_VMEM)
-    if (getrlimit(RLIMIT_VMEM, rlim) < 0)
-      pr_log_pri(PR_LOG_ERR, "error: getrlimit(RLIMIT_VMEM): %s",
-        strerror(errno));
-#endif
-
-    if (strcasecmp("max", cmd->argv[1]) == 0) {
-      rlim->rlim_cur = RLIM_INFINITY;
-
-    } else {
-      rlim->rlim_cur = get_num_bytes(cmd->argv[1]);
-
-      /* Check for bad return values. */
-      if (rlim->rlim_cur == PR_BYTES_BAD_UNITS) {
-        CONF_ERROR(cmd, "unknown units used");
-      }
-
-      if (rlim->rlim_cur == PR_BYTES_BAD_FORMAT) {
-        CONF_ERROR(cmd, "badly formatted parameter");
-      }
-    }
-
-    /* Handle the optional "hard limit" parameter, if present. */
-    if (cmd->argc-1 == 2) {
-      if (strcasecmp("max", cmd->argv[2]) == 0) {
-        rlim->rlim_max = RLIM_INFINITY;
-
-      } else {
-        rlim->rlim_max = get_num_bytes(cmd->argv[2]);
-
-        /* Check for bad return values. */
-        if (rlim->rlim_max == PR_BYTES_BAD_UNITS) {
-          CONF_ERROR(cmd, "unknown units used");
-        }
-
-        if (rlim->rlim_max == PR_BYTES_BAD_FORMAT) {
-          CONF_ERROR(cmd, "badly formatted parameter");
-        }
-      }
-    }
-
-    add_config_param(cmd->argv[0], 2, (void *) rlim, NULL);
-  }
-
-  return PR_HANDLED(cmd);
-#else
-  CONF_ERROR(cmd, "RLimitMemory is not supported on this platform");
-#endif
-}
-
-MODRET set_rlimitopenfiles(cmd_rec *cmd) {
-#if defined(RLIMIT_NOFILE) || defined(RLIMIT_OFILE)
-  /* Make sure the directive has between 1 and 3 parameters */
-  if (cmd->argc-1 < 1 || cmd->argc-1 > 3)
-    CONF_ERROR(cmd, "wrong number of parameters");
-
-  /* The context check for this directive depends on the first parameter.
-   * For backwards compatibility, this parameter may be a number, or it
-   * may be "daemon", "session", or "none".  If it happens to be
-   * "daemon", then this directive should be in the CONF_ROOT context only.
-   * Otherwise, it can appear in the full range of server contexts.
-   */
-
-  if (strncmp(cmd->argv[1], "daemon", 7) == 0) {
-    CHECK_CONF(cmd, CONF_ROOT);
-
-  } else {
-    CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
-  }
-
-  /* Handle the newer format, which uses "daemon" or "session" or "none"
-   * as the first parameter.
-   */
-  if (strncmp(cmd->argv[1], "daemon", 7) == 0 ||
-      strncmp(cmd->argv[1], "session", 8) == 0) {
-    config_rec *c = NULL;
-    struct rlimit *rlim = pcalloc(cmd->server->pool, sizeof(struct rlimit));
-
-    /* Retrieve the current values */
-#if defined(RLIMIT_NOFILE)
-    if (getrlimit(RLIMIT_NOFILE, rlim) < 0) {
-      pr_log_pri(PR_LOG_ERR, "error: getrlimit(RLIMIT_NOFILE): %s",
-        strerror(errno));
-    }
-#elif defined(RLIMIT_OFILE)
-    if (getrlimit(RLIMIT_OFILE, rlim) < 0) {
-      pr_log_pri(PR_LOG_ERR, "error: getrlimit(RLIMIT_OFILE): %s",
-        strerror(errno));
-    }
-#endif
-
-    if (strcasecmp("max", cmd->argv[2]) == 0) {
-      rlim->rlim_cur = sysconf(_SC_OPEN_MAX);
-
-    } else {
-      /* Check that the non-max argument is a number, and error out if not. */
-      char *ptr = NULL;
-      long num = strtol(cmd->argv[2], &ptr, 10);
-
-      if (ptr && *ptr) {
-        CONF_ERROR(cmd, "badly formatted argument");
-      }
-
-      rlim->rlim_cur = num;
-    }
-
-    /* Handle the optional "hard limit" parameter, if present. */
-    if (cmd->argc-1 == 3) {
-      if (strcasecmp("max", cmd->argv[3]) == 0) {
-        rlim->rlim_max = sysconf(_SC_OPEN_MAX);
-
-      } else {
-        /* Check that the non-max argument is a number, and error out if not. */
-        char *ptr = NULL;
-        long num = strtol(cmd->argv[3], &ptr, 10);
-
-        if (ptr && *ptr) {
-          CONF_ERROR(cmd, "badly formatted argument");
-        }
-
-        rlim->rlim_max = num;
-      }
-
-    } else {
-      /* Assume that the hard limit should be the same as the soft limit. */
-      rlim->rlim_max = rlim->rlim_cur;
-    }
-
-    c = add_config_param(cmd->argv[0], 2, (void *) rlim, NULL);
-    c->argv[1] = pstrdup(c->pool, cmd->argv[1]);
-
-  /* Handle the older format, which will have a number as the first
-   * parameter.
-   */
-  } else {
-    struct rlimit *rlim = pcalloc(cmd->server->pool, sizeof(struct rlimit));
-
-    /* Retrieve the current values */
-#if defined(RLIMIT_NOFILE)
-    if (getrlimit(RLIMIT_NOFILE, rlim) < 0) {
-      pr_log_pri(PR_LOG_ERR, "error: getrlimit(RLIMIT_NOFILE): %s",
-        strerror(errno));
-    }
-#elif defined(RLIMIT_OFILE)
-    if (getrlimit(RLIMIT_OFILE, rlim) < 0) {
-      pr_log_pri(PR_LOG_ERR, "error: getrlimit(RLIMIT_OFILE): %s",
-        strerror(errno));
-    }
-#endif
-
-    if (strcasecmp("max", cmd->argv[1]) == 0) {
-      rlim->rlim_cur = sysconf(_SC_OPEN_MAX);
-
-    } else {
-      /* Check that the non-max argument is a number, and error out if not. */
-      char *ptr = NULL;
-      long num = strtol(cmd->argv[1], &ptr, 10);
-
-      if (ptr && *ptr) {
-        CONF_ERROR(cmd, "badly formatted argument");
-      }
-
-      rlim->rlim_cur = num;
-    }
-
-    /* Handle the optional "hard limit" parameter, if present. */
-    if (cmd->argc-1 == 2) {
-      if (strcasecmp("max", cmd->argv[2]) == 0) {
-        rlim->rlim_max = sysconf(_SC_OPEN_MAX);
-
-      } else {
-        /* Check that the non-max argument is a number, and error out if not. */
-        char *ptr = NULL;
-        long num = strtol(cmd->argv[2], &ptr, 10);
-
-        if (ptr && *ptr) {
-          CONF_ERROR(cmd, "badly formatted argument");
-        }
-
-        rlim->rlim_max = num;
-      }
-
-    } else {
-      /* Assume that the hard limit should be the same as the soft limit. */
-      rlim->rlim_max = rlim->rlim_cur;
-    }
-
-    add_config_param(cmd->argv[0], 2, (void *) rlim, NULL);
-  }
-
-  return PR_HANDLED(cmd);
-#else
-  CONF_ERROR(cmd, "RLimitOpenFiles is not supported on this platform");
-#endif
 }
 
 MODRET set_syslogfacility(cmd_rec *cmd) {
@@ -2993,62 +2525,62 @@ MODRET add_limit(cmd_rec *cmd) {
 
   elts = (char **) list->elts;
   for (i = 0; i < list->nelts; i++) {
-    if (strcasecmp(elts[i], "CDUP") == 0) {
+    if (strcasecmp(elts[i], C_CDUP) == 0) {
       have_cdup = TRUE;
 
-    } else if (strcasecmp(elts[i], "XCUP") == 0) {
+    } else if (strcasecmp(elts[i], C_XCUP) == 0) {
       have_xcup = TRUE; 
 
-    } else if (strcasecmp(elts[i], "MKD") == 0) {
+    } else if (strcasecmp(elts[i], C_MKD) == 0) {
       have_mkd = TRUE;
 
-    } else if (strcasecmp(elts[i], "XMKD") == 0) {
+    } else if (strcasecmp(elts[i], C_XMKD) == 0) {
       have_xmkd = TRUE;
 
-    } else if (strcasecmp(elts[i], "PWD") == 0) {
+    } else if (strcasecmp(elts[i], C_PWD) == 0) {
       have_pwd = TRUE;
 
-    } else if (strcasecmp(elts[i], "XPWD") == 0) {
+    } else if (strcasecmp(elts[i], C_XPWD) == 0) {
       have_xpwd = TRUE;
 
-    } else if (strcasecmp(elts[i], "RMD") == 0) {
+    } else if (strcasecmp(elts[i], C_RMD) == 0) {
       have_rmd = TRUE;
 
-    } else if (strcasecmp(elts[i], "XRMD") == 0) {
+    } else if (strcasecmp(elts[i], C_XRMD) == 0) {
       have_xrmd = TRUE;
     }
   }
 
   if (have_cdup && !have_xcup) {
-    *((char **) push_array(list)) = pstrdup(c->pool, "XCUP");
+    *((char **) push_array(list)) = pstrdup(c->pool, C_XCUP);
   }
 
   if (!have_cdup && have_xcup) {
-    *((char **) push_array(list)) = pstrdup(c->pool, "CDUP");
+    *((char **) push_array(list)) = pstrdup(c->pool, C_CDUP);
   }
 
   if (have_mkd && !have_xmkd) {
-    *((char **) push_array(list)) = pstrdup(c->pool, "XMKD");
+    *((char **) push_array(list)) = pstrdup(c->pool, C_XMKD);
   }
 
   if (!have_mkd && have_xmkd) {
-    *((char **) push_array(list)) = pstrdup(c->pool, "MKD");
+    *((char **) push_array(list)) = pstrdup(c->pool, C_MKD);
   }
 
   if (have_pwd && !have_xpwd) {
-    *((char **) push_array(list)) = pstrdup(c->pool, "XPWD");
+    *((char **) push_array(list)) = pstrdup(c->pool, C_XPWD);
   }
 
   if (!have_pwd && have_xpwd) {
-    *((char **) push_array(list)) = pstrdup(c->pool, "PWD");
+    *((char **) push_array(list)) = pstrdup(c->pool, C_PWD);
   }
 
   if (have_rmd && !have_xrmd) {
-    *((char **) push_array(list)) = pstrdup(c->pool, "XRMD");
+    *((char **) push_array(list)) = pstrdup(c->pool, C_XRMD);
   }
 
   if (!have_rmd && have_xrmd) {
-    *((char **) push_array(list)) = pstrdup(c->pool, "RMD");
+    *((char **) push_array(list)) = pstrdup(c->pool, C_RMD);
   }
 
   c->argc = list->nelts;
@@ -3757,6 +3289,7 @@ MODRET core_pasv(cmd_rec *cmd) {
   char *addrstr = NULL, *tmp = NULL;
   config_rec *c = NULL;
   pr_netaddr_t *bind_addr;
+  const char *proto;
 
   if (session.sf_flags & SF_EPSV_ALL) {
     pr_response_add_err(R_500, _("Illegal PASV command, EPSV ALL in effect"));
@@ -3876,11 +3409,30 @@ MODRET core_pasv(cmd_rec *cmd) {
   addrstr = (char *) pr_netaddr_get_ipstr(session.d->local_addr);
 
   /* Check for a MasqueradeAddress configuration record, and return that
-   * addr if appropriate.
+   * addr if appropriate.  Note that if TLSMasqueradeAddress is configured AND
+   * this is an FTPS session, TLSMasqueradeAddress will take precedence;
+   * see Bug#3862.
    */
-  c = find_config(main_server->conf, CONF_PARAM, "MasqueradeAddress", FALSE);
-  if (c != NULL) {
-    addrstr = (char *) pr_netaddr_get_ipstr(c->argv[0]);
+  proto = pr_session_get_protocol(0);
+  if (strncmp(proto, "ftps", 5) == 0) {
+    c = find_config(main_server->conf, CONF_PARAM, "TLSMasqueradeAddress",
+      FALSE);
+    if (c != NULL) {
+      addrstr = (char *) pr_netaddr_get_ipstr(c->argv[0]);
+
+    } else {
+      c = find_config(main_server->conf, CONF_PARAM, "MasqueradeAddress",
+        FALSE);
+      if (c != NULL) {
+        addrstr = (char *) pr_netaddr_get_ipstr(c->argv[0]);
+      }
+    }
+
+  } else {
+    c = find_config(main_server->conf, CONF_PARAM, "MasqueradeAddress", FALSE);
+    if (c != NULL) {
+      addrstr = (char *) pr_netaddr_get_ipstr(c->argv[0]);
+    }
   }
 
   /* Fixup the address string for the PASV response. */
@@ -3915,6 +3467,7 @@ MODRET core_port(cmd_rec *cmd) {
   unsigned short port;
   unsigned char *allow_foreign_addr = NULL, *root_revoke = NULL;
   config_rec *c;
+  const char *proto;
 
   if (session.sf_flags & SF_EPSV_ALL) {
     pr_response_add_err(R_500, _("Illegal PORT command, EPSV ALL in effect"));
@@ -4002,10 +3555,27 @@ MODRET core_port(cmd_rec *cmd) {
    * routable), then ignore that address, and use the client's remote address.
    */
   listen_addr = session.c->local_addr;
- 
-  c = find_config(main_server->conf, CONF_PARAM, "MasqueradeAddress", FALSE);
-  if (c != NULL) {
-    listen_addr = c->argv[0];
+
+  proto = pr_session_get_protocol(0);
+  if (strncmp(proto, "ftps", 5) == 0) {
+    c = find_config(main_server->conf, CONF_PARAM, "TLSMasqueradeAddress",
+      FALSE);
+    if (c != NULL) {
+      listen_addr = c->argv[0];
+
+    } else {
+      c = find_config(main_server->conf, CONF_PARAM, "MasqueradeAddress",
+        FALSE);
+      if (c != NULL) {
+        listen_addr = c->argv[0];
+      }
+    }
+
+  } else {
+    c = find_config(main_server->conf, CONF_PARAM, "MasqueradeAddress", FALSE);
+    if (c != NULL) {
+      listen_addr = c->argv[0];
+    }
   }
  
   if (pr_netaddr_is_rfc1918(listen_addr) != TRUE &&
@@ -4098,6 +3668,7 @@ MODRET core_eprt(cmd_rec *cmd) {
   char delim = '\0', *argstr = pstrdup(cmd->tmp_pool, cmd->argv[1]);
   char *tmp = NULL;
   config_rec *c;
+  const char *proto;
 
   if (session.sf_flags & SF_EPSV_ALL) {
     pr_response_add_err(R_500, _("Illegal PORT command, EPSV ALL in effect"));
@@ -4180,7 +3751,7 @@ MODRET core_eprt(cmd_rec *cmd) {
   }
 
   /* Now, skip past those numeric characters that atoi() used. */
-  while (isdigit((unsigned char) *argstr)) {
+  while (PR_ISDIGIT(*argstr)) {
     argstr++;
   }
 
@@ -4255,7 +3826,7 @@ MODRET core_eprt(cmd_rec *cmd) {
 
   port = atoi(argstr);
 
-  while (isdigit((unsigned char) *argstr)) {
+  while (PR_ISDIGIT(*argstr)) {
     argstr++;
   }
 
@@ -4275,9 +3846,26 @@ MODRET core_eprt(cmd_rec *cmd) {
    */
   listen_addr = session.c->local_addr;
 
-  c = find_config(main_server->conf, CONF_PARAM, "MasqueradeAddress", FALSE);
-  if (c != NULL) {
-    listen_addr = c->argv[0];
+  proto = pr_session_get_protocol(0);
+  if (strncmp(proto, "ftps", 5) == 0) {
+    c = find_config(main_server->conf, CONF_PARAM, "TLSMasqueradeAddress",
+      FALSE);
+    if (c != NULL) {
+      listen_addr = c->argv[0];
+
+    } else {
+      c = find_config(main_server->conf, CONF_PARAM, "MasqueradeAddress",
+        FALSE);
+      if (c != NULL) {
+        listen_addr = c->argv[0];
+      }
+    }
+
+  } else {
+    c = find_config(main_server->conf, CONF_PARAM, "MasqueradeAddress", FALSE);
+    if (c != NULL) {
+      listen_addr = c->argv[0];
+    }
   }
 
   if (pr_netaddr_is_rfc1918(listen_addr) != TRUE &&
@@ -4542,7 +4130,7 @@ MODRET core_epsv(cmd_rec *cmd) {
    * clients will simply use EPSV, rather than PASV, in existing IPv4 networks.
    *
    * Disable the honoring of MasqueradeAddress for EPSV until this can
-   * be officially determined (Bug#2369).
+   * be officially determined (Bug#2369).  See also Bug#3862.
    */
 #if 0
   c = find_config(main_server->conf, CONF_PARAM, "MasqueradeAddress", FALSE);
@@ -5054,7 +4642,7 @@ MODRET _chdir(cmd_rec *cmd, char *ndir) {
       c = find_config(cmd->server->conf, CONF_USERDATA, session.cwd, FALSE);
       if (!c) {
         time(&prev);
-        c = add_config_set(&cmd->server->conf, session.cwd);
+        c = pr_config_add_set(&cmd->server->conf, session.cwd, 0);
         c->config_type = CONF_USERDATA;
         c->argc = 1;
         c->argv = pcalloc(c->pool, sizeof(void **) * 2);
@@ -5720,6 +5308,20 @@ MODRET core_opts(cmd_rec *cmd) {
 
   CHECK_CMD_MIN_ARGS(cmd, 2);
 
+  /* Impose a maximum number of allowed arguments, to prevent malicious
+   * clients from trying to do Bad Things(tm).  See Bug#3870.
+   */
+  if ((cmd->argc-1) > PR_OPTS_MAX_PARAM_COUNT) {
+    int xerrno = EINVAL;
+
+    pr_log_debug(DEBUG2,
+      "OPTS command with too many parameters (%d), rejecting", cmd->argc-1);
+    pr_response_add_err(R_550, "%s: %s", cmd->argv[0], strerror(xerrno));
+
+    errno = xerrno;
+    return PR_ERROR(cmd);
+  }
+
   subcmd = pr_cmd_alloc(cmd->tmp_pool, cmd->argc-1, NULL);
   subcmd->argv[0] = pstrcat(cmd->tmp_pool, "OPTS_", cmd->argv[1], NULL);
   subcmd->group = cmd->group;
@@ -6341,11 +5943,30 @@ static int core_sess_init(void) {
   displayquit = get_param_ptr(TOPLEVEL_CONF, "DisplayQuit", FALSE);
   if (displayquit &&
       *displayquit == '/') {
+    struct stat st;
 
     displayquit_fh = pr_fsio_open(displayquit, O_RDONLY);
-    if (displayquit_fh == NULL)
+    if (displayquit_fh == NULL) {
       pr_log_debug(DEBUG6, "unable to open DisplayQuit file '%s': %s",
         displayquit, strerror(errno));
+
+    } else {
+      if (pr_fsio_fstat(displayquit_fh, &st) < 0) {
+        pr_log_debug(DEBUG6, "unable to stat DisplayQuit file '%s': %s",
+          displayquit, strerror(errno));
+        pr_fsio_close(displayquit_fh);
+        displayquit_fh = NULL;
+
+      } else {
+        if (S_ISDIR(st.st_mode)) {
+          errno = EISDIR;
+          pr_log_debug(DEBUG6, "unable to use DisplayQuit file '%s': %s",
+            displayquit, strerror(errno));
+          pr_fsio_close(displayquit_fh);
+          displayquit_fh = NULL;
+        }
+      }
+    }
   }
 
   /* Check for any ProcessTitles setting. */
@@ -6431,9 +6052,6 @@ static conftable core_conftab[] = {
   { "ProcessTitles",		set_processtitles,		NULL },
   { "Protocols",		set_protocols,			NULL },
   { "RegexOptions",		set_regexoptions,		NULL },
-  { "RLimitCPU",		set_rlimitcpu,			NULL },
-  { "RLimitMemory",		set_rlimitmemory,		NULL },
-  { "RLimitOpenFiles",		set_rlimitopenfiles,		NULL },
   { "Satisfy",			set_satisfy,			NULL },
   { "ScoreboardFile",		set_scoreboardfile,		NULL },
   { "ScoreboardMutex",		set_scoreboardmutex,		NULL },

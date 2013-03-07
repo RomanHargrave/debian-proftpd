@@ -4,6 +4,7 @@ use lib qw(t/lib);
 use base qw(ProFTPD::TestSuite::Child);
 use strict;
 
+use Cwd;
 use File::Path qw(mkpath);
 use File::Spec;
 use IO::Handle;
@@ -69,6 +70,36 @@ my $TESTS = {
   auth_user_file_at_symbol_ok => {
     order => ++$order,
     test_class => [qw(forking)],
+  },
+
+  auth_user_file_world_readable_bug3892 => {
+    order => ++$order,
+    test_class => [qw(bug forking)],
+  },
+
+  auth_user_file_world_writable_bug3892 => {
+    order => ++$order,
+    test_class => [qw(bug forking)],
+  },
+
+  auth_group_file_world_readable_bug3892 => {
+    order => ++$order,
+    test_class => [qw(bug forking)],
+  },
+
+  auth_group_file_world_writable_bug3892 => {
+    order => ++$order,
+    test_class => [qw(bug forking)],
+  },
+
+  auth_user_file_world_writable_parent_dir_bug3892 => {
+    order => ++$order,
+    test_class => [qw(bug forking)],
+  },
+
+  auth_user_file_symlink_world_writable_parent_dir_bug3892 => {
+    order => ++$order,
+    test_class => [qw(bug forking)],
   },
 
 };
@@ -1312,6 +1343,475 @@ sub auth_user_file_at_symbol_ok {
   $self->assert_child_ok($pid);
 
   if ($ex) {
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
+    die($ex);
+  }
+
+  unlink($log_file);
+}
+
+sub auth_user_file_world_readable_bug3892 {
+  my $self = shift;
+  my $tmpdir = $self->{tmpdir};
+
+  my $config_file = "$tmpdir/authfile.conf";
+  my $pid_file = File::Spec->rel2abs("$tmpdir/authfile.pid");
+  my $scoreboard_file = File::Spec->rel2abs("$tmpdir/authfile.scoreboard");
+
+  my $log_file = test_get_logfile();
+
+  my $auth_user_file = File::Spec->rel2abs("$tmpdir/authfile.passwd");
+  my $auth_group_file = File::Spec->rel2abs("$tmpdir/authfile.group");
+
+  my $user = 'proftpd';
+  my $passwd = 'test';
+  my $group = 'ftpd';
+  my $home_dir = File::Spec->rel2abs($tmpdir);
+  my $uid = 500;
+  my $gid = 500;
+
+  # Make sure that, if we're running as root, that the home directory has
+  # permissions/privs set for the account we create
+  if ($< == 0) {
+    unless (chmod(0755, $home_dir)) {
+      die("Can't set perms on $home_dir to 0755: $!");
+    }
+
+    unless (chown($uid, $gid, $home_dir)) {
+      die("Can't set owner of $home_dir to $uid/$gid: $!");
+    }
+  }
+
+  auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
+    '/bin/bash');
+  auth_group_write($auth_group_file, $group, $gid, $user);
+
+  # Deliberately set world-readable perms on the AuthUserFile, to trigger
+  # the checks done for Bug#3892.
+  unless (chmod(0444, $auth_user_file)) {
+    die("Can't set perms on $auth_user_file: $!");
+  }
+
+  my $config = {
+    PidFile => $pid_file,
+    ScoreboardFile => $scoreboard_file,
+    SystemLog => $log_file,
+
+    AuthUserFile => $auth_user_file,
+    AuthGroupFile => $auth_group_file,
+
+    IfModules => {
+      'mod_delay.c' => {
+        DelayEngine => 'off',
+      },
+    },
+  };
+
+  my ($port, $config_user, $config_group) = config_write($config_file, $config);
+
+  eval { server_start($config_file, $pid_file) };
+  unless ($@) {
+    server_stop($pid_file);
+
+    my $ex = "Server started up unexpectedly with world-readable AuthUserFile";
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
+    die($ex);
+  }
+
+  unlink($log_file);
+}
+
+sub auth_user_file_world_writable_bug3892 {
+  my $self = shift;
+  my $tmpdir = $self->{tmpdir};
+
+  my $config_file = "$tmpdir/authfile.conf";
+  my $pid_file = File::Spec->rel2abs("$tmpdir/authfile.pid");
+  my $scoreboard_file = File::Spec->rel2abs("$tmpdir/authfile.scoreboard");
+
+  my $log_file = test_get_logfile();
+
+  my $auth_user_file = File::Spec->rel2abs("$tmpdir/authfile.passwd");
+  my $auth_group_file = File::Spec->rel2abs("$tmpdir/authfile.group");
+
+  my $user = 'proftpd';
+  my $passwd = 'test';
+  my $group = 'ftpd';
+  my $home_dir = File::Spec->rel2abs($tmpdir);
+  my $uid = 500;
+  my $gid = 500;
+
+  # Make sure that, if we're running as root, that the home directory has
+  # permissions/privs set for the account we create
+  if ($< == 0) {
+    unless (chmod(0755, $home_dir)) {
+      die("Can't set perms on $home_dir to 0755: $!");
+    }
+
+    unless (chown($uid, $gid, $home_dir)) {
+      die("Can't set owner of $home_dir to $uid/$gid: $!");
+    }
+  }
+
+  auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
+    '/bin/bash');
+  auth_group_write($auth_group_file, $group, $gid, $user);
+
+  # Deliberately set world-writable perms on the AuthUserFile, to trigger
+  # the checks done for Bug#3892.
+  unless (chmod(0442, $auth_user_file)) {
+    die("Can't set perms on $auth_user_file: $!");
+  }
+
+  my $config = {
+    PidFile => $pid_file,
+    ScoreboardFile => $scoreboard_file,
+    SystemLog => $log_file,
+
+    AuthUserFile => $auth_user_file,
+    AuthGroupFile => $auth_group_file,
+
+    IfModules => {
+      'mod_delay.c' => {
+        DelayEngine => 'off',
+      },
+    },
+  };
+
+  my ($port, $config_user, $config_group) = config_write($config_file, $config);
+
+  eval { server_start($config_file, $pid_file) };
+  unless ($@) {
+    server_stop($pid_file);
+
+    my $ex = "Server started up unexpectedly with world-writable AuthUserFile";
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
+    die($ex);
+  }
+
+  unlink($log_file);
+}
+
+sub auth_group_file_world_readable_bug3892 {
+  my $self = shift;
+  my $tmpdir = $self->{tmpdir};
+
+  my $config_file = "$tmpdir/authfile.conf";
+  my $pid_file = File::Spec->rel2abs("$tmpdir/authfile.pid");
+  my $scoreboard_file = File::Spec->rel2abs("$tmpdir/authfile.scoreboard");
+
+  my $log_file = test_get_logfile();
+
+  my $auth_user_file = File::Spec->rel2abs("$tmpdir/authfile.passwd");
+  my $auth_group_file = File::Spec->rel2abs("$tmpdir/authfile.group");
+
+  my $user = 'proftpd';
+  my $passwd = 'test';
+  my $group = 'ftpd';
+  my $home_dir = File::Spec->rel2abs($tmpdir);
+  my $uid = 500;
+  my $gid = 500;
+
+  # Make sure that, if we're running as root, that the home directory has
+  # permissions/privs set for the account we create
+  if ($< == 0) {
+    unless (chmod(0755, $home_dir)) {
+      die("Can't set perms on $home_dir to 0755: $!");
+    }
+
+    unless (chown($uid, $gid, $home_dir)) {
+      die("Can't set owner of $home_dir to $uid/$gid: $!");
+    }
+  }
+
+  auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
+    '/bin/bash');
+  auth_group_write($auth_group_file, $group, $gid, $user);
+
+  # Deliberately set world-readable perms on the AuthGroupFile, to trigger
+  # the checks done for Bug#3892.
+  unless (chmod(0444, $auth_group_file)) {
+    die("Can't set perms on $auth_group_file: $!");
+  }
+
+  my $config = {
+    PidFile => $pid_file,
+    ScoreboardFile => $scoreboard_file,
+    SystemLog => $log_file,
+
+    AuthUserFile => $auth_user_file,
+    AuthGroupFile => $auth_group_file,
+
+    IfModules => {
+      'mod_delay.c' => {
+        DelayEngine => 'off',
+      },
+    },
+  };
+
+  my ($port, $config_user, $config_group) = config_write($config_file, $config);
+
+  eval { server_start($config_file, $pid_file) };
+  unless ($@) {
+    server_stop($pid_file);
+
+    my $ex = "Server started up unexpectedly with world-readable AuthGroupFile";
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
+    die($ex);
+  }
+
+  unlink($log_file);
+}
+
+sub auth_group_file_world_writable_bug3892 {
+  my $self = shift;
+  my $tmpdir = $self->{tmpdir};
+
+  my $config_file = "$tmpdir/authfile.conf";
+  my $pid_file = File::Spec->rel2abs("$tmpdir/authfile.pid");
+  my $scoreboard_file = File::Spec->rel2abs("$tmpdir/authfile.scoreboard");
+
+  my $log_file = test_get_logfile();
+
+  my $auth_user_file = File::Spec->rel2abs("$tmpdir/authfile.passwd");
+  my $auth_group_file = File::Spec->rel2abs("$tmpdir/authfile.group");
+
+  my $user = 'proftpd';
+  my $passwd = 'test';
+  my $group = 'ftpd';
+  my $home_dir = File::Spec->rel2abs($tmpdir);
+  my $uid = 500;
+  my $gid = 500;
+
+  # Make sure that, if we're running as root, that the home directory has
+  # permissions/privs set for the account we create
+  if ($< == 0) {
+    unless (chmod(0755, $home_dir)) {
+      die("Can't set perms on $home_dir to 0755: $!");
+    }
+
+    unless (chown($uid, $gid, $home_dir)) {
+      die("Can't set owner of $home_dir to $uid/$gid: $!");
+    }
+  }
+
+  auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
+    '/bin/bash');
+  auth_group_write($auth_group_file, $group, $gid, $user);
+
+  # Deliberately set world-writable perms on the AuthGroupFile, to trigger
+  # the checks done for Bug#3892.
+  unless (chmod(0442, $auth_group_file)) {
+    die("Can't set perms on $auth_group_file: $!");
+  }
+
+  my $config = {
+    PidFile => $pid_file,
+    ScoreboardFile => $scoreboard_file,
+    SystemLog => $log_file,
+
+    AuthUserFile => $auth_user_file,
+    AuthGroupFile => $auth_group_file,
+
+    IfModules => {
+      'mod_delay.c' => {
+        DelayEngine => 'off',
+      },
+    },
+  };
+
+  my ($port, $config_user, $config_group) = config_write($config_file, $config);
+
+  eval { server_start($config_file, $pid_file) };
+  unless ($@) {
+    server_stop($pid_file);
+
+    my $ex = "Server started up unexpectedly with world-writable AuthGroupFile";
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
+    die($ex);
+  }
+
+  unlink($log_file);
+}
+
+sub auth_user_file_world_writable_parent_dir_bug3892 {
+  my $self = shift;
+  my $tmpdir = $self->{tmpdir};
+
+  my $config_file = "$tmpdir/authfile.conf";
+  my $pid_file = File::Spec->rel2abs("$tmpdir/authfile.pid");
+  my $scoreboard_file = File::Spec->rel2abs("$tmpdir/authfile.scoreboard");
+
+  my $log_file = test_get_logfile();
+
+  my $auth_user_file = File::Spec->rel2abs("$tmpdir/authfile.passwd");
+  my $auth_group_file = File::Spec->rel2abs("$tmpdir/authfile.group");
+
+  my $user = 'proftpd';
+  my $passwd = 'test';
+  my $group = 'ftpd';
+  my $home_dir = File::Spec->rel2abs($tmpdir);
+  my $uid = 500;
+  my $gid = 500;
+
+  # Make sure that, if we're running as root, that the home directory has
+  # permissions/privs set for the account we create
+  if ($< == 0) {
+    unless (chmod(0755, $home_dir)) {
+      die("Can't set perms on $home_dir to 0755: $!");
+    }
+
+    unless (chown($uid, $gid, $home_dir)) {
+      die("Can't set owner of $home_dir to $uid/$gid: $!");
+    }
+  }
+
+  auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
+    '/bin/bash');
+  auth_group_write($auth_group_file, $group, $gid, $user);
+
+  # Deliberately set world-writable perms on the parent directory of the
+  # AuthUserFile, to trigger the checks done for Bug#3892.
+  unless (chmod(0777, $tmpdir)) {
+    die("Can't set perms on $tmpdir: $!");
+  }
+
+  my $config = {
+    PidFile => $pid_file,
+    ScoreboardFile => $scoreboard_file,
+    SystemLog => $log_file,
+
+    AuthUserFile => $auth_user_file,
+    AuthGroupFile => $auth_group_file,
+
+    IfModules => {
+      'mod_delay.c' => {
+        DelayEngine => 'off',
+      },
+    },
+  };
+
+  my ($port, $config_user, $config_group) = config_write($config_file, $config);
+
+  eval { server_start($config_file, $pid_file) };
+  unless ($@) {
+    server_stop($pid_file);
+
+    my $ex = "Server started up unexpectedly with world-writable AuthUserFile parent directory";
+    test_append_logfile($log_file, $ex);
+    unlink($log_file);
+
+    die($ex);
+  }
+
+  unlink($log_file);
+}
+
+sub auth_user_file_symlink_world_writable_parent_dir_bug3892 {
+  my $self = shift;
+  my $tmpdir = $self->{tmpdir};
+
+  my $config_file = "$tmpdir/authfile.conf";
+  my $pid_file = File::Spec->rel2abs("$tmpdir/authfile.pid");
+  my $scoreboard_file = File::Spec->rel2abs("$tmpdir/authfile.scoreboard");
+
+  my $log_file = test_get_logfile();
+
+  my $etc_dir = File::Spec->rel2abs("$tmpdir/etc");
+  mkpath($etc_dir);
+
+  my $auth_user_file = File::Spec->rel2abs("$tmpdir/etc/authfile.passwd");
+  my $auth_group_file = File::Spec->rel2abs("$tmpdir/etc/authfile.group");
+
+  my $user = 'proftpd';
+  my $passwd = 'test';
+  my $group = 'ftpd';
+  my $home_dir = File::Spec->rel2abs($tmpdir);
+  my $uid = 500;
+  my $gid = 500;
+
+  my $test_dir = File::Spec->rel2abs("$tmpdir/test.d");
+  mkpath($test_dir);
+  my $auth_user_symlink = File::Spec->rel2abs("$tmpdir/test.d/authfile.lnk");
+
+  # Make sure that, if we're running as root, that the home directory has
+  # permissions/privs set for the account we create
+  #
+  # Deliberately set world-writable perms on the symlink parent
+  # directory, to trigger the checks done for Bug#3892.
+
+  if ($< == 0) {
+    unless (chmod(0750, $home_dir, $etc_dir)) {
+      die("Can't set perms on $home_dir to 0750: $!");
+    }
+
+    unless (chmod(0777, $test_dir)) {
+      die("Can't set perms on $etc_dir to 0777: $!");
+    }
+
+    unless (chown($uid, $gid, $home_dir, $etc_dir, $test_dir)) {
+      die("Can't set owner of $home_dir to $uid/$gid: $!");
+    }
+
+  } else {
+    unless (chmod(0750, $home_dir, $etc_dir)) {
+      die("Can't set perms on $home_dir to 0750: $!");
+    }
+
+    unless (chmod(0777, $test_dir)) {
+      die("Can't set perms on $test_dir to 0777: $!");
+    }
+  }
+
+  auth_user_write($auth_user_file, $user, $passwd, $uid, $gid, $home_dir,
+    '/bin/bash');
+  auth_group_write($auth_group_file, $group, $gid, $user);
+
+  my $cwd = getcwd();
+  unless (chdir($test_dir)) {
+    die("Can't chdir to $test_dir: $!");
+  }
+
+  unless (symlink($auth_user_file, 'authfile.lnk')) {
+    die("Can't symlink '$auth_user_file' to 'authfile.lnk': $!");
+  }
+
+  unless (chdir($cwd)) {
+    die("Can't chdir to $cwd: $!");
+  }
+
+  my $config = {
+    PidFile => $pid_file,
+    ScoreboardFile => $scoreboard_file,
+    SystemLog => $log_file,
+
+    AuthUserFile => $auth_user_symlink,
+    AuthGroupFile => $auth_group_file,
+
+    IfModules => {
+      'mod_delay.c' => {
+        DelayEngine => 'off',
+      },
+    },
+  };
+
+  my ($port, $config_user, $config_group) = config_write($config_file, $config);
+
+  eval { server_start($config_file, $pid_file) };
+  unless ($@) {
+    server_stop($pid_file);
+
+    my $ex = "Server started up unexpectedly with symlink AuthUserFile";
     test_append_logfile($log_file, $ex);
     unlink($log_file);
 

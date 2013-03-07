@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2004-2011 The ProFTPD Project team
+ * Copyright (c) 2004-2013 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@
  */
 
 /* Display of files
- * $Id: display.c,v 1.27 2011/12/11 02:14:43 castaglia Exp $
+ * $Id: display.c,v 1.29 2013/02/14 19:22:29 castaglia Exp $
  */
 
 #include "conf.h"
@@ -150,7 +150,7 @@ static int display_fh(pr_fh_t *fh, const char *fs, const char *code,
   pr_fsio_fstat(fh, &st);
   fh->fh_iosz = st.st_blksize;
 
-  res = pr_fs_getsize2(fh->fh_path, &fs_size);
+  res = pr_fs_fgetsize(fh->fh_fd, &fs_size);
   if (res < 0 &&
       errno != ENOSYS) {
     (void) pr_log_debug(DEBUG7, "error getting filesystem size for '%s': %s",
@@ -418,15 +418,30 @@ int pr_display_file(const char *path, const char *fs, const char *code,
     int flags) {
   pr_fh_t *fh = NULL;
   int res, xerrno;
+  struct stat st;
 
-  if (!path || !code) {
+  if (path == NULL ||
+      code == NULL) {
     errno = EINVAL;
     return -1;
   }
 
   fh = pr_fsio_open_canon(path, O_RDONLY);
-  if (fh == NULL)
+  if (fh == NULL) {
     return -1;
+  }
+
+  res = pr_fsio_fstat(fh, &st);
+  if (res < 0) {
+    pr_fsio_close(fh);
+    return -1;
+  }
+
+  if (S_ISDIR(st.st_mode)) {
+    pr_fsio_close(fh);
+    errno = EISDIR;
+    return -1;
+  }
 
   res = display_fh(fh, fs, code, flags);
   xerrno = errno;

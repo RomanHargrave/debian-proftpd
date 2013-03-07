@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 # ---------------------------------------------------------------------------
-# Copyright (C) 2000-2012 TJ Saunders <tj@castaglia.org>
+# Copyright (C) 2000-2013 TJ Saunders <tj@castaglia.org>
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@
 # format, or AuthGroupFile, in group(5) format.  The idea is somewhat similar
 # to Apache's htpasswd program.
 #
-#  $Id: ftpasswd,v 1.14 2012/12/14 00:16:26 castaglia Exp $
+#  $Id: ftpasswd,v 1.17 2013/02/06 05:37:51 castaglia Exp $
 # ---------------------------------------------------------------------------
 
 use strict;
@@ -39,7 +39,7 @@ my $shell_file = "/etc/shells";
 my $default_cracklib_dict = "/usr/lib/cracklib_dict";
 my $cracklib_dict;
 my $output_file;
-my $version = "1.1.3";
+my $version = "1.2.0";
 
 my @data;
 
@@ -119,12 +119,6 @@ if ((exists($opts{'passwd'}) && exists($opts{'group'})) ||
 
   # check for and handle the --delete-user option.
   if (defined($opts{'delete-user'})) {
-
-    # make sure we can write/update the file first
-    unless (chmod 0644, $output_file) {
-      die "$program: unable to set permissions on $output_file to 0644: $!\n";
-    }
-
     open_output_file();
 
     my ($pass, $uid, $gid, $gecos, $home, $shell) = find_passwd_entry(name =>
@@ -207,12 +201,6 @@ if ((exists($opts{'passwd'}) && exists($opts{'group'})) ||
 
   # check for and handle the --delete-group option.
   if (defined($opts{'delete-group'})) {
-
-    # make sure we can write/update the file first
-    unless (chmod 0644, $output_file) {
-      die "$program: unable to set permissions on $output_file to 0644: $!\n";
-    }
-
     open_output_file();
 
     handle_group_entry(name => $opts{'name'},
@@ -299,8 +287,10 @@ sub close_output_file {
     print OUTPUT "$line\n";
   }
 
-  # set the permissions appropriately, ie 0444, before closing the file
-  chmod 0444, $output_file;
+  # set the permissions appropriately, ie 0440, before closing the file
+  unless (chmod(0440, $output_file)) {
+    die("$program: unable to set permissions on $output_file: $!");
+  }
 
   close(OUTPUT) or die "$program: unable to close $output_file: $!\n";
 }
@@ -774,6 +764,11 @@ sub open_output_file {
   # If the file already exists, slurp up its contents for later updating.
 
   if (-f $output_file) {
+    # make sure we can write/update the file first
+    unless (chmod 0644, $output_file) {
+      die "$program: unable to set permissions on $output_file to 0644: $!\n";
+    }
+
     open(INPUT, "< $output_file") or
       die "$program: unable to open $output_file: $!\n";
     chomp(@data = <INPUT>);

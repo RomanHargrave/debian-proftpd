@@ -1,6 +1,6 @@
 /*
  * mod_ldap - LDAP password lookup module for ProFTPD
- * Copyright (c) 1999-2012, John Morrissey <jwm@horde.net>
+ * Copyright (c) 1999-2013, John Morrissey <jwm@horde.net>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -45,14 +45,14 @@
  *                                                   LDAPDefaultAuthScheme
  *
  *
- * $Id: mod_ldap.c,v 1.98 2012/09/07 18:48:19 jwm Exp $
+ * $Id: mod_ldap.c,v 1.101 2013/02/24 17:10:44 jwm Exp $
  * $Libraries: -lldap -llber$
  */
 
 #include "conf.h"
 #include "privs.h"
 
-#define MOD_LDAP_VERSION	"mod_ldap/2.9.2"
+#define MOD_LDAP_VERSION	"mod_ldap/2.9.3"
 
 #if PROFTPD_VERSION_NUMBER < 0x0001030103
 # error MOD_LDAP_VERSION " requires ProFTPD 1.3.1rc3 or later"
@@ -282,7 +282,7 @@ _ldap_connect(LDAP **conn_ld, int do_bind)
       pr_ldap_unbind();
       return -1;
     }
-    pr_log_debug(DEBUG3, MOD_LDAP_VERSION ": successfully bound as %s with password %s", ldap_dn ? ldap_dn : "(anonymous)", ldap_dnpass ? ldap_dnpass : "(none)");
+    pr_log_debug(DEBUG3, MOD_LDAP_VERSION ": successfully bound as %s with password %s", ldap_dn ? ldap_dn : "(anonymous)", ldap_dnpass ? "(see config)" : "(none)");
   }
 
 #ifdef LDAP_OPT_DEREF
@@ -1707,6 +1707,9 @@ set_ldap_userlookups(cmd_rec *cmd)
   config_rec *c;
 
   CHECK_CONF(cmd, CONF_ROOT | CONF_VIRTUAL | CONF_GLOBAL);
+  if ((strcmp(cmd->argv[1], "on") == 0) || (strcmp(cmd->argv[1], "on") == 0)) {
+    CONF_ERROR(cmd, "LDAPUsers: first argument is base DN, not on/off.");
+  }
 
   c = add_config_param(cmd->argv[0], cmd->argc - 1, NULL, NULL, NULL);
   c->argv[0] = pstrdup(c->pool, cmd->argv[1]);
@@ -1865,6 +1868,9 @@ set_ldap_grouplookups(cmd_rec *cmd)
   config_rec *c;
 
   CHECK_CONF(cmd, CONF_ROOT | CONF_VIRTUAL | CONF_GLOBAL);
+  if ((strcmp(cmd->argv[1], "on") == 0) || (strcmp(cmd->argv[1], "on") == 0)) {
+    CONF_ERROR(cmd, "LDAPGroups: first argument is base DN, not on/off.");
+  }
 
   c = add_config_param(cmd->argv[0], cmd->argc - 1, NULL);
   c->argv[0] = pstrdup(c->pool, cmd->argv[1]);

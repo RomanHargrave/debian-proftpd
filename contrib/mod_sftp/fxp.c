@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: fxp.c,v 1.168 2013/01/03 20:20:03 castaglia Exp $
+ * $Id: fxp.c,v 1.188 2013/02/28 01:20:02 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -56,6 +56,26 @@
 #define SSH2_FX_ATTR_UNTRANSLATED_NAME	0x00004000
 #define SSH2_FX_ATTR_CTIME		0x00008000
 #define SSH2_FX_ATTR_EXTENDED		0x80000000
+
+/* FX_ATTR_BITS values (see draft-ietf-secsh-filexfer-13, Section 7.9) */
+#define SSH2_FX_ATTR_BIT_FL_READONLY		0x00000001
+#define SSH2_FX_ATTR_BIT_FL_SYSTEM		0x00000002
+#define SSH2_FX_ATTR_BIT_FL_HIDDEN		0x00000004
+#define SSH2_FX_ATTR_BIT_FL_CASE_INSENSITIVE	0x00000008
+#define SSH2_FX_ATTR_BIT_FL_ARCHIVE		0x00000010
+#define SSH2_FX_ATTR_BIT_FL_ENCRYPTED		0x00000020
+#define SSH2_FX_ATTR_BIT_FL_COMPRESSED		0x00000040
+#define SSH2_FX_ATTR_BIT_FL_SPARSE		0x00000080
+#define SSH2_FX_ATTR_BIT_FL_APPEND_ONLY		0x00000100
+#define SSH2_FX_ATTR_BIT_FL_IMMUTABLE		0x00000200
+#define SSH2_FX_ATTR_BIT_FL_SYNC		0x00000400
+#define SSH2_FX_ATTR_BIT_FL_TRANSLATION_ERR	0x00000800
+
+/* FX_ATTR_TEXT_HINT values (see draft-ietf-secsh-filexfer-13, Section 7.10) */
+#define SSH2_FX_ATTR_KNOWN_TEXT		0x00
+#define SSH2_FX_ATTR_GUESSED_TEXT	0x01
+#define SSH2_FX_ATTR_KNOWN_BINARY	0x02
+#define SSH2_FX_ATTR_GUESSED_BINARY	0x03
 
 /* FXP_ATTRS file types */
 #define SSH2_FX_ATTR_FTYPE_REGULAR		1
@@ -366,7 +386,6 @@ static cmd_rec *fxp_cmd_alloc(pool *p, const char *name, char *arg) {
 
   cmd = pr_cmd_alloc(p, 2, pstrdup(p, name), arg ? arg : "");
   cmd->arg = arg;
-  cmd->tmp_pool = pr_pool_create_sz(p, 64);
 
   return cmd;
 }
@@ -725,6 +744,87 @@ static int fxp_get_v3_open_flags(uint32_t flags) {
   }
 
   return res;
+}
+
+static void fxp_trace_v5_bit_flags(pool *p, uint32_t attr_bits,
+    uint32_t attr_valid_bits) {
+  uint32_t flags;
+  char *flags_str = "";
+  int trace_level = 15;
+
+  if (pr_trace_get_level(trace_channel) < trace_level) {
+    return;
+  }
+
+  /* We're only interested in which, of the valid bits, are turned on/enabled
+   * in the bits value, for logging.
+   */
+
+  flags = (attr_bits & attr_valid_bits);
+
+  if (flags & SSH2_FX_ATTR_BIT_FL_READONLY) {
+    flags_str = pstrcat(p, flags_str, *flags_str ? "|" : "",
+      "FLAGS_READONLY", NULL);
+  }
+
+  if (flags & SSH2_FX_ATTR_BIT_FL_SYSTEM) {
+    flags_str = pstrcat(p, flags_str, *flags_str ? "|" : "",
+      "FLAGS_SYSTEM", NULL);
+  }
+
+  if (flags & SSH2_FX_ATTR_BIT_FL_HIDDEN) {
+    flags_str = pstrcat(p, flags_str, *flags_str ? "|" : "",
+      "FLAGS_HIDDEN", NULL);
+  }
+
+  if (flags & SSH2_FX_ATTR_BIT_FL_CASE_INSENSITIVE) {
+    flags_str = pstrcat(p, flags_str, *flags_str ? "|" : "",
+      "FLAGS_CASE_INSENSITIVE", NULL);
+  }
+
+  if (flags & SSH2_FX_ATTR_BIT_FL_ARCHIVE) {
+    flags_str = pstrcat(p, flags_str, *flags_str ? "|" : "",
+      "FLAGS_ARCHIVE", NULL);
+  }
+
+  if (flags & SSH2_FX_ATTR_BIT_FL_ENCRYPTED) {
+    flags_str = pstrcat(p, flags_str, *flags_str ? "|" : "",
+      "FLAGS_ENCRYPTED", NULL);
+  }
+
+  if (flags & SSH2_FX_ATTR_BIT_FL_COMPRESSED) {
+    flags_str = pstrcat(p, flags_str, *flags_str ? "|" : "",
+      "FLAGS_COMPRESSED", NULL);
+  }
+
+  if (flags & SSH2_FX_ATTR_BIT_FL_SPARSE) {
+    flags_str = pstrcat(p, flags_str, *flags_str ? "|" : "",
+      "FLAGS_SPARSE", NULL);
+  }
+
+  if (flags & SSH2_FX_ATTR_BIT_FL_APPEND_ONLY) {
+    flags_str = pstrcat(p, flags_str, *flags_str ? "|" : "",
+      "FLAGS_APPEND_ONLY", NULL);
+  }
+
+  if (flags & SSH2_FX_ATTR_BIT_FL_IMMUTABLE) {
+    flags_str = pstrcat(p, flags_str, *flags_str ? "|" : "",
+      "FLAGS_IMMUTABLE", NULL);
+  }
+
+  if (flags & SSH2_FX_ATTR_BIT_FL_SYNC) {
+    flags_str = pstrcat(p, flags_str, *flags_str ? "|" : "",
+      "FLAGS_SYNC", NULL);
+  }
+
+  if (flags & SSH2_FX_ATTR_BIT_FL_TRANSLATION_ERR) {
+    flags_str = pstrcat(p, flags_str, *flags_str ? "|" : "",
+      "FLAGS_TRANSLATION_ERR", NULL);
+  }
+
+  pr_trace_msg(trace_channel, 15,
+    "protocol version %lu: read BITS attribute: bits %s requested",
+    (unsigned long) fxp_session->client_version, flags_str);
 }
 
 static void fxp_trace_v5_open_flags(pool *p, uint32_t desired_access,
@@ -1156,12 +1256,10 @@ static uint64_t fxp_msg_read_long(pool *p, unsigned char **buf,
   return val;
 }
 
-#if 0
-/* XXX Not used yet, if ever. */
-static struct fxp_extpair *fxp_msg_read_extpair(pool *p, char **buf,
+static struct fxp_extpair *fxp_msg_read_extpair(pool *p, unsigned char **buf,
     uint32_t *buflen) {
   uint32_t namelen, datalen;
-  char *name, *data;
+  unsigned char *name, *data;
   struct fxp_extpair *extpair;
 
   namelen = sftp_msg_read_int(p, buf, buflen);
@@ -1187,13 +1285,12 @@ static struct fxp_extpair *fxp_msg_read_extpair(pool *p, char **buf,
   }
 
   extpair = palloc(p, sizeof(struct fxp_extpair));
-  extpair->ext_name = name;
+  extpair->ext_name = (char *) name;
   extpair->ext_datalen = datalen;
   extpair->ext_data = data;
 
   return extpair;
 }
-#endif
 
 static uint32_t fxp_msg_write_short(unsigned char **buf, uint32_t *buflen,
     uint16_t val) {
@@ -1901,6 +1998,16 @@ static struct stat *fxp_attrs_read(struct fxp_packet *fxp, unsigned char **buf,
       st->st_size = fxp_msg_read_long(fxp->pool, buf, buflen);
     }
 
+    if (*flags & SSH2_FX_ATTR_ALLOCATION_SIZE) {
+      /* Read (and ignore) any allocation size attribute. */
+      uint64_t allosz;
+
+      allosz = fxp_msg_read_long(fxp->pool, buf, buflen);
+      pr_trace_msg(trace_channel, 15,
+        "protocol version %lu: read ALLOCATION_SIZE attribute: %" PR_LU,
+        (unsigned long) fxp_session->client_version, (pr_off_t) allosz);
+    }
+
     if (*flags & SSH2_FX_ATTR_OWNERGROUP) {
       char *name;
       uid_t uid;
@@ -1985,13 +2092,185 @@ static struct stat *fxp_attrs_read(struct fxp_packet *fxp, unsigned char **buf,
 
     if (*flags & SSH2_FX_ATTR_ACCESSTIME) {
       st->st_atime = fxp_msg_read_long(fxp->pool, buf, buflen);
+
+      if (*flags & SSH2_FX_ATTR_SUBSECOND_TIMES) {
+        /* Read (and ignore) the nanoseconds field. */
+        uint32_t nanosecs;
+
+        nanosecs = sftp_msg_read_int(fxp->pool, buf, buflen);
+        pr_trace_msg(trace_channel, 15,
+          "protocol version %lu: read ACCESSTIME SUBSECOND attribute: %lu",
+          (unsigned long) fxp_session->client_version,
+          (unsigned long) nanosecs);
+      }
+    }
+
+    if (*flags & SSH2_FX_ATTR_CREATETIME) {
+      /* Read (and ignore) the create time attribute. */
+      uint64_t create_time;
+
+      create_time = fxp_msg_read_long(fxp->pool, buf, buflen);
+      pr_trace_msg(trace_channel, 15,
+        "protocol version %lu: read CREATETIME attribute: %" PR_LU,
+        (unsigned long) fxp_session->client_version, (pr_off_t) create_time);
+
+      if (*flags & SSH2_FX_ATTR_SUBSECOND_TIMES) {
+        /* Read (and ignore) the nanoseconds field. */
+        uint32_t nanosecs;
+
+        nanosecs = sftp_msg_read_int(fxp->pool, buf, buflen);
+        pr_trace_msg(trace_channel, 15,
+          "protocol version %lu: read CREATETIME SUBSECOND attribute: %lu",
+          (unsigned long) fxp_session->client_version,
+          (unsigned long) nanosecs);
+      }
     }
 
     if (*flags & SSH2_FX_ATTR_MODIFYTIME) {
       st->st_mtime = fxp_msg_read_long(fxp->pool, buf, buflen);
+
+      if (*flags & SSH2_FX_ATTR_SUBSECOND_TIMES) {
+        /* Read (and ignore) the nanoseconds field. */
+        uint32_t nanosecs;
+
+        nanosecs = sftp_msg_read_int(fxp->pool, buf, buflen);
+        pr_trace_msg(trace_channel, 15,
+          "protocol version %lu: read MOTIFYTIME SUBSECOND attribute: %lu",
+          (unsigned long) fxp_session->client_version,
+          (unsigned long) nanosecs);
+      }
     }
 
-    /* XXX Vendor-specific extensions */
+    if (*flags & SSH2_FX_ATTR_CTIME) {
+      /* Read (and ignore) the ctime attribute. */
+      uint64_t change_time;
+
+      change_time = fxp_msg_read_long(fxp->pool, buf, buflen);
+      pr_trace_msg(trace_channel, 15,
+        "protocol version %lu: read CTIME attribute: %" PR_LU,
+        (unsigned long) fxp_session->client_version, (pr_off_t) change_time);
+
+      if (*flags & SSH2_FX_ATTR_SUBSECOND_TIMES) {
+        /* Read (and ignore) the nanoseconds field. */
+        uint32_t nanosecs;
+
+        nanosecs = sftp_msg_read_int(fxp->pool, buf, buflen);
+        pr_trace_msg(trace_channel, 15,
+          "protocol version %lu: read CTIME SUBSECOND attribute: %lu",
+          (unsigned long) fxp_session->client_version,
+          (unsigned long) nanosecs);
+      }
+    }
+
+    if (*flags & SSH2_FX_ATTR_ACL) {
+      /* Read (and ignore) the ACL attribute. */
+      char *acl;
+
+      acl = sftp_msg_read_string(fxp->pool, buf, buflen);
+      pr_trace_msg(trace_channel, 15,
+        "protocol version %lu: read ACL attribute: '%s'",
+        (unsigned long) fxp_session->client_version, acl ? acl : "(nil)");
+    }
+
+    if (*flags & SSH2_FX_ATTR_BITS) {
+      /* Read (and ignore) the BITS attributes. */
+      uint32_t attr_bits, attr_valid_bits;
+
+      attr_bits = sftp_msg_read_int(fxp->pool, buf, buflen);
+      attr_valid_bits = sftp_msg_read_int(fxp->pool, buf, buflen);
+
+      fxp_trace_v5_bit_flags(fxp->pool, attr_bits, attr_valid_bits);
+    }
+
+    if (*flags & SSH2_FX_ATTR_TEXT_HINT) {
+      /* Read (and ignore) the TEXT_HINT attribute. */
+      char hint, *hint_type;
+
+      hint = sftp_msg_read_byte(fxp->pool, buf, buflen);
+      switch (hint) {
+        case SSH2_FX_ATTR_KNOWN_TEXT:
+          hint_type = "KNOWN_TEXT";
+          break;
+
+        case SSH2_FX_ATTR_GUESSED_TEXT:
+          hint_type = "GUESSED_TEXT";
+          break;
+
+        case SSH2_FX_ATTR_KNOWN_BINARY:
+          hint_type = "KNOWN_BINARY";
+          break;
+
+        case SSH2_FX_ATTR_GUESSED_BINARY:
+          hint_type = "GUESSED_BINARY";
+          break;
+
+        default:
+          hint_type = "(unknown)";
+          break;
+      }
+
+      pr_trace_msg(trace_channel, 15,
+        "protocol version %lu: read TEXT_HINT attribute: '%s'",
+        (unsigned long) fxp_session->client_version, hint_type);
+    }
+
+    if (*flags & SSH2_FX_ATTR_MIME_TYPE) {
+      /* Read (and ignore) the MIME_TYPE attribute. */
+      char *mime_type;
+
+      mime_type = sftp_msg_read_string(fxp->pool, buf, buflen);
+      pr_trace_msg(trace_channel, 15,
+        "protocol version %lu: read MIME_TYPE attribute: '%s'",
+        (unsigned long) fxp_session->client_version,
+        mime_type ? mime_type : "(nil)");
+    }
+
+    if (*flags & SSH2_FX_ATTR_LINK_COUNT) {
+      /* Read (and ignore) the LINK_COUNT attribute. */
+      uint32_t link_count;
+
+      link_count = sftp_msg_read_int(fxp->pool, buf, buflen);
+      pr_trace_msg(trace_channel, 15,
+        "protocol version %lu: read LINK_COUNT attribute: %lu",
+        (unsigned long) fxp_session->client_version,
+        (unsigned long) link_count);
+    }
+
+    if (*flags & SSH2_FX_ATTR_UNTRANSLATED_NAME) {
+      /* Read (and ignore) the UNTRANSLATED_NAME attribute. */
+      char *untranslated;
+
+      untranslated = sftp_msg_read_string(fxp->pool, buf, buflen);
+      pr_trace_msg(trace_channel, 15,
+        "protocol version %lu: read UNTRANSLATED_NAME attribute: '%s'",
+        (unsigned long) fxp_session->client_version,
+        untranslated ? untranslated : "(nil)");
+    }
+
+    /* Vendor-specific extensions */
+    if (*flags & SSH2_FX_ATTR_EXTENDED) {
+      /* Read (and ignore) the EXTENDED attribute. */
+      register unsigned int i;
+      uint32_t extpair_count;
+
+      extpair_count = sftp_msg_read_int(fxp->pool, buf, buflen);
+      pr_trace_msg(trace_channel, 15,
+        "protocol version %lu: read EXTENDED attribute: %lu extensions",
+        (unsigned long) fxp_session->client_version,
+        (unsigned long) extpair_count);
+
+      for (i = 0; i < extpair_count; i++) {
+        struct fxp_extpair *ext;
+
+        ext = fxp_msg_read_extpair(fxp->pool, buf, buflen);
+        pr_trace_msg(trace_channel, 15,
+          "protocol version %lu: read EXTENDED attribute: "
+          "extension '%s' (%lu bytes of data)",
+          (unsigned long) fxp_session->client_version, ext->ext_name,
+          (unsigned long) ext->ext_datalen);
+      }
+    }
+
   }
 
   return st;
@@ -2343,7 +2622,7 @@ static struct fxp_handle *fxp_handle_create(pool *p) {
   pool *sub_pool;
   struct fxp_handle *fxh;
 
-  sub_pool = pr_pool_create_sz(p, 64);
+  sub_pool = make_sub_pool(p);
   fxh = pcalloc(sub_pool, sizeof(struct fxp_handle));
   fxh->pool = sub_pool;
 
@@ -2354,10 +2633,10 @@ static struct fxp_handle *fxp_handle_create(pool *p) {
   data = palloc(p, data_len);
 
   handle_len = (2 * data_len);
-  handle = palloc(p, data_len + 1);
+  handle = palloc(fxh->pool, handle_len + 1);
   handle[handle_len] = '\0';
 
-  while (1) {
+  while (TRUE) {
     register unsigned int i;
 
     /* Keep trying until mktemp(3) returns a string that we haven't used
@@ -2400,10 +2679,20 @@ static int fxp_handle_abort(const void *key_data, size_t key_datasz,
 
   /* Is this a file or a directory handle? */
   if (fxh->dirh != NULL) {
+    cmd = fxp_cmd_alloc(fxh->pool, C_MLSD, (char *) fxh->dir);
+    cmd->cmd_class = CL_DIRS;
+    cmd->cmd_id = pr_cmd_get_id(C_MLSD);
+
     if (pr_fsio_closedir(fxh->dirh) < 0) {
       (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
         "error closing aborted directory '%s': %s", fxh->dir, strerror(errno));
     }
+
+    pr_response_clear(&resp_list);
+    pr_response_clear(&resp_err_list);
+
+    pr_cmd_dispatch_phase(cmd, POST_CMD_ERR, 0);
+    pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
 
     fxh->dirh = NULL;
     return 0;
@@ -2434,6 +2723,7 @@ static int fxp_handle_abort(const void *key_data, size_t key_datasz,
 
   if (fxh->fh_flags & O_APPEND) {
     cmd = fxp_cmd_alloc(fxh->pool, C_APPE, pstrdup(fxh->pool, curr_path));
+    cmd->cmd_class = CL_WRITE;
     session.curr_cmd = C_APPE;
 
     if (pr_table_add(cmd->notes, "mod_xfer.store-path",
@@ -2447,6 +2737,7 @@ static int fxp_handle_abort(const void *key_data, size_t key_datasz,
   } else if ((fxh->fh_flags & O_WRONLY) ||
              (fxh->fh_flags & O_RDWR)) {
     cmd = fxp_cmd_alloc(fxh->pool, C_STOR, pstrdup(fxh->pool, curr_path));
+    cmd->cmd_class = CL_WRITE;
     session.curr_cmd = C_STOR;
 
     if (pr_table_add(cmd->notes, "mod_xfer.store-path",
@@ -2459,6 +2750,7 @@ static int fxp_handle_abort(const void *key_data, size_t key_datasz,
 
   } else if (fxh->fh_flags == O_RDONLY) {
     cmd = fxp_cmd_alloc(fxh->pool, C_RETR, pstrdup(fxh->pool, curr_path));
+    cmd->cmd_class = CL_READ;
     session.curr_cmd = C_RETR;
 
     if (pr_table_add(cmd->notes, "mod_xfer.retr-path",
@@ -2547,7 +2839,7 @@ static struct fxp_packet *fxp_packet_create(pool *p, uint32_t channel_id) {
   pool *sub_pool;
   struct fxp_packet *fxp;
 
-  sub_pool = pr_pool_create_sz(p, 64);
+  sub_pool = make_sub_pool(p);
   fxp = pcalloc(sub_pool, sizeof(struct fxp_packet));
   fxp->pool = sub_pool;
   fxp->channel_id = channel_id;
@@ -3791,7 +4083,6 @@ static int fxp_handle_ext_copy_file(struct fxp_packet *fxp, char *src,
   cmd = pr_cmd_alloc(fxp->pool, 4, pstrdup(fxp->pool, "SITE"),
     pstrdup(fxp->pool, "COPY"), src, dst);
   cmd->arg = pstrcat(fxp->pool, "COPY ", src, " ", dst, NULL);
-  cmd->tmp_pool = pr_pool_create_sz(fxp->pool, 64);
   cmd->cmd_class = CL_WRITE;
 
   buflen = bufsz = FXP_RESPONSE_DATA_DEFAULT_SZ;
@@ -4672,6 +4963,10 @@ static int fxp_handle_close(struct fxp_packet *fxp) {
 
   fxh = fxp_handle_get(name);
   if (fxh == NULL) {
+    pr_trace_msg(trace_channel, 17,
+      "%s: unable to find handle for name '%s': %s", cmd->argv[0], name,
+      strerror(errno));
+
     status_code = SSH2_FX_INVALID_HANDLE;
 
     pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s'",
@@ -4874,14 +5169,28 @@ static int fxp_handle_close(struct fxp_packet *fxp) {
     }
 
   } else if (fxh->dirh != NULL) {
+    cmd_rec *cmd2;
+
+    cmd2 = fxp_cmd_alloc(fxp->pool, C_MLSD, (char *) fxh->dir);
+    cmd2->cmd_class = CL_DIRS;
+    cmd2->cmd_id = pr_cmd_get_id(C_MLSD);
+
     pr_scoreboard_entry_update(session.pid,
       PR_SCORE_CMD_ARG, "%s", fxh->dir, NULL, NULL);
 
     res = pr_fsio_closedir(fxh->dirh);
     if (res < 0) {
       xerrno = errno;
+
       (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
         "error closing directory '%s': %s", fxh->dir, strerror(xerrno));
+
+      pr_cmd_dispatch_phase(cmd2, POST_CMD_ERR, 0);
+      pr_cmd_dispatch_phase(cmd2, LOG_CMD_ERR, 0);
+
+    } else {
+      pr_cmd_dispatch_phase(cmd2, POST_CMD, 0);
+      pr_cmd_dispatch_phase(cmd2, LOG_CMD, 0);
     }
 
     fxh->dirh = NULL;
@@ -5139,6 +5448,10 @@ static int fxp_handle_extended(struct fxp_packet *fxp) {
 
     fxh = fxp_handle_get(handle);
     if (fxh == NULL) {
+      pr_trace_msg(trace_channel, 17,
+        "%s: unable to find handle for name '%s': %s", cmd->argv[0], handle,
+        strerror(errno));
+
       status_code = SSH2_FX_INVALID_HANDLE;
 
       pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s'",
@@ -5189,7 +5502,7 @@ static int fxp_handle_fsetstat(struct fxp_packet *fxp) {
   char *attrs_str, *cmd_name, *name;
   const char *reason;
   uint32_t attr_flags, buflen, bufsz, status_code;
-  int res;
+  int have_error = FALSE, res;
   struct stat *attrs;
   struct fxp_handle *fxh;
   struct fxp_packet *resp;
@@ -5224,6 +5537,10 @@ static int fxp_handle_fsetstat(struct fxp_packet *fxp) {
 
   fxh = fxp_handle_get(name);
   if (fxh == NULL) {
+    pr_trace_msg(trace_channel, 17,
+      "%s: unable to find handle for name '%s': %s", cmd->argv[0], name,
+      strerror(errno));
+
     status_code = SSH2_FX_INVALID_HANDLE;
 
     pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s'",
@@ -5270,15 +5587,28 @@ static int fxp_handle_fsetstat(struct fxp_packet *fxp) {
   }
 
   cmd_name = cmd->argv[0];
-  pr_cmd_set_name(cmd, "SETSTAT");
 
-  if (!dir_check(fxp->pool, cmd, G_WRITE, cmd->arg, NULL)) {
+  pr_cmd_set_name(cmd, "FSETSTAT");
+  if (dir_check(fxp->pool, cmd, G_WRITE, cmd->arg, NULL) > 0) {
+    /* Explicitly allowed by <Limit FSETSTAT>. */
+    have_error = FALSE;
+
+  } else {
+    pr_cmd_set_name(cmd, "SETSTAT");
+
+    if (!dir_check(fxp->pool, cmd, G_WRITE, cmd->arg, NULL)) {
+      have_error = TRUE;
+    }
+  }
+
+  if (have_error) {
     status_code = SSH2_FX_PERMISSION_DENIED;
 
-    pr_cmd_set_name(cmd, cmd_name);
-
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
-      "FSETSTAT of '%s' blocked by <Limit> configuration", cmd->arg);
+      "FSETSTAT of '%s' blocked by <Limit %s> configuration", cmd->arg,
+      cmd->argv[0]);
+
+    pr_cmd_set_name(cmd, cmd_name);
 
     pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s'",
       (unsigned long) status_code, fxp_strerror(status_code));
@@ -5422,7 +5752,13 @@ static int fxp_handle_fstat(struct fxp_packet *fxp) {
 
   fxh = fxp_handle_get(name);
   if (fxh == NULL) {
-    uint32_t status_code = SSH2_FX_INVALID_HANDLE;
+    uint32_t status_code;
+
+    pr_trace_msg(trace_channel, 17,
+      "%s: unable to find handle for name '%s': %s", cmd->argv[0], name,
+      strerror(errno));
+
+    status_code = SSH2_FX_INVALID_HANDLE;
 
     pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s'",
       (unsigned long) status_code, fxp_strerror(status_code));
@@ -5717,25 +6053,40 @@ static int fxp_handle_link(struct fxp_packet *fxp) {
   buf = ptr = palloc(fxp->pool, bufsz);
 
   cmd_name = cmd->argv[0];
-  pr_cmd_set_name(cmd, "SYMLINK");
+  pr_cmd_set_name(cmd, "LINK");
 
   if (!dir_check(fxp->pool, cmd, G_READ, src_path, NULL)) {
     have_error = TRUE;
   }
 
-  if (!have_error &&
-      !dir_check(fxp->pool, cmd, G_WRITE, dst_path, NULL)) {
-    have_error = TRUE;
+  if (!have_error) {
+    if (!dir_check(fxp->pool, cmd, G_WRITE, dst_path, NULL)) {
+      have_error = TRUE;
+    }
   }
 
-  pr_cmd_set_name(cmd, cmd_name);
+  if (!have_error) {
+    pr_cmd_set_name(cmd, "SYMLINK");
+
+    if (!dir_check(fxp->pool, cmd, G_READ, src_path, NULL)) {
+      have_error = TRUE;
+    }
+
+    if (!have_error) {
+      if (!dir_check(fxp->pool, cmd, G_WRITE, dst_path, NULL)) {
+        have_error = TRUE;
+      }
+    }
+  }
 
   if (have_error) {
     status_code = SSH2_FX_PERMISSION_DENIED;
 
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
-      "LINK of '%s' to '%s' blocked by <Limit> configuration",
-      src_path, dst_path);
+      "LINK of '%s' to '%s' blocked by <Limit %s> configuration",
+      src_path, dst_path, cmd->argv[0]);
+
+    pr_cmd_set_name(cmd, cmd_name);
 
     pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s'",
       (unsigned long) status_code, fxp_strerror(status_code));
@@ -5752,6 +6103,8 @@ static int fxp_handle_link(struct fxp_packet *fxp) {
 
     return fxp_packet_write(resp);
   }
+
+  pr_cmd_set_name(cmd, cmd_name);
 
   if (is_symlink) {
     res = pr_fsio_symlink(src_path, dst_path);
@@ -5832,6 +6185,10 @@ static int fxp_handle_lock(struct fxp_packet *fxp) {
 
   fxh = fxp_handle_get(name);
   if (fxh == NULL) {
+    pr_trace_msg(trace_channel, 17,
+      "%s: unable to find handle for name '%s': %s", cmd->argv[0], name,
+      strerror(errno));
+
     status_code = SSH2_FX_INVALID_HANDLE;
 
     pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s'",
@@ -6318,9 +6675,6 @@ static int fxp_handle_mkdir(struct fxp_packet *fxp) {
   /* The path may have been changed by any PRE_CMD handlers. */
   path = cmd2->arg;
 
-  cmd_name = cmd->argv[0];
-  pr_cmd_set_name(cmd, C_MKD);
-
   path = dir_canonical_path(fxp->pool, path);
   if (path == NULL) {
     status_code = fxp_errno2status(EINVAL, NULL);
@@ -6343,24 +6697,20 @@ static int fxp_handle_mkdir(struct fxp_packet *fxp) {
     return fxp_packet_write(resp);
   }
 
+  cmd_name = cmd->argv[0];
+  pr_cmd_set_name(cmd, C_XMKD);
+
   if (!dir_check_canon(fxp->pool, cmd, G_WRITE, path, NULL)) {
     have_error = TRUE;
   }
-
-  pr_cmd_set_name(cmd, C_XMKD);
-
-  if (!have_error &&
-      !dir_check_canon(fxp->pool, cmd, G_WRITE, path, NULL)) {
-    have_error = TRUE;
-  }
-
-  pr_cmd_set_name(cmd, cmd_name);
 
   if (have_error) {
     status_code = SSH2_FX_PERMISSION_DENIED;
 
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
-      "MKDIR of '%s' blocked by <Limit> configuration", path);
+      "MKDIR of '%s' blocked by <Limit %s> configuration", path, cmd->argv[0]);
+
+    pr_cmd_set_name(cmd, cmd_name);
 
     pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s'",
       (unsigned long) status_code, fxp_strerror(status_code));
@@ -6379,6 +6729,8 @@ static int fxp_handle_mkdir(struct fxp_packet *fxp) {
 
     return fxp_packet_write(resp);
   }
+
+  pr_cmd_set_name(cmd, cmd_name);
 
   if (fxp_path_pass_regex_filters(fxp->pool, "MKDIR", path) < 0) {
     status_code = fxp_errno2status(errno, NULL);
@@ -6784,8 +7136,15 @@ static int fxp_handle_open(struct fxp_packet *fxp) {
     path = cmd2->arg;
 
     if (session.xfer.xfer_type == STOR_HIDDEN) {
+      void *nfs;
+
       hiddenstore_path = pr_table_get(cmd2->notes,
         "mod_xfer.store-hidden-path", NULL);
+
+      nfs = pr_table_get(cmd2->notes, "mod_xfer.store-hidden-nfs", NULL);
+      if (nfs == NULL) {
+        open_flags |= O_EXCL;
+      }
 
     } else {
       path = dir_best_path(fxp->pool, path);
@@ -7012,6 +7371,7 @@ static int fxp_handle_open(struct fxp_packet *fxp) {
       reason, NULL);
 
     pr_fsio_close(fh);
+    destroy_pool(fxh->pool);
 
     if (cmd2) {
       pr_cmd_dispatch_phase(cmd2, POST_CMD_ERR, 0);
@@ -7040,7 +7400,7 @@ static int fxp_handle_open(struct fxp_packet *fxp) {
   }
   memset(&session.xfer, 0, sizeof(session.xfer));
 
-  session.xfer.p = pr_pool_create_sz(fxp_pool, 64);
+  session.xfer.p = make_sub_pool(fxp_pool);
   session.xfer.path = pstrdup(session.xfer.p, orig_path);
   memset(&session.xfer.start_time, 0, sizeof(session.xfer.start_time));
   gettimeofday(&session.xfer.start_time, NULL);
@@ -7083,7 +7443,7 @@ static int fxp_handle_opendir(struct fxp_packet *fxp) {
   void *dirh;
   struct fxp_handle *fxh;
   struct fxp_packet *resp;
-  cmd_rec *cmd;
+  cmd_rec *cmd, *cmd2;
 
   path = sftp_msg_read_string(fxp->pool, &fxp->payload, &fxp->payload_sz);
   if (fxp_session->client_version >= fxp_utf8_protocol_version) {
@@ -7139,6 +7499,54 @@ static int fxp_handle_opendir(struct fxp_packet *fxp) {
   /* The path may have been changed by any PRE_CMD handlers. */
   path = cmd->arg;
 
+  cmd2 = fxp_cmd_alloc(fxp->pool, C_MLSD, path);
+  cmd2->cmd_class = CL_DIRS;
+  cmd2->cmd_id = pr_cmd_get_id(C_MLSD);
+
+  if (pr_cmd_dispatch_phase(cmd2, PRE_CMD, 0) < 0) {
+    int xerrno = errno;
+    const char *reason;
+    uint32_t status_code;
+
+    /* One of the PRE_CMD phase handlers rejected the command. */
+
+    (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+      "OPENDIR command for '%s' blocked by '%s' handler", path, cmd2->argv[0]);
+
+    /* Hopefully the command handlers set an appropriate errno value.  If
+     * they didn't, however, we need to be prepared with a fallback.
+     */
+    if (xerrno != ENOENT &&
+        xerrno != EACCES &&
+        xerrno != EPERM &&
+        xerrno != EINVAL) {
+      xerrno = EACCES;
+    }
+
+    status_code = fxp_errno2status(xerrno, &reason);
+
+    pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s' "
+      "('%s' [%d])", (unsigned long) status_code, reason, strerror(xerrno),
+       xerrno);
+
+    fxp_status_write(&buf, &buflen, fxp->request_id, status_code, reason, NULL);
+
+    pr_cmd_dispatch_phase(cmd2, POST_CMD_ERR, 0);
+    pr_cmd_dispatch_phase(cmd2, LOG_CMD_ERR, 0);
+
+    pr_cmd_dispatch_phase(cmd, POST_CMD_ERR, 0);
+    pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
+
+    resp = fxp_packet_create(fxp->pool, fxp->channel_id);
+    resp->payload = ptr;
+    resp->payload_sz = (bufsz - buflen);
+
+    return fxp_packet_write(resp);
+  }
+
+  /* The path may have been changed by any PRE_CMD handlers. */
+  path = cmd2->arg;
+
   vpath = dir_canonical_vpath(fxp->pool, path);
   if (vpath == NULL) {
     uint32_t status_code;
@@ -7156,6 +7564,9 @@ static int fxp_handle_opendir(struct fxp_packet *fxp) {
 
     fxp_status_write(&buf, &buflen, fxp->request_id, status_code, reason,
       NULL);
+
+    pr_cmd_dispatch_phase(cmd2, POST_CMD_ERR, 0);
+    pr_cmd_dispatch_phase(cmd2, LOG_CMD_ERR, 0);
 
     pr_cmd_dispatch_phase(cmd, POST_CMD_ERR, 0);
     pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
@@ -7192,6 +7603,9 @@ static int fxp_handle_opendir(struct fxp_packet *fxp) {
     fxp_status_write(&buf, &buflen, fxp->request_id, status_code, reason,
       NULL);
 
+    pr_cmd_dispatch_phase(cmd2, POST_CMD_ERR, 0);
+    pr_cmd_dispatch_phase(cmd2, LOG_CMD_ERR, 0);
+
     pr_cmd_dispatch_phase(cmd, POST_CMD_ERR, 0);
     pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
 
@@ -7219,6 +7633,9 @@ static int fxp_handle_opendir(struct fxp_packet *fxp) {
 
     fxp_status_write(&buf, &buflen, fxp->request_id, status_code, reason,
       NULL);
+
+    pr_cmd_dispatch_phase(cmd2, POST_CMD_ERR, 0);
+    pr_cmd_dispatch_phase(cmd2, LOG_CMD_ERR, 0);
 
     pr_cmd_dispatch_phase(cmd, POST_CMD_ERR, 0);
     pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
@@ -7255,6 +7672,11 @@ static int fxp_handle_opendir(struct fxp_packet *fxp) {
         "error closing directory '%s': %s", fxh->dir, strerror(xerrno));
     }
 
+    destroy_pool(fxh->pool);
+
+    pr_cmd_dispatch_phase(cmd2, POST_CMD_ERR, 0);
+    pr_cmd_dispatch_phase(cmd2, LOG_CMD_ERR, 0);
+
     pr_cmd_dispatch_phase(cmd, POST_CMD_ERR, 0);
     pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
 
@@ -7282,7 +7704,7 @@ static int fxp_handle_opendir(struct fxp_packet *fxp) {
   if (session.xfer.p == NULL) {
     memset(&session.xfer, 0, sizeof(session.xfer));
 
-    session.xfer.p = pr_pool_create_sz(fxp_pool, 64);
+    session.xfer.p = make_sub_pool(fxp_pool);
     memset(&session.xfer.start_time, 0, sizeof(session.xfer.start_time));
     gettimeofday(&session.xfer.start_time, NULL);
     session.xfer.direction = PR_NETIO_IO_WR;
@@ -7296,8 +7718,6 @@ static int fxp_handle_opendir(struct fxp_packet *fxp) {
       fxp_timeout_stalled_cb, "TimeoutStalled");
   }
 
-  pr_event_generate("mod_sftp.sftp.protocol-version",
-    &(fxp_session->client_version));
   pr_cmd_dispatch_phase(cmd, POST_CMD, 0);
   pr_cmd_dispatch_phase(cmd, LOG_CMD, 0);
 
@@ -7354,7 +7774,13 @@ static int fxp_handle_read(struct fxp_packet *fxp) {
 
   fxh = fxp_handle_get(name);
   if (fxh == NULL) {
-    uint32_t status_code = SSH2_FX_INVALID_HANDLE;
+    uint32_t status_code;
+
+    pr_trace_msg(trace_channel, 17,
+      "%s: unable to find handle for name '%s': %s", cmd->argv[0], name,
+      strerror(errno));
+
+    status_code = SSH2_FX_INVALID_HANDLE;
 
     pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s'",
       (unsigned long) status_code, fxp_strerror(status_code));
@@ -7664,7 +8090,13 @@ static int fxp_handle_readdir(struct fxp_packet *fxp) {
 
   fxh = fxp_handle_get(name);
   if (fxh == NULL) {
-    uint32_t status_code = SSH2_FX_INVALID_HANDLE;
+    uint32_t status_code;
+
+    pr_trace_msg(trace_channel, 17,
+      "%s: unable to find handle for name '%s': %s", cmd->argv[0], name,
+      strerror(errno));
+
+    status_code = SSH2_FX_INVALID_HANDLE;
 
     pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s'",
       (unsigned long) status_code, fxp_strerror(status_code));
@@ -7706,30 +8138,37 @@ static int fxp_handle_readdir(struct fxp_packet *fxp) {
 
   path_list = make_array(fxp->pool, 5, sizeof(struct fxp_dirent *));
 
-  /* If blocked by <Limit LIST>/<Limit NLST>, return EOF immediately. */
-
   cmd_name = cmd->argv[0];
-  pr_cmd_set_name(cmd, C_LIST);
+  pr_cmd_set_name(cmd, "READDIR");
 
-  if (!dir_check(fxp->pool, cmd, G_DIRS, (char *) fxh->dir, NULL)) {
-    have_error = TRUE;
+  if (dir_check(fxp->pool, cmd, G_DIRS, (char *) fxh->dir, NULL) > 0) {
+    /* Explicitly allowed by <Limit READDIR> configuration. */
+    have_error = FALSE;
+
+  } else {
+    /* If blocked by <Limit LIST>/<Limit NLST>, return EOF immediately. */
+
+    pr_cmd_set_name(cmd, C_LIST);
+    if (!dir_check(fxp->pool, cmd, G_DIRS, (char *) fxh->dir, NULL)) {
+      have_error = TRUE;
+    }
+
+    if (!have_error) {
+      pr_cmd_set_name(cmd, C_NLST);
+      if (!dir_check(fxp->pool, cmd, G_DIRS, (char *) fxh->dir, NULL)) {
+        have_error = TRUE;
+      }
+    }
   }
-
-  pr_cmd_set_name(cmd, C_NLST);
-
-  if (!have_error &&
-      !dir_check(fxp->pool, cmd, G_DIRS, (char *) fxh->dir, NULL)) {
-    have_error = TRUE;
-  }
-
-  /* XXX Should we also check for MLSD here? */
-  pr_cmd_set_name(cmd, cmd_name);
 
   if (have_error) {
     uint32_t status_code = SSH2_FX_EOF;
  
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
-      "READDIR of '%s' blocked by <Limit> configuration", fxh->dir);
+      "READDIR of '%s' blocked by <Limit %s> configuration", fxh->dir,
+      cmd->argv[0]);
+
+    pr_cmd_set_name(cmd, cmd_name);
 
     pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s'",
       (unsigned long) status_code, fxp_strerror(status_code));
@@ -7746,6 +8185,8 @@ static int fxp_handle_readdir(struct fxp_packet *fxp) {
 
     return fxp_packet_write(resp);
   }
+
+  pr_cmd_set_name(cmd, cmd_name);
 
   /* Change into the directory being read, so that ".", "..", and relative
    * paths (e.g. for symlinks) get resolved properly.
@@ -8008,6 +8449,29 @@ static int fxp_handle_readlink(struct fxp_packet *fxp) {
   /* The path may have been changed by any PRE_CMD handlers. */
   path = cmd->arg;
 
+  if (!dir_check(fxp->pool, cmd, G_READ, path, NULL)) {
+    uint32_t status_code = SSH2_FX_PERMISSION_DENIED;
+
+    (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+      "READLINK of '%s' blocked by <Limit %s> configuration", path,
+      cmd->argv[0]);
+
+    pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s'",
+      (unsigned long) status_code, fxp_strerror(status_code));
+
+    fxp_status_write(&buf, &buflen, fxp->request_id, status_code,
+      fxp_strerror(status_code), NULL);
+
+    pr_cmd_dispatch_phase(cmd, POST_CMD_ERR, 0);
+    pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
+
+    resp = fxp_packet_create(fxp->pool, fxp->channel_id);
+    resp->payload = ptr;
+    resp->payload_sz = (bufsz - buflen);
+
+    return fxp_packet_write(resp);
+  }
+
   res = pr_fsio_readlink(path, data, sizeof(data) - 1);
   if (res < 0) {
     uint32_t status_code;
@@ -8076,8 +8540,34 @@ static int fxp_handle_readlink(struct fxp_packet *fxp) {
   return fxp_packet_write(resp);
 }
 
+static void fxp_trace_v6_realpath_flags(pool *p, unsigned char flags) {
+  char *flags_str = "";
+  int trace_level = 15;
+
+  if (pr_trace_get_level(trace_channel) < trace_level) {
+    return;
+  }
+
+  if (flags & SSH2_FXRP_NO_CHECK) {
+    flags_str = pstrcat(p, flags_str, *flags_str ? "|" : "",
+      "FX_REALPATH_NO_CHECK", NULL);
+  }
+
+  if (flags & SSH2_FXRP_STAT_IF) {
+    flags_str = pstrcat(p, flags_str, *flags_str ? "|" : "",
+      "FX_REALPATH_STAT_IF", NULL);
+  }
+
+  if (flags & SSH2_FXRP_STAT_ALWAYS) {
+    flags_str = pstrcat(p, flags_str, *flags_str ? "|" : "",
+      "FX_REALPATH_STAT_ALWAYS", NULL);
+  }
+
+  pr_trace_msg(trace_channel, trace_level, "REALPATH flags = %s", flags_str);
+}
+
 static int fxp_handle_realpath(struct fxp_packet *fxp) {
-  unsigned char *buf, *ptr;
+  unsigned char *buf, *ptr, realpath_flags = 0;
   char *path;
   uint32_t buflen, bufsz;
   struct stat st;
@@ -8110,27 +8600,35 @@ static int fxp_handle_realpath(struct fxp_packet *fxp) {
   cmd = fxp_cmd_alloc(fxp->pool, "REALPATH", path);
   cmd->cmd_class = CL_INFO;
 
-  if (fxp_session->client_version >= 6 &&
-      fxp->payload_sz >= sizeof(char)) {
-    char ctrl_flags;
-    char *composite_path;
+  if (fxp_session->client_version >= 6) {
+    /* See Section 8.9 of:
+     *
+     *  http://tools.ietf.org/id/draft-ietf-secsh-filexfer-13.txt
+     *
+     * for the semantics and defaults of these crazy flags.
+     */
+    realpath_flags = SSH2_FXRP_NO_CHECK;
 
-    ctrl_flags = sftp_msg_read_byte(fxp->pool, &fxp->payload,
-      &fxp->payload_sz);
-(void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION, "handle_realpath: ctrl_flags = %d", ctrl_flags);
+    if (fxp->payload_sz >= sizeof(char)) {
+      char *composite_path;
 
-    if (fxp->payload_sz > 0) {
-      composite_path = sftp_msg_read_string(fxp->pool, &fxp->payload,
+      realpath_flags = sftp_msg_read_byte(fxp->pool, &fxp->payload,
         &fxp->payload_sz);
+      fxp_trace_v6_realpath_flags(fxp->pool, realpath_flags);
+
+      if (fxp->payload_sz > 0) {
+        composite_path = sftp_msg_read_string(fxp->pool, &fxp->payload,
+          &fxp->payload_sz);
 (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION, "handle_realpath: have composite-path = '%s'", composite_path);
 
-      /* XXX One problem with the most recent SFTP Draft is that it does NOT
-       * include a count of the number of composite-paths that the client
-       * may send.  The format of the REALPATH request, currently, only allows
-       * for one composite-path element; the description of this feature
-       * implies that multiple such composite-path elements could be supplied.
-       * Sigh.  I'll need to provide feedback on this, I see.
-       */
+        /* XXX One problem with the most recent SFTP Draft is that it does NOT
+         * include a count of the number of composite-paths that the client
+         * may send.  The format of the REALPATH request, currently, only allows
+         * for one composite-path element; the description of this feature
+         * implies that multiple such composite-path elements could be supplied.
+         * Sigh.  I'll need to provide feedback on this, I see.
+         */
+      }
     }
   }
 
@@ -8143,11 +8641,27 @@ static int fxp_handle_realpath(struct fxp_packet *fxp) {
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
       "REALPATH of '%s' blocked by '%s' handler", path, cmd->argv[0]);
 
-    pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s'",
-      (unsigned long) status_code, fxp_strerror(status_code));
+    if (fxp_session->client_version <= 5 ||
+        (fxp_session->client_version >= 6 &&
+         !(realpath_flags & SSH2_FXRP_NO_CHECK))) {
+      pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s'",
+        (unsigned long) status_code, fxp_strerror(status_code));
 
-    fxp_status_write(&buf, &buflen, fxp->request_id, status_code,
-      fxp_strerror(status_code), NULL);
+      fxp_status_write(&buf, &buflen, fxp->request_id, status_code,
+        fxp_strerror(status_code), NULL);
+
+    } else {
+      uint32_t attr_flags = 0;
+
+      memset(&st, 0, sizeof(st));
+      st.st_uid = (uid_t) -1;
+      st.st_gid = (gid_t) -1;
+  
+      pr_trace_msg(trace_channel, 8, "sending response: NAME 1 %s %s",
+        path, fxp_strattrs(fxp->pool, &st, &attr_flags));
+      fxp_name_write(fxp->pool, &buf, &buflen, path, &st, "nobody",
+        "nobody");
+    }
 
     pr_cmd_dispatch_phase(cmd, POST_CMD_ERR, 0);
     pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
@@ -8180,12 +8694,28 @@ static int fxp_handle_realpath(struct fxp_packet *fxp) {
 
       status_code = fxp_errno2status(xerrno, &reason);
 
-      pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s' "
-        "('%s' [%d])", (unsigned long) status_code, reason,
-        xerrno != EOF ? strerror(xerrno) : "End of file", xerrno);
+      if (fxp_session->client_version <= 5 ||
+          (fxp_session->client_version >= 6 &&
+           !(realpath_flags & SSH2_FXRP_NO_CHECK))) {
+        pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s' "
+          "('%s' [%d])", (unsigned long) status_code, reason,
+          xerrno != EOF ? strerror(xerrno) : "End of file", xerrno);
 
-      fxp_status_write(&buf, &buflen, fxp->request_id, status_code, reason,
-        NULL);
+        fxp_status_write(&buf, &buflen, fxp->request_id, status_code, reason,
+          NULL);
+
+      } else {
+        uint32_t attr_flags = 0;
+
+        memset(&st, 0, sizeof(st));
+        st.st_uid = (uid_t) -1;
+        st.st_gid = (gid_t) -1;
+
+        pr_trace_msg(trace_channel, 8, "sending response: NAME 1 %s %s",
+          path, fxp_strattrs(fxp->pool, &st, &attr_flags));
+        fxp_name_write(fxp->pool, &buf, &buflen, path, &st, "nobody",
+          "nobody");
+      }
 
       pr_cmd_dispatch_phase(cmd, POST_CMD_ERR, 0);
       pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
@@ -8203,7 +8733,7 @@ static int fxp_handle_realpath(struct fxp_packet *fxp) {
   }
 
   /* Force a full lookup. */
-  if (!dir_check_full(fxp->pool, cmd, G_NONE, path, NULL)) {
+  if (!dir_check_full(fxp->pool, cmd, G_DIRS, path, NULL)) {
     uint32_t status_code;
     const char *reason;
     int xerrno = errno;
@@ -8218,12 +8748,29 @@ static int fxp_handle_realpath(struct fxp_packet *fxp) {
 
     status_code = fxp_errno2status(xerrno, &reason);
 
-    pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s' "
-      "('%s' [%d])", (unsigned long) status_code, reason,
-      xerrno != EOF ? strerror(xerrno) : "End of file", xerrno);
+    if (fxp_session->client_version <= 5 ||
+        (fxp_session->client_version >= 6 &&
+         !(realpath_flags & SSH2_FXRP_NO_CHECK))) {
 
-    fxp_status_write(&buf, &buflen, fxp->request_id, status_code, reason,
-      NULL);
+      pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s' "
+        "('%s' [%d])", (unsigned long) status_code, reason,
+        xerrno != EOF ? strerror(xerrno) : "End of file", xerrno);
+
+      fxp_status_write(&buf, &buflen, fxp->request_id, status_code, reason,
+        NULL);
+
+    } else {
+      uint32_t attr_flags = 0;
+
+      memset(&st, 0, sizeof(st));
+      st.st_uid = (uid_t) -1;
+      st.st_gid = (gid_t) -1;
+
+      pr_trace_msg(trace_channel, 8, "sending response: NAME 1 %s %s",
+        path, fxp_strattrs(fxp->pool, &st, &attr_flags));
+      fxp_name_write(fxp->pool, &buf, &buflen, path, &st, "nobody",
+        "nobody");
+    }
 
     pr_cmd_dispatch_phase(cmd, POST_CMD_ERR, 0);
     pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
@@ -8242,12 +8789,29 @@ static int fxp_handle_realpath(struct fxp_packet *fxp) {
 
       status_code = fxp_errno2status(xerrno, &reason);
 
-      pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s' "
-        "('%s' [%d])", (unsigned long) status_code, reason,
-        xerrno != EOF ? strerror(xerrno) : "End of file", xerrno);
+      if (fxp_session->client_version <= 5 ||
+          (fxp_session->client_version >= 6 &&
+           !(realpath_flags & SSH2_FXRP_NO_CHECK))) {
 
-      fxp_status_write(&buf, &buflen, fxp->request_id, status_code, reason,
-        NULL);
+        pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s' "
+          "('%s' [%d])", (unsigned long) status_code, reason,
+          xerrno != EOF ? strerror(xerrno) : "End of file", xerrno);
+
+        fxp_status_write(&buf, &buflen, fxp->request_id, status_code, reason,
+          NULL);
+
+      } else {
+        uint32_t attr_flags = 0;
+
+        memset(&st, 0, sizeof(st));
+        st.st_uid = (uid_t) -1;
+        st.st_gid = (gid_t) -1;
+
+        pr_trace_msg(trace_channel, 8, "sending response: NAME 1 %s %s",
+          path, fxp_strattrs(fxp->pool, &st, &attr_flags));
+        fxp_name_write(fxp->pool, &buf, &buflen, path, &st, "nobody",
+          "nobody");
+      }
 
       pr_cmd_dispatch_phase(cmd, POST_CMD_ERR, 0);
       pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
@@ -8355,7 +8919,7 @@ static int fxp_handle_remove(struct fxp_packet *fxp) {
   path = cmd->arg;
 
   cmd2 = fxp_cmd_alloc(fxp_pool, C_DELE, path);
-  if (pr_cmd_dispatch_phase(cmd2, PRE_CMD, 0) == -1) {
+  if (pr_cmd_dispatch_phase(cmd2, PRE_CMD, 0) < 0) {
     status_code = SSH2_FX_PERMISSION_DENIED;
 
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
@@ -8367,8 +8931,11 @@ static int fxp_handle_remove(struct fxp_packet *fxp) {
     fxp_status_write(&buf, &buflen, fxp->request_id, status_code,
       fxp_strerror(status_code), NULL);
 
+    pr_response_add_err(R_550, "%s: %s", path, strerror(EPERM));
     pr_cmd_dispatch_phase(cmd2, POST_CMD_ERR, 0);
     pr_cmd_dispatch_phase(cmd2, LOG_CMD_ERR, 0);
+    pr_response_clear(&resp_err_list);
+
     pr_cmd_dispatch_phase(cmd, POST_CMD_ERR, 0);
     pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
 
@@ -8385,7 +8952,7 @@ static int fxp_handle_remove(struct fxp_packet *fxp) {
   cmd_name = cmd->argv[0];
   pr_cmd_set_name(cmd, C_DELE);
 
-  if (!dir_check(fxp->pool, cmd, G_WRITE, path, NULL)) {
+  if (!dir_check_canon(fxp->pool, cmd, G_WRITE, path, NULL)) {
     status_code = SSH2_FX_PERMISSION_DENIED;
 
     pr_cmd_set_name(cmd, cmd_name);
@@ -8399,8 +8966,11 @@ static int fxp_handle_remove(struct fxp_packet *fxp) {
     fxp_status_write(&buf, &buflen, fxp->request_id, status_code,
       fxp_strerror(status_code), NULL);
 
+    pr_response_add_err(R_550, "%s: %s", path, strerror(EPERM));
     pr_cmd_dispatch_phase(cmd2, POST_CMD_ERR, 0);
     pr_cmd_dispatch_phase(cmd2, LOG_CMD_ERR, 0);
+    pr_response_clear(&resp_err_list);
+
     pr_cmd_dispatch_phase(cmd, POST_CMD_ERR, 0);
     pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
 
@@ -8414,6 +8984,8 @@ static int fxp_handle_remove(struct fxp_packet *fxp) {
   pr_cmd_set_name(cmd, cmd_name);
 
   if (fxp_path_pass_regex_filters(fxp->pool, "REMOVE", path) < 0) {
+    int xerrno = errno;
+
     status_code = fxp_errno2status(errno, NULL);
 
     pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s'",
@@ -8422,8 +8994,11 @@ static int fxp_handle_remove(struct fxp_packet *fxp) {
     fxp_status_write(&buf, &buflen, fxp->request_id, status_code,
       fxp_strerror(status_code), NULL);
 
+    pr_response_add_err(R_550, "%s: %s", path, strerror(xerrno));
     pr_cmd_dispatch_phase(cmd2, POST_CMD_ERR, 0);
     pr_cmd_dispatch_phase(cmd2, LOG_CMD_ERR, 0);
+    pr_response_clear(&resp_err_list);
+
     pr_cmd_dispatch_phase(cmd, POST_CMD_ERR, 0);
     pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
 
@@ -8450,8 +9025,11 @@ static int fxp_handle_remove(struct fxp_packet *fxp) {
     fxp_status_write(&buf, &buflen, fxp->request_id, status_code, reason,
       NULL);
 
+    pr_response_add_err(R_550, "%s: %s", path, strerror(xerrno));
     pr_cmd_dispatch_phase(cmd2, POST_CMD_ERR, 0);
     pr_cmd_dispatch_phase(cmd2, LOG_CMD_ERR, 0);
+    pr_response_clear(&resp_err_list);
+
     pr_cmd_dispatch_phase(cmd, POST_CMD_ERR, 0);
     pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
 
@@ -8478,8 +9056,11 @@ static int fxp_handle_remove(struct fxp_packet *fxp) {
     fxp_status_write(&buf, &buflen, fxp->request_id, status_code, reason,
       NULL);
 
+    pr_response_add_err(R_550, "%s: %s", path, strerror(xerrno));
     pr_cmd_dispatch_phase(cmd2, POST_CMD_ERR, 0);
     pr_cmd_dispatch_phase(cmd2, LOG_CMD_ERR, 0);
+    pr_response_clear(&resp_err_list);
+
     pr_cmd_dispatch_phase(cmd, POST_CMD_ERR, 0);
     pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
 
@@ -8505,8 +9086,11 @@ static int fxp_handle_remove(struct fxp_packet *fxp) {
     fxp_status_write(&buf, &buflen, fxp->request_id, status_code, reason,
       NULL);
 
+    pr_response_add_err(R_550, "%s: %s", path, strerror(xerrno));
     pr_cmd_dispatch_phase(cmd2, POST_CMD_ERR, 0);
     pr_cmd_dispatch_phase(cmd2, LOG_CMD_ERR, 0);
+    pr_response_clear(&resp_err_list);
+
     pr_cmd_dispatch_phase(cmd, POST_CMD_ERR, 0);
     pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
 
@@ -8529,8 +9113,10 @@ static int fxp_handle_remove(struct fxp_packet *fxp) {
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
       "error unlinking '%s': %s", real_path, strerror(xerrno));
 
+    pr_response_add_err(R_550, "%s: %s", path, strerror(xerrno));
     pr_cmd_dispatch_phase(cmd2, POST_CMD_ERR, 0);
     pr_cmd_dispatch_phase(cmd2, LOG_CMD_ERR, 0);
+    pr_response_clear(&resp_err_list);
 
     errno = xerrno;
 
@@ -8545,8 +9131,11 @@ static int fxp_handle_remove(struct fxp_packet *fxp) {
     xferlog_write(0, session.c->remote_name, st.st_size, abs_path,
       'b', 'd', 'r', session.user, 'c', "_");
 
+    pr_response_add(R_250, "%s command successful", cmd2->argv[0]);
     pr_cmd_dispatch_phase(cmd2, POST_CMD, 0);
     pr_cmd_dispatch_phase(cmd2, LOG_CMD, 0);
+    pr_response_clear(&resp_list);
+
     errno = 0;
   }
 
@@ -8883,7 +9472,7 @@ static int fxp_handle_rename(struct fxp_packet *fxp) {
   pr_cmd_dispatch_phase(cmd2, xerrno == 0 ? POST_CMD : POST_CMD_ERR, 0);
   pr_cmd_dispatch_phase(cmd2, xerrno == 0 ? LOG_CMD : LOG_CMD_ERR, 0);
 
-  session.xfer.p = pr_pool_create_sz(fxp_pool, 64);
+  session.xfer.p = make_sub_pool(fxp_pool);
   session.xfer.path = pstrdup(session.xfer.p, new_path);
   memset(&session.xfer.start_time, 0, sizeof(session.xfer.start_time));
   gettimeofday(&session.xfer.start_time, NULL);
@@ -9372,7 +9961,7 @@ static int fxp_handle_stat(struct fxp_packet *fxp) {
   cmd_name = cmd->argv[0];
   pr_cmd_set_name(cmd, "STAT");
 
-  if (!dir_check(fxp->pool, cmd, G_NONE, path, NULL)) {
+  if (!dir_check(fxp->pool, cmd, G_READ, path, NULL)) {
     uint32_t status_code = SSH2_FX_PERMISSION_DENIED;
 
     pr_cmd_set_name(cmd, cmd_name);
@@ -9738,6 +10327,10 @@ static int fxp_handle_write(struct fxp_packet *fxp) {
 
   fxh = fxp_handle_get(name);
   if (fxh == NULL) {
+    pr_trace_msg(trace_channel, 17,
+      "%s: unable to find handle for name '%s': %s", cmd->argv[0], name,
+      strerror(errno));
+
     status_code = SSH2_FX_INVALID_HANDLE;
 
     pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s'",
@@ -10078,6 +10671,10 @@ static int fxp_handle_unlock(struct fxp_packet *fxp) {
 
   fxh = fxp_handle_get(name);
   if (fxh == NULL) {
+    pr_trace_msg(trace_channel, 17,
+      "%s: unable to find handle for name '%s': %s", cmd->argv[0], name,
+      strerror(errno));
+
     status_code = SSH2_FX_INVALID_HANDLE;
 
     pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s'",

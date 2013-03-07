@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2012 The ProFTPD Project team
+ * Copyright (c) 2001-2013 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* Directory listing module for ProFTPD.
- * $Id: mod_ls.c,v 1.197 2012/10/01 21:14:35 castaglia Exp $
+ * $Id: mod_ls.c,v 1.201 2013/02/15 22:50:54 castaglia Exp $
  */
 
 #include "conf.h"
@@ -302,32 +302,38 @@ static int ls_perms(pool *p, cmd_rec *cmd, const char *path, int *hidden) {
  * By using a runtime allocation, we can use pr_config_get_server_xfer_bufsz()
  * to get the optimal buffer size for network transfers.
  */
-static char *listbuf = NULL;
+static char *listbuf = NULL, *listbuf_ptr = NULL;
 static size_t listbufsz = 0;
 
 static int sendline(int flags, char *fmt, ...) {
   va_list msg;
   char buf[PR_TUNABLE_BUFFER_SIZE+1] = {'\0'};
   int res = 0;
-  size_t listbuflen;
+  size_t buflen, listbuflen;
 
   if (listbuf == NULL) {
     listbufsz = pr_config_get_server_xfer_bufsz(PR_NETIO_IO_WR);
-    listbuf = pcalloc(session.pool, listbufsz);
+    listbuf = listbuf_ptr = pcalloc(session.pool, listbufsz);
     pr_trace_msg("data", 8, "allocated list buffer of %lu bytes",
       (unsigned long) listbufsz);
   }
 
   if (flags & LS_SENDLINE_FL_FLUSH) {
-    listbuflen = strlen(listbuf);
+    listbuflen = (listbuf_ptr - listbuf) + strlen(listbuf_ptr);
 
     if (listbuflen > 0) {
+      /* Make sure the ASCII flags are cleared from the session flags,
+       * so that the pr_data_xfer() function does not try to perform
+       * ASCII translation on this data.
+       */
+      session.sf_flags &= ~SF_ASCII_OVERRIDE;
+
       res = pr_data_xfer(listbuf, listbuflen);
       if (res < 0 &&
           errno != 0) {
         int xerrno = errno;
 
-        if (session.d) {
+        if (session.d != NULL) {
           xerrno = PR_NETIO_ERRNO(session.d->outstrm);
         }
 
@@ -335,7 +341,11 @@ static int sendline(int flags, char *fmt, ...) {
           strerror(xerrno));
       }
 
+      session.sf_flags |= SF_ASCII_OVERRIDE;
+
       memset(listbuf, '\0', listbufsz);
+      listbuf_ptr = listbuf;
+      listbuflen = 0;
       pr_trace_msg("data", 8, "flushed %lu bytes of list buffer",
         (unsigned long) listbuflen);
     }
@@ -350,15 +360,22 @@ static int sendline(int flags, char *fmt, ...) {
   buf[sizeof(buf)-1] = '\0';
 
   /* If buf won't fit completely into listbuf, flush listbuf */
-  listbuflen = strlen(listbuf);
+  listbuflen = (listbuf_ptr - listbuf) + strlen(listbuf_ptr);
 
-  if (strlen(buf) >= (listbufsz - listbuflen)) {
+  buflen = strlen(buf);
+  if (buflen >= (listbufsz - listbuflen)) {
+    /* Make sure the ASCII flags are cleared from the session flags,
+     * so that the pr_data_xfer() function does not try to perform
+     * ASCII translation on this data.
+     */
+    session.sf_flags &= ~SF_ASCII_OVERRIDE;
+
     res = pr_data_xfer(listbuf, listbuflen);
     if (res < 0 &&
         errno != 0) {
       int xerrno = errno;
 
-      if (session.d &&
+      if (session.d != NULL &&
           session.d->outstrm) {
         xerrno = PR_NETIO_ERRNO(session.d->outstrm);
       }
@@ -367,20 +384,27 @@ static int sendline(int flags, char *fmt, ...) {
         strerror(xerrno));
     }
 
+    session.sf_flags |= SF_ASCII_OVERRIDE;
+
     memset(listbuf, '\0', listbufsz);
+    listbuf_ptr = listbuf;
+    listbuflen = 0;
     pr_trace_msg("data", 8, "flushed %lu bytes of list buffer",
       (unsigned long) listbuflen);
   }
 
-  sstrcat(listbuf, buf, listbufsz);
+  sstrcat(listbuf_ptr, buf, listbufsz - listbuflen);
+  listbuf_ptr += buflen;
+
   return res;
 }
 
 static void ls_done(cmd_rec *cmd) {
   int quiet = FALSE;
 
-  if (session.sf_flags & SF_ABORT)
+  if (session.sf_flags & SF_ABORT) {
     quiet = TRUE;
+  }
 
   pr_data_close(quiet);
 }
@@ -460,7 +484,7 @@ static int listfile(cmd_rec *cmd, pool *p, const char *name) {
        * octal escape sequence equivalent.
        */
       for (i = 0, j = 0; i < display_namelen && j < printable_namelen; i++) {
-        if (!isprint((int) display_name[i])) {
+        if (!PR_ISPRINT(display_name[i])) {
           register unsigned int k;
           int replace_len = 0;
           char replace[32];
@@ -957,7 +981,7 @@ static int outputfiles(cmd_rec *cmd) {
       pr_signals_handle();
 
       if (!q->right) {
-        sstrncpy(pad, "\n", sizeof(pad));
+        sstrncpy(pad, "\r\n", sizeof(pad));
 
       } else {
         unsigned int idx = 0;
@@ -1287,7 +1311,7 @@ static int listdir(cmd_rec *cmd, pool *workp, const char *name) {
           pr_response_add(R_211, "%s:",
             pr_fs_encode_path(cmd->tmp_pool, subdir));
 
-        } else if (sendline(0, "\n%s:\n",
+        } else if (sendline(0, "\r\n%s:\r\n",
                      pr_fs_encode_path(cmd->tmp_pool, subdir)) < 0 ||
             sendline(LS_SENDLINE_FL_FLUSH, " ") < 0) {
           pop_cwd(cwd_buf, &symhold);
@@ -1369,7 +1393,7 @@ static void parse_list_opts(char **opt, int *glob_flags, int handle_plus_opts) {
    */
   ptr = *opt;
 
-  while (isspace((int) *ptr)) {
+  while (PR_ISSPACE(*ptr)) {
     pr_signals_handle();
     ptr++;
   }
@@ -1383,7 +1407,7 @@ static void parse_list_opts(char **opt, int *glob_flags, int handle_plus_opts) {
   while (*opt && **opt == '-') {
     pr_signals_handle();
 
-    while ((*opt)++ && isalnum((int) **opt)) {
+    while ((*opt)++ && PR_ISALNUM(**opt)) {
       switch (**opt) {
         case '1':
           if (strcmp(session.curr_cmd, C_STAT) != 0) {
@@ -1479,7 +1503,7 @@ static void parse_list_opts(char **opt, int *glob_flags, int handle_plus_opts) {
     ptr = *opt;
 
     while (*ptr &&
-           isspace((int) *ptr)) {
+           PR_ISSPACE(*ptr)) {
       pr_signals_handle();
       ptr++;
     }
@@ -1506,7 +1530,7 @@ static void parse_list_opts(char **opt, int *glob_flags, int handle_plus_opts) {
   while (*opt && **opt == '+') {
     pr_signals_handle();
 
-    while ((*opt)++ && isalnum((int) **opt)) {
+    while ((*opt)++ && PR_ISALNUM(**opt)) {
       switch (**opt) {
         case '1':
           opt_1 = opt_l = opt_C = 0;
@@ -1589,7 +1613,7 @@ static void parse_list_opts(char **opt, int *glob_flags, int handle_plus_opts) {
     ptr = *opt;
 
     while (*ptr &&
-           isspace((int) *ptr)) {
+           PR_ISSPACE(*ptr)) {
       pr_signals_handle();
       ptr++;
     }
@@ -1677,7 +1701,7 @@ static int dolist(cmd_rec *cmd, const char *opt, int clearflags) {
        */
       ptr = arg;
 
-      while (isspace((int) *ptr)) {
+      while (PR_ISSPACE(*ptr)) {
         pr_signals_handle();
         ptr++;
       }
@@ -1689,13 +1713,14 @@ static int dolist(cmd_rec *cmd, const char *opt, int clearflags) {
 
       while (arg && *arg == '-') {
         /* Advance to the next whitespace */
-        while (*arg != '\0' && !isspace((int) *arg))
+        while (*arg != '\0' && !PR_ISSPACE(*arg)) {
           arg++;
+        }
 
         ptr = arg;
 
         while (*ptr &&
-               isspace((int) *ptr)) {
+               PR_ISSPACE(*ptr)) {
           pr_signals_handle();
           ptr++;
         }
@@ -1911,7 +1936,7 @@ static int dolist(cmd_rec *cmd, const char *opt, int clearflags) {
                 pr_fs_encode_path(cmd->tmp_pool, *path));
 
             } else {
-              sendline(0, "\n%s:\n",
+              sendline(0, "\r\n%s:\r\n",
                 pr_fs_encode_path(cmd->tmp_pool, *path));
               sendline(LS_SENDLINE_FL_FLUSH, " ");
             }
@@ -1986,8 +2011,10 @@ static int dolist(cmd_rec *cmd, const char *opt, int clearflags) {
 
     /* Open data connection */
     if (!opt_STAT) {
-      if (pr_data_open(NULL, "file list", PR_NETIO_IO_WR, 0) < 0)
+      if (pr_data_open(NULL, "file list", PR_NETIO_IO_WR, 0) < 0) {
         return -1;
+      }
+
       session.sf_flags |= SF_ASCII_OVERRIDE;
     }
 
@@ -2060,7 +2087,7 @@ static int nlstfile(cmd_rec *cmd, const char *file) {
      * escape sequence equivalent.
      */
     for (i = 0, j = 0; i < display_namelen && j < printable_namelen; i++) {
-      if (!isprint((int) display_name[i])) {
+      if (!PR_ISPRINT(display_name[i])) {
         register unsigned int k;
         int replace_len = 0;
         char replace[32];
@@ -2102,7 +2129,7 @@ static int nlstfile(cmd_rec *cmd, const char *file) {
   }
 
   /* Be sure to flush the output */
-  res = sendline(0, "%s\n", pr_fs_encode_path(cmd->tmp_pool, display_name));
+  res = sendline(0, "%s\r\n", pr_fs_encode_path(cmd->tmp_pool, display_name));
   if (res < 0)
     return res;
 
@@ -2240,7 +2267,7 @@ static int nlstdir(cmd_rec *cmd, const char *dir) {
             pdircat(cmd->tmp_pool, dir, p, NULL));
         }
 
-        if (sendline(0, "%s\n", str) < 0) {
+        if (sendline(0, "%s\r\n", str) < 0) {
           count = -1;
 
         } else {
@@ -2262,7 +2289,7 @@ static int nlstdir(cmd_rec *cmd, const char *dir) {
         }
 
       } else {
-        if (sendline(0, "%s\n", pr_fs_encode_path(cmd->tmp_pool, p)) < 0) {
+        if (sendline(0, "%s\r\n", pr_fs_encode_path(cmd->tmp_pool, p)) < 0) {
           count = -1;
 
         } else {
@@ -2474,12 +2501,12 @@ MODRET ls_stat(cmd_rec *cmd) {
 
   /* Get to the actual argument. */
   if (*arg == '-') {
-    while (arg && *arg && !isspace((int) *arg)) {
+    while (arg && *arg && !PR_ISSPACE(*arg)) {
       arg++;
     }
   }
 
-  while (arg && *arg && isspace((int) *arg)) {
+  while (arg && *arg && PR_ISSPACE(*arg)) {
     arg++;
   }
 
@@ -2660,7 +2687,7 @@ MODRET ls_nlst(cmd_rec *cmd) {
        */
       ptr = target;
 
-      while (isspace((int) *ptr)) {
+      while (PR_ISSPACE(*ptr)) {
         pr_signals_handle();
         ptr++;
       }
@@ -2672,13 +2699,13 @@ MODRET ls_nlst(cmd_rec *cmd) {
 
       while (target && *target == '-') {
         /* Advance to the next whitespace */
-        while (*target != '\0' && !isspace((int) *target))
+        while (*target != '\0' && !PR_ISSPACE(*target))
           target++;
 
         ptr = target;
 
         while (*ptr &&
-               isspace((int) *ptr)) {
+               PR_ISSPACE(*ptr)) {
           pr_signals_handle();
           ptr++;
         }
@@ -2885,8 +2912,9 @@ MODRET ls_nlst(cmd_rec *cmd) {
 
       if (xerrno == ENOENT &&
           (list_flags & LS_FL_NO_ERROR_IF_ABSENT)) {
-        if (pr_data_open(NULL, "file list", PR_NETIO_IO_WR, 0) < 0)
+        if (pr_data_open(NULL, "file list", PR_NETIO_IO_WR, 0) < 0) {
           return PR_ERROR(cmd);
+        }
         session.sf_flags |= SF_ASCII_OVERRIDE;
         pr_response_add(R_226, _("Transfer complete"));
         ls_done(cmd);
@@ -2913,8 +2941,9 @@ MODRET ls_nlst(cmd_rec *cmd) {
             *ignore_hidden == TRUE) {
 
           if (list_flags & LS_FL_NO_ERROR_IF_ABSENT) {
-            if (pr_data_open(NULL, "file list", PR_NETIO_IO_WR, 0) < 0)
+            if (pr_data_open(NULL, "file list", PR_NETIO_IO_WR, 0) < 0) {
               return PR_ERROR(cmd);
+            }
             session.sf_flags |= SF_ASCII_OVERRIDE;
             pr_response_add(R_226, _("Transfer complete"));
             ls_done(cmd);
@@ -2943,8 +2972,9 @@ MODRET ls_nlst(cmd_rec *cmd) {
 
       if (xerrno == ENOENT &&
           (list_flags & LS_FL_NO_ERROR_IF_ABSENT)) {
-        if (pr_data_open(NULL, "file list", PR_NETIO_IO_WR, 0) < 0)
+        if (pr_data_open(NULL, "file list", PR_NETIO_IO_WR, 0) < 0) {
           return PR_ERROR(cmd);
+        }
         session.sf_flags |= SF_ASCII_OVERRIDE;
         pr_response_add(R_226, _("Transfer complete"));
         ls_done(cmd);
@@ -2959,15 +2989,17 @@ MODRET ls_nlst(cmd_rec *cmd) {
     }
 
     if (S_ISREG(st.st_mode)) {
-      if (pr_data_open(NULL, "file list", PR_NETIO_IO_WR, 0) < 0)
+      if (pr_data_open(NULL, "file list", PR_NETIO_IO_WR, 0) < 0) {
         return PR_ERROR(cmd);
+      }
       session.sf_flags |= SF_ASCII_OVERRIDE;
 
       res = nlstfile(cmd, target);
 
     } else if (S_ISDIR(st.st_mode)) {
-      if (pr_data_open(NULL, "file list", PR_NETIO_IO_WR, 0) < 0)
+      if (pr_data_open(NULL, "file list", PR_NETIO_IO_WR, 0) < 0) {
         return PR_ERROR(cmd);
+      }
       session.sf_flags |= SF_ASCII_OVERRIDE;
 
       res = nlstdir(cmd, target);

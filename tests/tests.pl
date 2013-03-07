@@ -93,6 +93,7 @@ if (scalar(@ARGV) > 0) {
     t/commands/mlst.t
     t/commands/mff.t
     t/commands/mfmt.t
+    t/commands/opts.t
     t/commands/host.t
     t/commands/site/chgrp.t
     t/commands/site/chmod.t
@@ -133,6 +134,7 @@ if (scalar(@ARGV) > 0) {
     t/config/ifdefine.t
     t/config/include.t
     t/config/listoptions.t
+    t/config/masqueradeaddress.t
     t/config/maxclients.t
     t/config/maxclientsperclass.t
     t/config/maxclientsperhost.t
@@ -150,7 +152,9 @@ if (scalar(@ARGV) > 0) {
     t/config/protocols.t
     t/config/requirevalidshell.t
     t/config/rewritehome.t
+    t/config/rlimitcpu.t
     t/config/rlimitmemory.t
+    t/config/rlimitopenfiles.t
     t/config/rootrevoke.t
     t/config/serveradmin.t
     t/config/serverident.t
@@ -262,6 +266,11 @@ if (scalar(@ARGV) > 0) {
     't/modules/mod_lang.t' => {
       order => ++$order,
       test_class => [qw(mod_lang)],
+    },
+
+    't/modules/mod_log_forensic.t' => {
+      order => ++$order,
+      test_class => [qw(mod_log_forensic)],
     },
 
     't/modules/mod_quotatab_file.t' => {
