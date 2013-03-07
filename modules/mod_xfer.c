@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2012 The ProFTPD Project team
+ * Copyright (c) 2001-2013 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,7 +26,7 @@
 
 /* Data transfer module for ProFTPD
  *
- * $Id: mod_xfer.c,v 1.307 2012/12/26 23:18:59 castaglia Exp $
+ * $Id: mod_xfer.c,v 1.320 2013/02/15 22:50:54 castaglia Exp $
  */
 
 #include "conf.h"
@@ -232,8 +232,9 @@ static char *get_cmd_from_list(char **list) {
   char *res = NULL, *dst = NULL;
   unsigned char quote_mode = FALSE;
 
-  while (**list && isspace((int) **list))
+  while (**list && PR_ISSPACE(**list)) {
     (*list)++;
+  }
 
   if (!**list)
     return NULL;
@@ -246,7 +247,7 @@ static char *get_cmd_from_list(char **list) {
   }
 
   while (**list && **list != ',' &&
-      (quote_mode ? (**list != '\"') : (!isspace((int) **list)))) {
+      (quote_mode ? (**list != '\"') : (!PR_ISSPACE(**list)))) {
 
     if (**list == '\\' && quote_mode) {
 
@@ -994,19 +995,20 @@ static int stor_complete(void) {
   return res;
 }
 
-static int get_hidden_store_path(cmd_rec *cmd, char *path, char *prefix) {
-  char *c = NULL, *hidden_path;
-  int dotcount = 0, foundslash = 0, basenamestart = 0, maxlen;
+static int get_hidden_store_path(cmd_rec *cmd, char *path, char *prefix,
+    char *suffix) {
+  char *c = NULL, *hidden_path, *parent_dir = NULL;
+  int dotcount = 0, found_slash = FALSE, basenamestart = 0, maxlen;
 
   /* We have to also figure out the temporary hidden file name for receiving
-   * this transfer.  Length is +(N+1) due to prepended prefix and "." at end.
+   * this transfer.  Length is +(N+M) due to prepended prefix and suffix.
    */
 
   /* Figure out where the basename starts */
   for (c = path; *c; ++c) {
 
     if (*c == '/') {
-      foundslash = 1;
+      found_slash = TRUE;
       basenamestart = dotcount = 0;
 
     } else if (*c == '.') {
@@ -1017,8 +1019,9 @@ static int get_hidden_store_path(cmd_rec *cmd, char *path, char *prefix) {
        * this the possible start of the basename.
        */
       if ((dotcount > 2) &&
-          !basenamestart)
+          !basenamestart) {
         basenamestart = ((unsigned long) c - (unsigned long) path) - dotcount;
+      }
 
     } else {
 
@@ -1026,8 +1029,9 @@ static int get_hidden_store_path(cmd_rec *cmd, char *path, char *prefix) {
        * we found one since the last slash, remember this as the possible
        * start of the basename.
        */
-      if (!basenamestart)
+      if (!basenamestart) {
         basenamestart = ((unsigned long) c - (unsigned long) path) - dotcount;
+      }
     }
   }
 
@@ -1042,10 +1046,10 @@ static int get_hidden_store_path(cmd_rec *cmd, char *path, char *prefix) {
     return -1;
   }
 
-  /* Add N+1 for the prefix and "." characters, plus one for a terminating
+  /* Add N+M for the prefix and suffix characters, plus one for a terminating
    * NUL.
    */
-  maxlen = strlen(path) + strlen(prefix) + 2;
+  maxlen = strlen(prefix) + strlen(path) + strlen(suffix) + 1;
 
   if (maxlen > PR_TUNABLE_PATH_MAX) {
     session.xfer.xfer_type = STOR_DEFAULT;
@@ -1059,15 +1063,17 @@ static int get_hidden_store_path(cmd_rec *cmd, char *path, char *prefix) {
   }
 
   if (pr_table_add(cmd->notes, "mod_xfer.store-hidden-path", NULL, 0) < 0) {
-    pr_log_pri(PR_LOG_NOTICE,
-      "notice: error adding 'mod_xfer.store-hidden-path': %s",
-      strerror(errno));
+    if (errno != EEXIST) {
+      pr_log_pri(PR_LOG_NOTICE,
+        "notice: error adding 'mod_xfer.store-hidden-path': %s",
+        strerror(errno));
+    }
   }
 
-  if (!foundslash) {
+  if (found_slash == FALSE) {
 
     /* Simple local file name */
-    hidden_path = pstrcat(cmd->tmp_pool, prefix, path, ".", NULL);
+    hidden_path = pstrcat(cmd->tmp_pool, prefix, path, suffix, NULL);
 
     pr_log_pri(PR_LOG_DEBUG, "HiddenStore: local path, will rename %s to %s",
       hidden_path, path);
@@ -1079,7 +1085,7 @@ static int get_hidden_store_path(cmd_rec *cmd, char *path, char *prefix) {
     hidden_path[basenamestart] = '\0';
 
     hidden_path = pstrcat(cmd->pool, hidden_path, prefix,
-      path + basenamestart, ".", NULL);
+      path + basenamestart, suffix, NULL);
 
     pr_log_pri(PR_LOG_DEBUG, "HiddenStore: complex path, will rename %s to %s",
       hidden_path, path);
@@ -1101,6 +1107,28 @@ static int get_hidden_store_path(cmd_rec *cmd, char *path, char *prefix) {
     pr_log_pri(PR_LOG_NOTICE,
       "notice: error setting 'mod_xfer.store-hidden-path': %s",
       strerror(errno));
+  }
+
+  /* Only use the O_EXCL open(2) flag if the path is NOT on an NFS-mounted
+   * filesystem (see Bug#3874).
+   */
+  if (found_slash == FALSE) {
+    parent_dir = "./";
+
+  } else if (basenamestart == 0) {
+    parent_dir = "/";
+
+  } else {
+    parent_dir = pstrndup(cmd->tmp_pool, path, basenamestart);
+  }
+
+  if (pr_fs_is_nfs(parent_dir) == TRUE) {
+    if (pr_table_add(cmd->notes, "mod_xfer.store-hidden-nfs",
+        pstrdup(cmd->pool, "1"), 0) < 0) {
+      pr_log_pri(PR_LOG_NOTICE,
+        "notice: error adding 'mod_xfer.store-hidden-nfs' note: %s",
+        strerror(errno));
+    }
   }
 
   session.xfer.xfer_type = STOR_HIDDEN;
@@ -1231,9 +1259,11 @@ MODRET xfer_pre_stor(cmd_rec *cmd) {
 
     if (pr_table_add(cmd->notes, "mod_xfer.file-modified",
         pstrdup(cmd->pool, "true"), 0) < 0) {
-      pr_log_pri(PR_LOG_NOTICE,
-        "notice: error adding 'mod_xfer.file-modified' note: %s",
-        strerror(errno));
+      if (errno != EEXIST) {
+        pr_log_pri(PR_LOG_NOTICE,
+          "notice: error adding 'mod_xfer.file-modified' note: %s",
+          strerror(errno));
+      }
     }
   }
 
@@ -1249,7 +1279,10 @@ MODRET xfer_pre_stor(cmd_rec *cmd) {
   c = find_config(CURRENT_CONF, CONF_PARAM, "HiddenStores", FALSE);
   if (c &&
       *((int *) c->argv[0]) == TRUE) {
-    char *prefix = c->argv[1];
+    char *prefix, *suffix;
+
+    prefix = c->argv[1];
+    suffix = c->argv[2];
 
     /* If we're using HiddenStores, then REST won't work. */
     if (session.restart_pos) {
@@ -1260,7 +1293,7 @@ MODRET xfer_pre_stor(cmd_rec *cmd) {
       return PR_ERROR(cmd);
     }
 
-    /* APPE is not compatible with HiddenStores either (Bug#3598) */
+    /* APPE is not compatible with HiddenStores either (Bug#3598). */
     if (session.xfer.xfer_type == STOR_APPEND) {
       pr_log_debug(DEBUG9, "HiddenStore in effect, refusing APPE upload");
       pr_response_add_err(R_550,
@@ -1269,7 +1302,7 @@ MODRET xfer_pre_stor(cmd_rec *cmd) {
       return PR_ERROR(cmd);
     }
 
-    if (get_hidden_store_path(cmd, path, prefix) < 0) {
+    if (get_hidden_store_path(cmd, path, prefix, suffix) < 0) {
       return PR_ERROR(cmd);
     }
   }
@@ -1487,8 +1520,29 @@ MODRET xfer_stor(cmd_rec *cmd) {
   pr_fs_setcwd(pr_fs_getcwd());
 
   if (session.xfer.xfer_type == STOR_HIDDEN) {
-    stor_fh = pr_fsio_open(session.xfer.path_hidden,
-      O_WRONLY|(session.restart_pos ? 0 : O_CREAT|O_EXCL));
+    void *nfs;
+    int oflags;
+
+    oflags = O_WRONLY;
+
+    if (session.restart_pos == 0) {
+      oflags |= O_CREAT;
+    }
+
+    nfs = pr_table_get(cmd->notes, "mod_xfer.store-hidden-nfs", NULL);
+    if (nfs == NULL) {
+      pr_trace_msg("fsio", 9,
+        "HiddenStores path '%s' is NOT on NFS, using O_EXCL open(2) flags",
+        session.xfer.path_hidden);
+      oflags |= O_EXCL;
+
+    } else {
+      pr_trace_msg("fsio", 9,
+        "HiddenStores path '%s' is on NFS, NOT using O_EXCL open(2) flags",
+        session.xfer.path_hidden);
+    }
+
+    stor_fh = pr_fsio_open(session.xfer.path_hidden, oflags);
     if (stor_fh == NULL) {
       ferrno = errno;
 
@@ -1736,24 +1790,31 @@ MODRET xfer_stor(cmd_rec *cmd) {
     pr_throttle_pause(nbytes_stored, TRUE);
 
     if (stor_complete() < 0) {
+      int xerrno = errno;
+
+      _log_transfer('i', 'i');
+
       /* Check errno for EDQOUT (or the most appropriate alternative).
        * (I hate the fact that FTP has a special response code just for
        * this, and that clients actually expect it.  Special cases are
        * stupid.)
        */
 #if defined(EDQUOT)
-      if (errno == EDQUOT) {
-        pr_response_add_err(R_552, "%s: %s", cmd->arg, strerror(errno));
+      if (xerrno == EDQUOT) {
+        pr_response_add_err(R_552, "%s: %s", cmd->arg, strerror(xerrno));
+        errno = xerrno;
         return PR_ERROR(cmd);
       }
 #elif defined(EFBIG)
-      if (errno == EFBIG) {
-        pr_response_add_err(R_552, "%s: %s", cmd->arg, strerror(errno));
+      if (xerrno == EFBIG) {
+        pr_response_add_err(R_552, "%s: %s", cmd->arg, strerror(xerrno));
+        errno = xerrno;
         return PR_ERROR(cmd);
       }
 #endif
 
-      pr_response_add_err(R_550, "%s: %s", cmd->arg, strerror(errno));
+      pr_response_add_err(R_550, "%s: %s", cmd->arg, strerror(xerrno));
+      errno = xerrno;
       return PR_ERROR(cmd);
     }
 
@@ -1930,9 +1991,12 @@ MODRET xfer_pre_retr(cmd_rec *cmd) {
 
   /* Otherwise everthing is good */
   if (pr_table_add(cmd->notes, "mod_xfer.retr-path",
-      pstrdup(cmd->pool, dir), 0) < 0)
-    pr_log_pri(PR_LOG_NOTICE, "notice: error adding 'mod_xfer.retr-path': %s",
-      strerror(errno));
+      pstrdup(cmd->pool, dir), 0) < 0) {
+    if (errno != EEXIST) {
+      pr_log_pri(PR_LOG_NOTICE, "notice: error adding 'mod_xfer.retr-path': %s",
+        strerror(errno));
+    }
+  }
 
   (void) xfer_prio_adjust();
   return PR_HANDLED(cmd);
@@ -2362,7 +2426,6 @@ MODRET xfer_log_stor(cmd_rec *cmd) {
 }
 
 MODRET xfer_log_retr(cmd_rec *cmd) {
-
   _log_transfer('o', 'c');
 
   /* Increment the file counters. */
@@ -2552,13 +2615,13 @@ MODRET set_displayfiletransfer(cmd_rec *cmd) {
 }
 
 MODRET set_hiddenstores(cmd_rec *cmd) {
-  int bool = -1, add_periods = TRUE;
+  int enabled = -1, add_periods = TRUE;
   config_rec *c = NULL;
 
   CHECK_ARGS(cmd, 1);
   CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL|CONF_ANON|CONF_DIR);
 
-  c = add_config_param(cmd->argv[0], 2, NULL, NULL);
+  c = add_config_param(cmd->argv[0], 3, NULL, NULL, NULL);
 
   /* Handle the case where the admin may, for some reason, want a custom
    * prefix which could also be construed to be a Boolean value by
@@ -2568,13 +2631,20 @@ MODRET set_hiddenstores(cmd_rec *cmd) {
   if ((cmd->argv[1])[0] == '.' &&
       (cmd->argv[1])[strlen(cmd->argv[1])-1] == '.') {
     add_periods = FALSE;
-    bool = -1;
+    enabled = -1;
 
   } else {
-    bool = get_boolean(cmd, 1);
+    enabled = get_boolean(cmd, 1);
   }
 
-  if (bool == -1) {
+  /* If a suffix has been configured as well, assume that we do NOT
+   * automatically want periods.
+   */
+  if (cmd->argc == 3) {
+    add_periods = FALSE;
+  }
+
+  if (enabled == -1) {
     /* If the parameter is not a Boolean parameter, assume that the
      * admin is configuring a specific prefix to use instead of the
      * default ".in.".
@@ -2591,13 +2661,23 @@ MODRET set_hiddenstores(cmd_rec *cmd) {
       c->argv[1] = pstrdup(c->pool, cmd->argv[1]);
     }
 
+    if (cmd->argc == 3) {
+      c->argv[2] = pstrdup(c->pool, cmd->argv[2]);
+
+    } else {
+      c->argv[2] = pstrdup(c->pool, ".");
+    }
+
   } else {
     c->argv[0] = pcalloc(c->pool, sizeof(int));
-    *((int *) c->argv[0]) = bool;
+    *((int *) c->argv[0]) = enabled;
 
-    if (bool) {
+    if (enabled) {
       /* The default HiddenStore prefix */
       c->argv[1] = pstrdup(c->pool, ".in.");
+
+      /* The default HiddenStores suffix. */
+      c->argv[2] = pstrdup(c->pool, ".");
     }
   }
 
@@ -3271,11 +3351,32 @@ static int xfer_sess_init(void) {
     FALSE);
   if (displayfilexfer &&
       *displayfilexfer == '/') {
+    struct stat st;
 
     displayfilexfer_fh = pr_fsio_open(displayfilexfer, O_RDONLY);
-    if (displayfilexfer_fh == NULL)
+    if (displayfilexfer_fh == NULL) {
       pr_log_debug(DEBUG6, "unable to open DisplayFileTransfer file '%s': %s",
         displayfilexfer, strerror(errno));
+
+    } else {
+      if (pr_fsio_fstat(displayfilexfer_fh, &st) < 0) {
+        pr_log_debug(DEBUG6, "unable to stat DisplayFileTransfer file '%s': %s",
+          displayfilexfer, strerror(errno));
+        pr_fsio_close(displayfilexfer_fh);
+        displayfilexfer_fh = NULL;
+
+      } else {
+        if (S_ISDIR(st.st_mode)) {
+          errno = EISDIR;
+
+          pr_log_debug(DEBUG6,
+            "unable to use DisplayFileTransfer file '%s': %s",
+            displayfilexfer, strerror(errno));
+          pr_fsio_close(displayfilexfer_fh);
+          displayfilexfer_fh = NULL;
+        }
+      }
+    }
   }
 
   return 0;

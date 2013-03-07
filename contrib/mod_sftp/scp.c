@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: scp.c,v 1.77 2013/01/03 21:51:51 castaglia Exp $
+ * $Id: scp.c,v 1.80 2013/02/27 17:26:55 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -601,7 +601,7 @@ static int recv_filesz(pool *p, uint32_t channel_id, char *size_str,
   register unsigned int i;
 
   /* The file size field could be of arbitrary length. */
-  for (i = 0, *filesz = 0; isdigit((int) size_str[i]); i++) {
+  for (i = 0, *filesz = 0; PR_ISDIGIT(size_str[i]); i++) {
     pr_signals_handle();
 
     *filesz = (*filesz * 10) + (size_str[i] - '0');
@@ -1679,7 +1679,7 @@ static int send_data(pool *p, uint32_t channel_id, struct scp_path *sp,
     }
 
     pr_trace_msg(trace_channel, 3, "sending '%s' data (%lu bytes)", sp->path,
-      (unsigned long) chunklen);
+      need_confirm ? (unsigned long) (chunklen - 1) : (unsigned long) chunklen);
 
     res = sftp_channel_write_data(p, channel_id, chunk, chunklen);
     if (res < 0) {
@@ -2089,19 +2089,28 @@ int sftp_scp_handle_packet(pool *p, void *ssh2, uint32_t channel_id,
   }
 
   if (scp_opts & SFTP_SCP_OPT_ISSRC) {
+    struct scp_path **paths;
+
     pr_proctitle_set("%s - %s: scp download", session.user,
       session.proc_prefix);
 
-    while (scp_session->path_idx < scp_session->paths->nelts) {
-      struct scp_path **paths;
+    if (scp_session->path_idx == scp_session->paths->nelts) {
+      /* Done sending our paths; need confirmation that the client received
+       * all of them.
+       */
+      return 1;
+    }
 
+    if (scp_session->path_idx < scp_session->paths->nelts) {
       pr_signals_handle();
 
       paths = scp_session->paths->elts;
 
       res = send_path(pkt->pool, channel_id, paths[scp_session->path_idx]);
-      if (res == 1) {
+      if (res < 0)
+        return -1;
 
+      if (res == 1) {
         /* If send_path() returns 1, it means we've finished that path,
          * and are ready for another.
          */
@@ -2112,27 +2121,8 @@ int sftp_scp_handle_packet(pool *p, void *ssh2, uint32_t channel_id,
           destroy_pool(session.xfer.p);
         }
         memset(&session.xfer, 0, sizeof(session.xfer));
-
-        continue;
       }
-
-      break;
     }
-
-    if (res < 0) {
-      if (scp_session->path_idx == scp_session->paths->nelts) {
-        /* If we've sent all the paths, and we're here, assume that everything
-         * is OK.  We may just have received the final "OK" ACK byte from the
-         * scp client, and have nothing more to do.
-         */
-        return 1;
-      }
-
-      return -1;
-    }
-
-    if (scp_session->path_idx != scp_session->paths->nelts)
-      return 0;
 
     /* We would normally return 1 here, to indicate that we are done with
      * the transfer.  However, doing so indicates to the channel-handling

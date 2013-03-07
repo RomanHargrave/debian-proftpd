@@ -1,4 +1,4 @@
-<!-- $Id: mod_core.html,v 1.34 2012/12/02 00:32:52 castaglia Exp $ -->
+<!-- $Id: mod_core.html,v 1.38 2013/01/10 00:21:34 castaglia Exp $ -->
 <!-- $Source: /cvsroot/proftp/proftpd/doc/modules/mod_core.html,v $ -->
 
 <html>
@@ -22,6 +22,7 @@ The <code>mod_core</code> module handles most of the core FTP commands.
   <li><a href="#AllowFilter">AllowFilter</a>
   <li><a href="#AuthOrder">AuthOrder</a>
   <li><a href="#DebugLevel">DebugLevel</a>
+  <li><a href="#DefaultAddress">DefaultAddress</a>
   <li><a href="#DenyFilter">DenyFilter</a>
   <li><a href="#DisplayChdir">DisplayChdir</a>
   <li><a href="#DisplayConnect">DisplayConnect</a>
@@ -31,11 +32,13 @@ The <code>mod_core</code> module handles most of the core FTP commands.
   <li><a href="#HideNoAccess">HideNoAccess</a>
   <li><a href="#HideUser">HideUser</a>
   <li><a href="#Include">Include</a>
+  <li><a href="#MasqueradeAddress">MasqueradeAddress</a>
   <li><a href="#MaxCommandRate">MaxCommandRate</a>
   <li><a href="#MaxInstances">MaxInstances</a>
   <li><a href="#PassivePorts">PassivePorts</a>
   <li><a href="#PathAllowFilter">PathAllowFilter</a>
   <li><a href="#PathDenyFilter">PathDenyFilter</a>
+  <li><a href="#Port">Port</a>
   <li><a href="#ProcessTitles">ProcessTitles</a>
   <li><a href="#Protocols">Protocols</a>
   <li><a href="#ScoreboardFile">ScoreboardFile</a>
@@ -53,6 +56,7 @@ The <code>mod_core</code> module handles most of the core FTP commands.
   <li><a href="#TraceOptions">TraceOptions</a>
   <li><a href="#TransferLog">TransferLog</a>
   <li><a href="#Umask">Umask</a>
+  <li><a href="#VirtualHost">&lt;VirtualHost&gt;</a>
 </ul>
 
 <hr>
@@ -169,6 +173,54 @@ and 10.  This directive will take precedence over any
 <p>
 The <a href="../howto/Logging.html">Logging</a> howto covers logging in
 greater detail.
+
+<p>
+<hr>
+<h2><a name="DefaultAddress">DefaultAddress</a></h2>
+<strong>Syntax:</strong> DefaultAddress <em>ip-address|dns-name</em> <em>[ip-address|dns-name ...]</em><br>
+<strong>Default:</strong> None<br>
+<strong>Context:</strong> &quot;server config&quot;<br>
+<strong>Module:</strong> mod_core<br>
+<strong>Compatibility:</strong> 1.2.7rc1 and later
+
+<p>
+The <code>DefaultAddress</code> directive sets the the address to which the
+main server instance (<i>i.e.</i> the server configured by the "server config"
+context) will bind.  The default behaviour is to select whatever IP address
+is reported by the operating system as the primary IP address.
+
+<p>
+Starting with <code>proftpd-1.3.0rc1</code>, it is possible to use more than
+one FQDN or IP address.
+
+<p>
+Examples
+<pre>
+  ServerName "Default FTP Server"
+  Port 21
+
+  # We want the main server instance to listen on a specific IP
+  DefaultAddress 192.168.10.30
+
+  # Since 1.3.0rc1 it's also possible to use the following:
+  DefaultAddress 192.168.10.30 my.domain.tld
+</pre>
+
+<p>
+In <code>proftpd-1.3.5rc1</code>, the <code>DefaultAddress</code> directive
+also handles names which indicates the <em>device-name</em> (or
+<em>interface-name</em>); the IP address associated with this device/interface
+will be used.  For example, you can use:
+<pre>
+  DefaultAddress eth0
+</pre>
+Using the device/interface name is useful in cases where the same
+<code>proftpd.conf</code> file is going to be deployed to multiple different
+machines, which will have the same device/interface names but different IP
+addresses.
+
+<p>
+See also: <a href="VirtualHost"><code>&lt;VirtualHost&gt;</code></a>
 
 <p>
 <hr>
@@ -484,6 +536,38 @@ Examples:
 
 <p>
 <hr>
+<h2><a name="MasqueradeAddress">MasqueradeAddress</a></h2>
+<strong>Syntax:</strong> MasqueradeAddress <em>ip-address|dns-name|device-name</em><br>
+<strong>Default:</strong> None<br>
+<strong>Context:</strong> server config, <code>&lt;VirtualHost&gt;</code><br>
+<strong>Module:</strong> mod_core<br>
+<strong>Compatibility:</strong> 1.2.2 and later
+
+<p>
+The <code>MasqueradeAddress</code> directive causes the server to display the
+network information for the specified IP address or DNS hostname to the client
+in the responses to <code>PASV</code> and <code>EPSV</code> FTP commands, on
+the assumption that that IP address or DNS host is acting as a NAT gateway or
+port forwarder for the server.  For example:
+<pre>
+  MasqueradeAddress nat-gw.mydomain.com 
+</pre>
+
+<p>
+The <code>MasqueradeAddress</code> directive also handles a parameter which
+indicates the <em>device-name</em> (or <em>interface-name</em>); the IP address
+associated with this device/interface will be used.  For example, you can
+use:
+<pre>
+  MasqueradeAddress eth0
+</pre>
+Using the device/interface name is useful in cases where the same
+<code>proftpd.conf</code> file is going to be deployed to multiple different
+machines, which will have the same device/interface names but different IP
+addresses.
+
+<p>
+<hr>
 <h2><a name="MaxCommandRate">MaxCommandRate</a></h2>
 <strong>Syntax:</strong> MaxCommandRate <em>count</em> <em>[secs]</em><br>
 <strong>Default:</strong> None<br>
@@ -667,6 +751,38 @@ greater detail.
 
 <p>
 See also: <a href="#PathAllowFilter"><code>PathAllowFilter</code></a>
+
+<p>
+<hr>
+<h2><a name="Port">Port</a></h2>
+<strong>Syntax:</strong> Port <em>number</em><br>
+<strong>Default:</strong> Port 21<br>
+<strong>Context:</strong> server config, <code>&lt;VirtualHost&gt;</code><br>
+<strong>Module:</strong> mod_core<br>
+<strong>Compatibility:</strong> 0.99.0 and later
+
+<p>
+The <code>Port</code> directive configures the TCP port to which
+<code>proftpd</code> will listen while running in standalone mode.  This
+directive has <em>no effect</em> when used on a server running in inetd mode;
+see <a href="#ServerType"><code>ServerType</code></a>.  The directive can be
+used in conjunction with
+<a href="#VirtualHost"><code>&lt;VirtualHost&gt;</code></a> in order to run a
+virtual server on the same IP address as the master server, but listening on a
+different port.
+
+<p>
+For any server, either <code>&lt;VirtualHost&gt;</code> <i>or</i> "server
+config", using a <em>number</em> value of zero (0) will effectively
+disable/turn off that server:
+<pre>
+  &lt;VirtualHost ...&gt;
+    # This virtual server is disabled because of this Port setting
+    Port 0
+
+    ...
+  &lt;/VirtualHost&gt;
+</pre>
 
 <p>
 <hr>
@@ -1331,6 +1447,92 @@ umasks in greater detail.
 
 <p>
 <hr>
+<h2><a name="VirtualHost">&lt;VirtualHost&gt;</a></h2>
+<strong>Syntax:</strong> &lt;VirtualHost <em>ip-address|dns-name [ip-address|dns-name ...]</em>&gt;<br>
+<strong>Default:</strong> None<br>
+<strong>Context:</strong> &quot;server config&quot;<br>
+<strong>Module:</strong> mod_core<br>
+<strong>Compatibility:</strong> 0.99.0 and later
+
+<p>
+The <code>&lt;VirtualHost&gt;</code> configuration section is used to create
+an independent set of configuration directives that apply to a <i>particular
+hostname or IP address</i>.  It is often used in conjunction with system level
+IP aliasing or dummy network interfaces in order to establish one or more
+<em>virtual</em> servers which all run on the same physical machine.  The
+section is terminated with a <code>&lt;/VirtualHost&gt;</code> directive.
+
+<p>
+By using the <a href="#Port"><code>Port</code></a> directive inside a
+<code>&lt;VirtualHost&gt;</code> section, it is possible to create a virtual
+server which uses the same IP address as the master server, <i>but</i>
+which listens on a <em>different</em> TCP port  (Note, however, that this
+approach is incompatible with a
+<a href="#ServerType"><code>ServerType</code></a> of "inetd").
+
+<p>
+When <code>proftpd</code> starts up, virtual server connections are handled in
+one of two ways, depending on the
+<a href="#ServerType"><code>ServerType</code></a> setting:
+<ul>
+  <li><em>inetd</em>
+    <p>
+    The daemon examines the destination address and port of the incoming
+    connection being handed off from <code>inetd/xinetd</code>.  If the
+    connection matches one of the configured <code>&lt;VirtualHost&gt;</code>
+    sections, the connection is handled by that matching configuration. If no
+    <code>&lt;VirtualHost&gt;</code> section matches, and the main server does
+    not match, the client is informed that no server is available to handle
+    their requests, and the client is disconnected.
+  </li>
+
+  <p>
+  <li><em>standalone</em>
+    <p>
+    After parsing the configuration file, the daemon begins listening for
+    connections on all configured ports, spawning child processes as necessary
+    to handle connections for either the main server or any
+    <code>&lt;VirtualHost&gt;</code> sections.
+
+    <p>
+    Because of the method that the daemon uses to listen for connections when
+    in standalone mode, it is possible to support an exceedingly large number
+    of virtual servers, potentially exceeding the number of per-process file
+    descriptors.  This is due to the fact that a single file descriptor is used
+    to listen to each configured port, regardless of the number of addresses
+    being monitored.  Note that it may be necessary to increase the
+    <a href="#TCPBacklog"><code>TCPBackLog</code></a> value on heavily loaded
+    servers in order to avoid kernel-rejected client connections; clients
+    will receive a "Connection refused" error when this condition happens.
+  </li>
+</ul>
+
+<p>
+Starting with <code>proftpd-1.3.0rc1</code>, it is possible to use more than
+one DNS name or IP address.  And starting with <code>proftpd-1.3.5rc1</code>,
+a device/interface name can also be used.
+
+<p>
+Examples:
+<pre>
+  &lt;VirtualHost host1.domain.com host2.domain.com&gt;
+    ...
+  &lt;/VirtualHost&gt;
+
+  # Establish a virtual server for the eth1 interface
+  &lt;VirtualHost eth1&gt;
+    ...
+  &lt;/VirtualHost&gt;
+
+</pre>
+The virtual server <a href="../howto/Vhost.html">howto</a> also talks about
+virtual servers in greater detail.
+
+<p>
+See also: <a href="#DefaultAddress"><code>DefaultAddress</code></a>
+
+<p>
+<hr>
 <h2><a name="Installation">Installation</a></h2>
 The <code>mod_core</code> module is <b>always</b> installed.
 
@@ -1338,12 +1540,12 @@ The <code>mod_core</code> module is <b>always</b> installed.
 <hr><br>
 
 Author: <i>$Author: castaglia $</i><br>
-Last Updated: <i>$Date: 2012/12/02 00:32:52 $</i><br>
+Last Updated: <i>$Date: 2013/01/10 00:21:34 $</i><br>
 
 <br><hr>
 
 <font size=2><b><i>
-&copy; Copyright 2000-2012 The ProFTPD Project<br>
+&copy; Copyright 2000-2013 The ProFTPD Project<br>
  All Rights Reserved<br>
 </i></b></font>
 

@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2012 The ProFTPD Project team
+ * Copyright (c) 2001-2013 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* ProFTPD logging support.
- * $Id: log.c,v 1.112 2012/05/20 20:38:06 castaglia Exp $
+ * $Id: log.c,v 1.116 2013/02/25 20:27:29 castaglia Exp $
  */
 
 #include "conf.h"
@@ -276,47 +276,51 @@ int pr_log_openfile(const char *log_file, int *log_fd, mode_t log_mode) {
 int pr_log_vwritefile(int logfd, const char *ident, const char *fmt,
     va_list msg) {
   char buf[PR_TUNABLE_BUFFER_SIZE] = {'\0'};
-  time_t timestamp;
-  struct tm *t = NULL;
-  size_t buflen;
+  struct timeval now;
+  struct tm *tm = NULL;
+  size_t buflen, len;
+  unsigned long millis;
 
   if (logfd < 0) {
     errno = EINVAL;
     return -1;
   }
 
-  timestamp = time(NULL);
-
-  t = pr_localtime(NULL, &timestamp);
-  if (t == NULL) {
+  gettimeofday(&now, NULL);
+  tm = pr_localtime(NULL, (const time_t *) &(now.tv_sec));
+  if (tm == NULL) {
     return -1;
   }
 
   /* Prepend the timestamp */
-  strftime(buf, sizeof(buf), "%b %d %H:%M:%S ", t);
+  len = strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", tm);
+  buflen = len;
   buf[sizeof(buf)-1] = '\0';
 
+  /* Convert microsecs to millisecs. */
+  millis = now.tv_usec / 1000;
+
+  len = snprintf(buf + buflen, sizeof(buf) - len, ",%03lu ", millis);
+  buflen += len;
+
   /* Prepend a small header */
-  buflen = strlen(buf);
-  snprintf(buf + buflen, sizeof(buf) - buflen, "%s[%u]: ", ident,
+  len = snprintf(buf + buflen, sizeof(buf) - buflen, "%s[%u]: ", ident,
     (unsigned int) (session.pid ? session.pid : getpid()));
+  buflen += len;
   buf[sizeof(buf)-1] = '\0';
 
   /* Affix the message */
-  buflen = strlen(buf);
-  vsnprintf(buf + buflen, sizeof(buf) - buflen - 1, fmt, msg);
-
+  len = vsnprintf(buf + buflen, sizeof(buf) - buflen - 1, fmt, msg);
+  buflen += len;
   buf[sizeof(buf)-1] = '\0';
 
-  buflen = strlen(buf);
   if (buflen < (sizeof(buf) - 1)) {
-    buf[buflen] = '\n';
+    buf[buflen++] = '\n';
 
   } else {
     buf[sizeof(buf)-2] = '\n';
+    buflen++;
   }
-
-  buflen = strlen(buf);
 
   pr_log_event_generate(PR_LOG_TYPE_UNSPEC, logfd, -1, buf, buflen);
 
@@ -442,32 +446,41 @@ static void log_write(int priority, int f, char *s, int discard) {
   if (!discard &&
       (logstderr || !main_server)) {
     char buf[LOGBUFFER_SIZE] = {'\0'};
-    size_t buflen;
-    time_t now = time(NULL);
+    size_t buflen, len;
+    struct timeval now;
     struct tm *tm = NULL;
+    unsigned long millis;
 
-    tm = pr_localtime(NULL, &now);
+    gettimeofday(&now, NULL);
+    tm = pr_localtime(NULL, (const time_t *) &(now.tv_sec));
     if (tm == NULL) {
       return;
     }
 
-    strftime(buf, sizeof(buf)-1, "%b %d %H:%M:%S ", tm);
+    len = strftime(buf, sizeof(buf)-1, "%Y-%m-%d %H:%M:%S", tm);
+    buflen = len;
     buf[sizeof(buf)-1] = '\0';
-    buflen = strlen(buf);
+
+    /* Convert microsecs to millisecs. */
+    millis = now.tv_usec / 1000;
+
+    len = snprintf(buf + buflen, sizeof(buf) - len, ",%03lu ", millis);
+    buflen += len;
+    buf[sizeof(buf)-1] = '\0';
 
     if (*serverinfo) {
-      snprintf(buf + buflen, sizeof(buf) - buflen,
-               "%s proftpd[%u] %s: %s\n", systemlog_host,
-               (unsigned int) (session.pid ? session.pid : getpid()),
-               serverinfo, s);
+      len = snprintf(buf + buflen, sizeof(buf) - buflen,
+        "%s proftpd[%u] %s: %s\n", systemlog_host,
+        (unsigned int) (session.pid ? session.pid : getpid()), serverinfo, s);
+
     } else {
-      snprintf(buf + buflen, sizeof(buf) - buflen,
-               "%s proftpd[%u]: %s\n", systemlog_host,
-               (unsigned int) (session.pid ? session.pid : getpid()), s);
+      len = snprintf(buf + buflen, sizeof(buf) - buflen,
+        "%s proftpd[%u]: %s\n", systemlog_host,
+        (unsigned int) (session.pid ? session.pid : getpid()), s);
     }
 
+    buflen += len;
     buf[sizeof(buf)-1] = '\0';
-    buflen = strlen(buf);
 
     pr_log_event_generate(PR_LOG_TYPE_SYSTEMLOG, STDERR_FILENO, priority,
       buf, buflen);
@@ -478,8 +491,8 @@ static void log_write(int priority, int f, char *s, int discard) {
 
   if (syslog_discard) {
     /* Only return now if we don't have any log listeners. */
-    if (pr_log_event_listening(PR_LOG_TYPE_SYSLOG) == FALSE &&
-        pr_log_event_listening(PR_LOG_TYPE_SYSTEMLOG) == FALSE) {
+    if (pr_log_event_listening(PR_LOG_TYPE_SYSLOG) <= 0 &&
+        pr_log_event_listening(PR_LOG_TYPE_SYSTEMLOG) <= 0) {
       return;
     }
   }
@@ -489,40 +502,49 @@ static void log_write(int priority, int f, char *s, int discard) {
       priority > *max_priority) {
 
     /* Only return now if we don't have any log listeners. */
-    if (pr_log_event_listening(PR_LOG_TYPE_SYSLOG) == FALSE &&
-        pr_log_event_listening(PR_LOG_TYPE_SYSTEMLOG) == FALSE) {
+    if (pr_log_event_listening(PR_LOG_TYPE_SYSLOG) <= 0 &&
+        pr_log_event_listening(PR_LOG_TYPE_SYSTEMLOG) <= 0) {
       return;
     }
   }
 
   if (systemlog_fd != -1) {
     char buf[LOGBUFFER_SIZE] = {'\0'};
-    size_t buflen;
-    time_t tt = time(NULL);
-    struct tm *t;
+    size_t buflen, len;
+    struct timeval now;
+    struct tm *tm;
+    unsigned long millis;
 
-    t = pr_localtime(NULL, &tt);
-    if (t == NULL) {
+    gettimeofday(&now, NULL);
+    tm = pr_localtime(NULL, (const time_t *) &(now.tv_sec));
+    if (tm == NULL) {
       return;
     }
 
-    strftime(buf, sizeof(buf), "%b %d %H:%M:%S ", t);
+    len = strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", tm);
+    buflen = len;
     buf[sizeof(buf) - 1] = '\0';
-    buflen = strlen(buf);
+
+    /* Convert microsecs to millisecs. */
+    millis = now.tv_usec / 1000;
+
+    len = snprintf(buf + buflen, sizeof(buf) - len, ",%03lu ", millis);
+    buflen += len;
+    buf[sizeof(buf) - 1] = '\0';
 
     if (*serverinfo) {
-      snprintf(buf + buflen, sizeof(buf) - buflen,
-	       "%s proftpd[%u] %s: %s\n", systemlog_host,
-	       (unsigned int) (session.pid ? session.pid : getpid()),
-               serverinfo, s);
+      len = snprintf(buf + buflen, sizeof(buf) - buflen,
+        "%s proftpd[%u] %s: %s\n", systemlog_host,
+        (unsigned int) (session.pid ? session.pid : getpid()), serverinfo, s);
+
     } else {
-      snprintf(buf + buflen, sizeof(buf) - buflen,
-	       "%s proftpd[%u]: %s\n", systemlog_host,
-	       (unsigned int) (session.pid ? session.pid : getpid()), s);
+      len = snprintf(buf + buflen, sizeof(buf) - buflen,
+        "%s proftpd[%u]: %s\n", systemlog_host,
+        (unsigned int) (session.pid ? session.pid : getpid()), s);
     }
 
-    buf[sizeof(buf) - 1] = '\0';
-    buflen = strlen(buf);
+    buflen += len;
+    buf[sizeof(buf)-1] = '\0';
 
     pr_log_event_generate(PR_LOG_TYPE_SYSTEMLOG, systemlog_fd, priority,
       buf, buflen);
@@ -673,8 +695,8 @@ void pr_log_debug(int level, const char *fmt, ...) {
   if (debug_level < level) {
     discard = TRUE;
 
-    if (pr_log_event_listening(PR_LOG_TYPE_SYSLOG) == FALSE &&
-        pr_log_event_listening(PR_LOG_TYPE_SYSTEMLOG) == FALSE) {
+    if (pr_log_event_listening(PR_LOG_TYPE_SYSLOG) <= 0 &&
+        pr_log_event_listening(PR_LOG_TYPE_SYSTEMLOG) <= 0) {
       return;
     }
   }
@@ -698,27 +720,27 @@ static const char *get_log_event_name(unsigned int log_type) {
 
   switch (log_type) {
     case PR_LOG_TYPE_UNSPEC:
-      event_name = "core.log.unspec";
+      event_name = PR_LOG_NAME_UNSPEC;
       break;
 
     case PR_LOG_TYPE_XFERLOG:
-      event_name = "core.log.xferlog";
+      event_name = PR_LOG_NAME_XFERLOG;
       break;
 
     case PR_LOG_TYPE_SYSLOG:
-      event_name = "core.log.syslog"; 
+      event_name = PR_LOG_NAME_SYSLOG;
       break;
 
     case PR_LOG_TYPE_SYSTEMLOG:
-      event_name = "core.log.systemlog"; 
+      event_name = PR_LOG_NAME_SYSTEMLOG;
       break;
 
     case PR_LOG_TYPE_EXTLOG:
-      event_name = "core.log.extendedlog"; 
+      event_name = PR_LOG_NAME_EXTLOG;
       break;
 
     case PR_LOG_TYPE_TRACELOG:
-      event_name = "core.log.tracelog"; 
+      event_name = PR_LOG_NAME_TRACELOG;
       break;
 
     default:
@@ -740,7 +762,7 @@ int pr_log_event_generate(unsigned int log_type, int log_fd, int log_level,
     return -1;
   }
 
-  if (pr_log_event_listening(log_type) == FALSE) {
+  if (pr_log_event_listening(log_type) <= 0) {
     errno = ENOENT;
     return -1;
   }

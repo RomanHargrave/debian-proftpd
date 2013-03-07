@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2003-2012 The ProFTPD Project team
+ * Copyright (c) 2003-2013 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@
  */
 
 /* Home-on-demand support
- * $Id: mkhome.c,v 1.18 2012/09/05 16:40:58 castaglia Exp $
+ * $Id: mkhome.c,v 1.22 2013/02/27 22:50:04 castaglia Exp $
  */
 
 #include "conf.h"
@@ -92,8 +92,6 @@ static int create_path(pool *p, const char *path, const char *user,
     errno = EEXIST;
     return -1;
   }
-
-  pr_event_generate("core.create-home", user);
 
   /* The special-case values of -1 for dir UID/GID mean that the destination
    * UID/GID should be used for the parent directories.
@@ -295,6 +293,8 @@ int create_home(pool *p, const char *home, const char *user, uid_t uid,
     PRIVS_ROOT
   }
 
+  pr_event_generate("core.creating-home", user);
+
   res = create_path(p, home, user, dir_uid, dir_gid, dir_mode,
     dst_uid, dst_gid, dst_mode);
 
@@ -316,9 +316,19 @@ int create_home(pool *p, const char *home, const char *user, uid_t uid,
       skel_dir, home);
     pr_log_debug(DEBUG4, "CreateHome: copying skel files from '%s' into '%s'",
       skel_dir, home);
+
+    pr_event_generate("core.copying-skel", user);
+
     if (copy_dir(p, skel_dir, home, uid, gid) < 0) {
       pr_log_debug(DEBUG4, "CreateHome: error copying skel files");
+
+    } else {
+      pr_event_generate("core.copied-skel", user);
     }
+  }
+
+  if (res == 0) {
+    pr_event_generate("core.created-home", user);
   }
 
   PRIVS_RELINQUISH

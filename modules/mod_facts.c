@@ -1,7 +1,7 @@
 /*
  * ProFTPD: mod_facts -- a module for handling "facts" [RFC3659]
  *
- * Copyright (c) 2007-2012 The ProFTPD Project
+ * Copyright (c) 2007-2013 The ProFTPD Project
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -22,7 +22,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: mod_facts.c,v 1.54 2012/12/28 23:20:59 castaglia Exp $
+ * $Id: mod_facts.c,v 1.59 2013/02/22 07:06:07 castaglia Exp $
  */
 
 #include "conf.h"
@@ -294,7 +294,7 @@ static size_t facts_mlinfo_fmt(struct mlinfo *info, char *buf, size_t bufsz) {
  * channel, wherease MLSD's output is sent via a data transfer, much like
  * LIST or NLST.
  */
-static char *mlinfo_buf = NULL;
+static char *mlinfo_buf = NULL, *mlinfo_bufptr = NULL;
 static size_t mlinfo_bufsz = 0;
 static size_t mlinfo_buflen = 0;
 
@@ -307,6 +307,7 @@ static void facts_mlinfobuf_init(void) {
   }
 
   memset(mlinfo_buf, '\0', mlinfo_bufsz);
+  mlinfo_bufptr = mlinfo_buf;
   mlinfo_buflen = 0;
 }
 
@@ -323,7 +324,8 @@ static void facts_mlinfobuf_add(struct mlinfo *info) {
     (void) facts_mlinfobuf_flush();
   }
 
-  sstrcat(mlinfo_buf, buf, mlinfo_bufsz);
+  sstrcat(mlinfo_bufptr, buf, mlinfo_bufsz - mlinfo_buflen);
+  mlinfo_bufptr += buflen;
   mlinfo_buflen += buflen;
 }
 
@@ -331,12 +333,20 @@ static void facts_mlinfobuf_flush(void) {
   if (mlinfo_buflen > 0) {
     int res;
 
+    /* Make sure the ASCII flags are cleared from the session flags,
+     * so that the pr_data_xfer() function does not try to perform
+     * ASCII translation on this data.
+     */
+    session.sf_flags &= ~SF_ASCII_OVERRIDE;
+
     res = pr_data_xfer(mlinfo_buf, mlinfo_buflen);
     if (res < 0 &&
         errno != 0) {
       pr_log_debug(DEBUG3, MOD_FACTS_VERSION
         ": error transferring data: [%d] %s", errno, strerror(errno));
     }
+
+    session.sf_flags |= SF_ASCII_OVERRIDE;
   }
 
   facts_mlinfobuf_init();
@@ -381,8 +391,12 @@ static int facts_mlinfo_get(struct mlinfo *info, const char *path,
       pr_fs_clear_cache();
       res = pr_fsio_stat(path, &target_st);
       if (res < 0) {
+        int xerrno = errno;
+
         pr_log_debug(DEBUG4, MOD_FACTS_VERSION ": error stat'ing '%s': %s",
-          path, strerror(errno));
+          path, strerror(xerrno));
+
+        errno = xerrno;
         return -1;
       }
 
@@ -442,7 +456,12 @@ static int facts_mlinfo_get(struct mlinfo *info, const char *path,
         }
 
       } else {
-        info->type = "file";
+        if (S_ISDIR(target_st.st_mode)) {
+          info->type = "dir";
+
+        } else {
+          info->type = "file";
+        }
       }
 
     } else {
@@ -1138,8 +1157,17 @@ MODRET facts_mlsd(cmd_rec *cmd) {
 
   /* Determine whether to display symlinks as such. */
   ptr = get_param_ptr(TOPLEVEL_CONF, "ShowSymlinks", FALSE);
-  if (ptr &&
-      *ptr == TRUE) {
+  if (ptr != NULL) {
+    if (*ptr == TRUE) {
+      flags |= FACTS_MLINFO_FL_SHOW_SYMLINKS;
+
+      if (facts_mlinfo_opts & FACTS_MLINFO_FL_SHOW_SYMLINKS_USE_SLINK) {
+        flags |= FACTS_MLINFO_FL_SHOW_SYMLINKS_USE_SLINK;
+      }
+    }
+
+  } else {
+    /* ShowSymlinks is documented as being 'on' by default. */
     flags |= FACTS_MLINFO_FL_SHOW_SYMLINKS;
 
     if (facts_mlinfo_opts & FACTS_MLINFO_FL_SHOW_SYMLINKS_USE_SLINK) {
@@ -1282,6 +1310,15 @@ MODRET facts_mlsd(cmd_rec *cmd) {
 }
 
 MODRET facts_mlsd_cleanup(cmd_rec *cmd) {
+  const char *proto;
+
+  proto = pr_session_get_protocol(0);
+
+  /* Ignore this for SFTP connections. */
+  if (strncmp(proto, "sftp", 5) == 0) {
+    return PR_DECLINED(cmd);
+  }
+
   if (session.xfer.p) {
     destroy_pool(session.xfer.p);
   }

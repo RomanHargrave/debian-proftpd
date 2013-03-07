@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2012 The ProFTPD Project team
+ * Copyright (c) 2001-2013 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* House initialization and main program loop
- * $Id: main.c,v 1.449 2012/06/06 18:18:02 castaglia Exp $
+ * $Id: main.c,v 1.454 2013/02/15 22:39:00 castaglia Exp $
  */
 
 #include "conf.h"
@@ -784,13 +784,15 @@ static cmd_rec *make_ftp_cmd(pool *p, char *buf, int flags) {
   /* Be pedantic (and RFC-compliant) by not allowing leading whitespace
    * in an issued FTP command.  Will this cause troubles with many clients?
    */
-  if (isspace((int) buf[0]))
+  if (PR_ISSPACE(buf[0])) {
     return NULL;
+  }
 
   /* Nothing there...bail out. */
   wrd = pr_str_get_word(&cp, str_flags);
-  if (wrd == NULL)
+  if (wrd == NULL) {
     return NULL;
+  }
 
   subpool = make_sub_pool(p);
   cmd = (cmd_rec *) pcalloc(subpool, sizeof(cmd_rec));
@@ -950,9 +952,6 @@ static void core_restart_cb(void *d1, void *d2, void *d3, void *d4) {
      */
     endpwent();
     endgrent();
-
-    /* Set the (possibly new) resource limits. */
-    set_daemon_rlimits();
 
     if (fixup_servers(server_list) < 0) {
       pr_log_pri(PR_LOG_ERR, "Fatal: error processing configuration file '%s'",
@@ -1368,9 +1367,6 @@ static void fork_server(int fd, conn_t *l, unsigned char nofork) {
 
   /* Prepare the Timers API. */
   timers_init();
-
-  /* Set the per-child resource limits. */
-  set_session_rlimits();
 
   /* Inform all the modules that we are now a child */
   pr_log_debug(DEBUG7, "performing module session initializations");
@@ -1871,7 +1867,7 @@ static void handle_stacktrace_signal(int signo, siginfo_t *info, void *ptr) {
   ucontext_t *uc = (ucontext_t *) ptr;
   void *trace[PR_TUNABLE_CALLER_DEPTH];
   char **strings;
-  size_t tracesz;
+  int tracesz;
 
   /* Call the "normal" signal handler. */
   table_handling_signal(TRUE);
@@ -1880,6 +1876,9 @@ static void handle_stacktrace_signal(int signo, siginfo_t *info, void *ptr) {
   pr_log_pri(PR_LOG_ERR, "-----BEGIN STACK TRACE-----");
 
   tracesz = backtrace(trace, PR_TUNABLE_CALLER_DEPTH);
+  if (tracesz < 0) {
+    pr_log_pri(PR_LOG_ERR, "backtrace(3) error: %s", strerror(errno));
+  }
 
   /* Overwrite sigaction with caller's address */
 #if defined(REG_EIP)
@@ -1889,6 +1888,9 @@ static void handle_stacktrace_signal(int signo, siginfo_t *info, void *ptr) {
 #endif
 
   strings = backtrace_symbols(trace, tracesz);
+  if (strings == NULL) {
+    pr_log_pri(PR_LOG_ERR, "backtrace_symbols(3) error: %s", strerror(errno));
+  }
 
   /* Skip first stack frame; it just points here. */
   for (i = 1; i < tracesz; ++i) {
@@ -2234,264 +2236,6 @@ static void install_signal_handlers(void) {
     pr_log_pri(PR_LOG_NOTICE,
       "unable to block signal set: %s", strerror(errno));
   }
-}
-
-void set_daemon_rlimits(void) {
-  config_rec *c = NULL;
-  struct rlimit rlim;
-
-  if (getrlimit(RLIMIT_CORE, &rlim) < 0)
-    pr_log_pri(PR_LOG_ERR, "error: getrlimit(RLIMIT_CORE): %s",
-      strerror(errno));
-
-  else {
-#ifdef PR_DEVEL_COREDUMP
-    rlim.rlim_cur = rlim.rlim_max = RLIM_INFINITY;
-#else
-    rlim.rlim_cur = rlim.rlim_max = 0;
-#endif /* PR_DEVEL_COREDUMP */
-
-    PRIVS_ROOT
-    if (setrlimit(RLIMIT_CORE, &rlim) < 0) {
-      int xerrno = errno;
-
-      PRIVS_RELINQUISH
-      pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_CORE): %s",
-        strerror(xerrno));
-      return;
-    }
-    PRIVS_RELINQUISH
-  }
-
-  /* Now check for the configurable resource limits */
-  c = find_config(main_server->conf, CONF_PARAM, "RLimitCPU", FALSE);
-
-#ifdef RLIMIT_CPU
-  while (c) {
-    /* Does this limit apply to the daemon? */
-    if (c->argv[1] == NULL ||
-        strncmp(c->argv[1], "daemon", 7) == 0) {
-      struct rlimit *cpu_rlimit = (struct rlimit *) c->argv[0];
-
-      PRIVS_ROOT
-      if (setrlimit(RLIMIT_CPU, cpu_rlimit) < 0) {
-        int xerrno = errno;
-
-        PRIVS_RELINQUISH
-        pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_CPU): %s",
-          strerror(xerrno));
-        return;
-      }
-      PRIVS_RELINQUISH
-
-      pr_log_debug(DEBUG2, "set RLimitCPU for daemon");
-    }
-
-    c = find_config_next(c, c->next, CONF_PARAM, "RLimitCPU", FALSE);
-  }
-#endif /* defined RLIMIT_CPU */
-
-  c = find_config(main_server->conf, CONF_PARAM, "RLimitMemory", FALSE);
-
-#if defined(RLIMIT_DATA) || defined(RLIMIT_AS) || defined(RLIMIT_VMEM)
-  while (c) {
-    /* Does this limit apply to the daemon? */
-    if (c->argv[1] == NULL ||
-        strncmp(c->argv[1], "daemon", 7) == 0) {
-      struct rlimit *memory_rlimit = (struct rlimit *) c->argv[0];
-
-      PRIVS_ROOT
-#  if defined(RLIMIT_DATA)
-      if (setrlimit(RLIMIT_DATA, memory_rlimit) < 0) {
-        int xerrno = errno;
-
-        PRIVS_RELINQUISH
-        pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_DATA): %s",
-          strerror(xerrno));
-        return;
-      }
-#  elif defined(RLIMIT_AS)
-      if (setrlimit(RLIMIT_AS, memory_rlimit) < 0) {
-        int xerrno = errno;
-
-        PRIVS_RELINQUISH
-        pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_AS): %s",
-          strerror(xerrno));
-        return;
-      }
-#  elif defined(RLIMIT_VMEM)
-      if (setrlimit(RLIMIT_VMEM, memory_rlimit) < 0) {
-        int xerrno = errno;
-
-        PRIVS_RELINQUISH
-        pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_VMEM): %s",
-          strerror(xerrno));
-        return;
-      }
-#  endif
-      PRIVS_RELINQUISH
-
-      pr_log_debug(DEBUG2, "set RLimitMemory for daemon");
-    }
-
-    c = find_config_next(c, c->next, CONF_PARAM, "RLimitMemory", FALSE);
-  }
-#endif /* no RLIMIT_DATA || RLIMIT_AS || RLIMIT_VMEM */
-
-  c = find_config(main_server->conf, CONF_PARAM, "RLimitOpenFiles", FALSE);
-
-#if defined(RLIMIT_NOFILE) || defined(RLIMIT_OFILE)
-  while (c) {
-    /* Does this limit apply to the daemon? */
-    if (c->argv[1] == NULL ||
-        strncmp(c->argv[1], "daemon", 7) == 0) {
-      struct rlimit *nofile_rlimit = (struct rlimit *) c->argv[0];
-
-      PRIVS_ROOT
-#  if defined(RLIMIT_NOFILE)
-      if (setrlimit(RLIMIT_NOFILE, nofile_rlimit) < 0) {
-        int xerrno = errno;
-
-        PRIVS_RELINQUISH
-        pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_NOFILE): %s",
-          strerror(xerrno));
-        return;
-      }
-#  elif defined(RLIMIT_OFILE)
-      if (setrlimit(RLIMIT_OFILE, nofile_rlimit) < 0) {
-        int xerrno = errno;
-
-        PRIVS_RELINQUISH
-        pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_OFILE): %s",
-          strerror(xerrno));
-        return;
-      }
-#  endif
-      PRIVS_RELINQUISH
-
-      pr_log_debug(DEBUG2, "set RLimitOpenFiles for daemon");
-    }
-
-    c = find_config_next(c, c->next, CONF_PARAM, "RLimitOpenFiles", FALSE);
-  }
-#endif /* defined RLIMIT_NOFILE or defined RLIMIT_OFILE */
-}
-
-void set_session_rlimits(void) {
-  config_rec *c = NULL;
-
-  /* now check for the configurable rlimits */
-  c = find_config(main_server->conf, CONF_PARAM, "RLimitCPU", FALSE);
-
-#ifdef RLIMIT_CPU
-  while (c) {
-    /* Does this limit apply to the session? */
-    if (c->argv[1] == NULL ||
-        strncmp(c->argv[1], "session", 8) == 0) {
-      struct rlimit *cpu_rlimit = (struct rlimit *) c->argv[0];
-
-      PRIVS_ROOT
-      if (setrlimit(RLIMIT_CPU, cpu_rlimit) < 0) {
-        int xerrno = errno;
-
-        PRIVS_RELINQUISH
-        pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_CPU): %s",
-          strerror(xerrno));
-        return;
-      }
-      PRIVS_RELINQUISH
-
-      pr_log_debug(DEBUG2, "set RLimitCPU for session");
-    }
-
-    c = find_config_next(c, c->next, CONF_PARAM, "RLimitCPU", FALSE);
-  }
-#endif /* defined RLIMIT_CPU */
-
-  c = find_config(main_server->conf, CONF_PARAM, "RLimitMemory", FALSE);
-
-#if defined(RLIMIT_DATA) || defined(RLIMIT_AS) || defined(RLIMIT_VMEM)
-  while (c) {
-    /* Does this limit apply to the session? */
-    if (c->argv[1] == NULL ||
-        strncmp(c->argv[1], "session", 8) == 0) {
-      struct rlimit *memory_rlimit = (struct rlimit *) c->argv[0];
-
-      PRIVS_ROOT
-#  if defined(RLIMIT_DATA)
-      if (setrlimit(RLIMIT_DATA, memory_rlimit) < 0) {
-        int xerrno = errno;
-
-        PRIVS_RELINQUISH
-        pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_DATA): %s",
-          strerror(xerrno));
-        return;
-      }
-#  elif defined(RLIMIT_AS)
-      if (setrlimit(RLIMIT_AS, memory_rlimit) < 0) {
-        int xerrno = errno;
-
-        PRIVS_RELINQUISH
-        pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_AS): %s",
-          strerror(xerrno));
-        return;
-      }
-#  elif defined(RLIMIT_VMEM)
-      if (setrlimit(RLIMIT_VMEM, memory_rlimit) < 0) {
-        int xerrno = errno;
-
-        PRIVS_RELINQUISH
-        pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_VMEM): %s",
-          strerror(xerrno));
-        return;
-      }
-#  endif
-      PRIVS_RELINQUISH
-
-      pr_log_debug(DEBUG2, "set RLimitMemory for session");
-    }
-
-    c = find_config_next(c, c->next, CONF_PARAM, "RLimitMemory", FALSE);
-  }
-#endif /* no RLIMIT_DATA || RLIMIT_AS || RLIMIT_VMEM */
-
-  c = find_config(main_server->conf, CONF_PARAM, "RLimitOpenFiles", FALSE);
-
-#if defined(RLIMIT_NOFILE) || defined(RLIMIT_OFILE)
-  while (c) {
-    /* Does this limit apply to the session? */
-    if (c->argv[1] == NULL ||
-        strncmp(c->argv[1], "session", 8) == 0) {
-      struct rlimit *nofile_rlimit = (struct rlimit *) c->argv[0];
-
-      PRIVS_ROOT
-#  if defined(RLIMIT_NOFILE)
-      if (setrlimit(RLIMIT_NOFILE, nofile_rlimit) < 0) {
-        int xerrno = errno;
-
-        PRIVS_RELINQUISH
-        pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_NOFILE): %s",
-          strerror(xerrno));
-        return;
-      }
-#  elif defined(RLIMIT_OFILE)
-      if (setrlimit(RLIMIT_OFILE, nofile_rlimit) < 0) {
-        int xerrno = errno;
-
-        PRIVS_RELINQUISH
-        pr_log_pri(PR_LOG_ERR, "error: setrlimit(RLIMIT_OFILE): %s",
-          strerror(xerrno));
-        return;
-      }
-#  endif /* defined RLIMIT_OFILE */
-      PRIVS_RELINQUISH
-
-      pr_log_debug(DEBUG2, "set RLimitOpenFiles for session");
-    }
-
-    c = find_config_next(c, c->next, CONF_PARAM, "RLimitOpenFiles", FALSE);
-  }
-#endif /* defined RLIMIT_NOFILE or defined RLIMIT_OFILE */
 }
 
 static void daemonize(void) {
@@ -3296,10 +3040,6 @@ int main(int argc, char *argv[], char **envp) {
     exit(1);
   }
 #endif /* PR_DEVEL_COREDUMP */
-
-#ifndef PR_DEVEL_NO_DAEMON
-  set_daemon_rlimits();
-#endif /* PR_DEVEL_NO_DAEMON */
 
   switch (ServerType) {
     case SERVER_STANDALONE:

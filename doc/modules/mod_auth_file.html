@@ -1,4 +1,4 @@
-<!-- $Id: mod_auth_file.html,v 1.3 2012/04/23 16:49:25 castaglia Exp $ -->
+<!-- $Id: mod_auth_file.html,v 1.5 2013/03/06 17:26:48 castaglia Exp $ -->
 <!-- $Source: /cvsroot/proftp/proftpd/doc/modules/mod_auth_file.html,v $ -->
 
 <html>
@@ -67,6 +67,15 @@ Example:
 </pre>
 
 <p>
+<b>Note</b>: In order to prevent other users from modifying the
+<code>AuthGroupFile</code>, the <code>mod_auth_file</code> module
+<b>requires</b> that the permissions on the file <b>not</b> be world-readable
+<b>or</b> world-writable, <b>and</b> that the directory containing the
+file <b>not</b> be world-writable.  In addition, if the file is not a file
+(<i>e.g.</i> the path points to a symlink, or a FIFO, <i>etc</i>), a warning
+will be logged on server startup/restart.
+
+<p>
 <hr>
 <h2><a name="AuthUserFile">AuthUserFile</a></h2>
 <strong>Syntax:</strong> AuthUserFile <em>path [id min-max] [home regex] [name regex]</em><br>
@@ -114,6 +123,15 @@ Example:
 </pre>
 
 <p>
+<b>Note</b>: In order to prevent other users from modifying the
+<code>AuthUserFile</code>, the <code>mod_auth_file</code> module
+<b>requires</b> that the permissions on the file <b>not</b> be world-readable
+<b>or</b> world-writable, <b>and</b> that the directory containing the
+file <b>not</b> be world-writable.  In addition, if the file is not a file
+(<i>e.g.</i> the path points to a symlink, or a FIFO, <i>etc</i>), a warning
+will be logged on server startup/restart.
+
+<p>
 <hr>
 <h2><a name="Installation">Installation</a></h2>
 The <code>mod_auth_file</code> module is compiled by default.
@@ -141,16 +159,36 @@ enhanced versions of <code>crypt(3)</code>, some do not.  The
 <a href="../utils/ftpasswd.html"><code>ftpasswd</code></a> script can generate
 <code>AuthUserFiles</code> which use the MD5 algorithm instead of DES.
 
+<p><a name="AuthFilePermissions">
+<font color=red>Question</font>: Why does <code>mod_auth_file</code> refuse
+to use an <code>AuthUserFile</code> (or <code>AuthGroupFile</code> that is
+world-writable?<br>
+<font color=blue>Answer</font>:  If an <code>AuthUserFile</code> or
+<code>AuthGroupFile</code> is world-writable, then <b>any user on the system
+can edit that file</b>.  They can create new users, or change the entries
+for existing users such that those users have different privileges, perhaps
+even root privileges.  In short, having <code>AuthUserFile<code> or
+<code>AuthGroupFile</code> with world-writable permissions is an unsafe
+configuration, and now <code>mod_auth_file</code> prevents this.
+
+<p>
+Similarly, <code>mod_auth_file</code> will refuse to use an
+<code>AuthUserFile</code> or <code>AuthGroupFile</code> if that file lives
+in a directory, and that directory has world-writable permissions (even if
+the configured file itself is <b>not</b> world-writable).  A world-writable
+directory would allow <b>any system user to delete the <code>AuthUserFile</code></b>, and add their own, or to add a symlink, <i>etc</i>.  It is another
+unsafe configuration against which <code>mod_auth_file</code> now guards.
+
 <p>
 <hr><br>
 
 Author: <i>$Author: castaglia $</i><br>
-Last Updated: <i>$Date: 2012/04/23 16:49:25 $</i><br>
+Last Updated: <i>$Date: 2013/03/06 17:26:48 $</i><br>
 
 <br><hr>
 
 <font size=2><b><i>
-&copy; Copyright 2002-2012<br>
+&copy; Copyright 2002-2013<br>
  All Rights Reserved<br>
 </i></b></font>
 

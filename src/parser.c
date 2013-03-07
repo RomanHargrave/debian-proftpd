@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2004-2012 The ProFTPD Project team
+ * Copyright (c) 2004-2013 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@
  */
 
 /* Configuration parser
- * $Id: parser.c,v 1.31 2012/10/14 03:52:08 castaglia Exp $
+ * $Id: parser.c,v 1.38 2013/02/20 06:53:52 castaglia Exp $
  */
 
 #include "conf.h"
@@ -217,26 +217,31 @@ config_rec *pr_parser_config_ctxt_close(int *empty) {
    */
 
   if (parser_curr_config == (config_rec **) parser_confstack->elts) {
-    if (!c->subset || !c->subset->xas_list) {
+    if (c != NULL &&
+        (!c->subset || !c->subset->xas_list)) {
       xaset_remove(c->set, (xasetmember_t *) c);
       destroy_pool(c->pool);
 
-      if (empty)
+      if (empty) {
         *empty = TRUE;
+      }
     }
 
-    if (*parser_curr_config)
+    if (*parser_curr_config) {
       *parser_curr_config = NULL;
+    }
 
     return NULL;
   }
 
-  if (!c->subset || !c->subset->xas_list) {
+  if (c != NULL &&
+      (!c->subset || !c->subset->xas_list)) {
     xaset_remove(c->set, (xasetmember_t *) c);
     destroy_pool(c->pool);
 
-    if (empty)
+    if (empty) {
       *empty = TRUE;
+    }
   }
 
   parser_curr_config--;
@@ -328,7 +333,7 @@ int pr_parser_parse_file(pool *p, const char *path, config_rec *start,
   pool *tmp_pool;
   char *report_path;
 
-  if (!path) {
+  if (path == NULL) {
     errno = EINVAL;
     return -1;
   }
@@ -345,13 +350,44 @@ int pr_parser_parse_file(pool *p, const char *path, config_rec *start,
 
   fh = pr_fsio_open(path, O_RDONLY);
   if (fh == NULL) {
+    int xerrno = errno;
+
     destroy_pool(tmp_pool);
+
+    errno = xerrno;
     return -1;
   }
 
   /* Stat the opened file to determine the optimal buffer size for IO. */
   memset(&st, 0, sizeof(st));
-  pr_fsio_fstat(fh, &st);
+  if (pr_fsio_fstat(fh, &st) < 0) {
+    int xerrno = errno;
+
+    pr_fsio_close(fh);
+    destroy_pool(tmp_pool);
+
+    errno = xerrno;
+    return -1;
+  }
+
+  if (S_ISDIR(st.st_mode)) {
+    pr_fsio_close(fh);
+    destroy_pool(tmp_pool);
+
+    errno = EISDIR;
+    return -1;
+  }
+
+  /* Check for world-writable files (and later, files in world-writable
+   * directories).
+   *
+   * For now, just warn about these; later, we will be more draconian.
+   */
+  if (st.st_mode & S_IWOTH) {
+    pr_log_pri(PR_LOG_WARNING, "warning: config file '%s' is world-writable",
+     path); 
+  }
+
   fh->fh_iosz = st.st_blksize;
 
   /* Push the configuration information onto the stack of configuration
@@ -603,15 +639,15 @@ char *pr_parser_read_line(char *buf, size_t bufsz) {
     if (buflen &&
         buf[buflen - 1] == '\n') {
       have_eol = TRUE;
-      buf[buflen - 1] = '\0';
-      buflen = strlen(buf);
+      buf[buflen-1] = '\0';
+      buflen--;
     }
 
     while (buflen &&
            buf[buflen - 1] == '\r') {
       pr_signals_handle();
-      buf[buflen - 1] = '\0';
-      buflen = strlen(buf);
+      buf[buflen-1] = '\0';
+      buflen--;
     }
 
     if (!have_eol) {
@@ -621,7 +657,7 @@ char *pr_parser_read_line(char *buf, size_t bufsz) {
     }
 
     /* Advance past any leading whitespace. */
-    for (bufp = buf; *bufp && isspace((int) *bufp); bufp++);
+    for (bufp = buf; *bufp && PR_ISSPACE(*bufp); bufp++);
 
     /* Check for commented or blank lines at this point, and just continue on
      * to the next configuration line if found.  If not, return the

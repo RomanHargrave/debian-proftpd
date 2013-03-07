@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2003-2012 The ProFTPD Project team
+ * Copyright (c) 2003-2013 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@
  */
 
 /* Network address routines
- * $Id: netaddr.c,v 1.88 2012/09/12 01:18:39 castaglia Exp $
+ * $Id: netaddr.c,v 1.91 2013/02/15 22:39:00 castaglia Exp $
  */
 
 #include "conf.h"
@@ -421,7 +421,7 @@ char *pr_netaddr_validate_dns_str(char *buf) {
   for (p = buf; p && *p; p++) {
 
     /* Per RFC requirements, these are all that are valid from a DNS. */
-    if (!isalnum((int) *p) &&
+    if (!PR_ISALNUM(*p) &&
         *p != '.' &&
         *p != '-'
 #ifdef PR_USE_IPV6
@@ -1995,6 +1995,7 @@ int pr_netaddr_is_rfc1918(const pr_netaddr_t *na) {
 #endif /* PR_USE_IPV6 */
   }
 
+  errno = EINVAL;
   return FALSE;
 }
 

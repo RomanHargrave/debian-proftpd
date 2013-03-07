@@ -1,7 +1,7 @@
 /*
  * ProFTPD: mod_ban -- a module implementing ban lists using the Controls API
  *
- * Copyright (c) 2004-2012 TJ Saunders
+ * Copyright (c) 2004-2013 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  * This is mod_ban, contrib software for proftpd 1.2.x/1.3.x.
  * For more information contact TJ Saunders <tj@castaglia.org>.
  *
- * $Id: mod_ban.c,v 1.59 2012/02/28 18:14:42 castaglia Exp $
+ * $Id: mod_ban.c,v 1.66 2013/03/01 19:57:43 castaglia Exp $
  */
 
 #include "conf.h"
@@ -35,7 +35,7 @@
 #include <sys/ipc.h>
 #include <sys/shm.h>
 
-#define MOD_BAN_VERSION			"mod_ban/0.6"
+#define MOD_BAN_VERSION			"mod_ban/0.6.1"
 
 /* Make sure the version of proftpd is as necessary. */
 #if PROFTPD_VERSION_NUMBER < 0x0001030402
@@ -125,6 +125,7 @@ struct ban_event_entry {
 #define BAN_EV_TYPE_LOGIN_RATE			12
 #define BAN_EV_TYPE_MAX_CMD_RATE		13
 #define BAN_EV_TYPE_UNHANDLED_CMD		14
+#define BAN_EV_TYPE_TLS_HANDSHAKE		15
 
 struct ban_event_list {
   struct ban_event_entry bel_entries[BAN_EVENT_LIST_MAXSZ];
@@ -139,6 +140,12 @@ struct ban_data {
 
 static struct ban_data *ban_lists = NULL;
 static int ban_engine = -1;
+
+/* Track whether "BanEngine on" was EVER seen in the configuration; see
+ * Bug#3865.
+ */
+static int ban_engine_overall = -1;
+
 static int ban_logfd = -1;
 static char *ban_log = NULL;
 static char *ban_mesg = NULL;
@@ -206,6 +213,7 @@ static void ban_maxloginattempts_ev(const void *, void *);
 static void ban_timeoutidle_ev(const void *, void *);
 static void ban_timeoutlogin_ev(const void *, void *);
 static void ban_timeoutnoxfer_ev(const void *, void *);
+static void ban_tlshandshake_ev(const void *, void *);
 static void ban_unhandledcmd_ev(const void *, void *);
 
 static void ban_handle_event(unsigned int, int, const char *,
@@ -1085,17 +1093,27 @@ static void ban_list_expire(void) {
     if (ban_lists->bans.bl_entries[i].be_type &&
         ban_lists->bans.bl_entries[i].be_expires &&
         !(ban_lists->bans.bl_entries[i].be_expires > now)) {
+      char *ban_desc, *ban_name;
+      int ban_type;
+      pool *tmp_pool;
+
+      ban_type = ban_lists->bans.bl_entries[i].be_type;
+      ban_name = ban_lists->bans.bl_entries[i].be_name;
 
       (void) pr_log_writefile(ban_logfd, MOD_BAN_VERSION,
         "ban for %s '%s' has expired (%lu seconds ago)",
-        ban_lists->bans.bl_entries[i].be_type == BAN_TYPE_USER ? "user" : 
-        ban_lists->bans.bl_entries[i].be_type == BAN_TYPE_HOST ? "host" :
-          "class",
-        ban_lists->bans.bl_entries[i].be_name,
+        ban_type == BAN_TYPE_USER ? "user" : 
+          ban_type == BAN_TYPE_HOST ? "host" : "class", ban_name,
         (unsigned long) now - ban_lists->bans.bl_entries[i].be_expires);
 
-      ban_list_remove(ban_lists->bans.bl_entries[i].be_type, 0,
-        ban_lists->bans.bl_entries[i].be_name);
+      tmp_pool = make_sub_pool(ban_pool ? ban_pool : session.pool);
+      ban_desc = pstrcat(tmp_pool,
+        ban_type == BAN_TYPE_USER ? "USER:" :
+          ban_type == BAN_TYPE_HOST ? "HOST:" : "CLASS:", ban_name, NULL);
+      pr_event_generate("mod_ban.ban.expired", ban_desc);
+      destroy_pool(tmp_pool);
+
+      ban_list_remove(ban_type, 0, ban_name);
     }
   }
 }
@@ -1143,6 +1161,9 @@ static const char *ban_event_entry_typestr(unsigned int type) {
 
     case BAN_EV_TYPE_UNHANDLED_CMD:
       return "UnhandledCommand";
+
+    case BAN_EV_TYPE_TLS_HANDSHAKE:
+      return "TLSHandshake";
   }
 
   return NULL;
@@ -1526,6 +1547,7 @@ static int ban_handle_info(pr_ctrls_t *ctrl, int reqargc, char **reqargv) {
           case BAN_EV_TYPE_LOGIN_RATE:
           case BAN_EV_TYPE_MAX_CMD_RATE:
           case BAN_EV_TYPE_UNHANDLED_CMD:
+          case BAN_EV_TYPE_TLS_HANDSHAKE:
             if (!have_banner) {
               pr_ctrls_add_response(ctrl, "Ban Events:");
               have_banner = TRUE;
@@ -1582,7 +1604,7 @@ static int ban_handle_ban(pr_ctrls_t *ctrl, int reqargc,
     return -1;
   }
 
-  if (ban_engine != TRUE) {
+  if (ban_engine_overall != TRUE) {
     pr_ctrls_add_response(ctrl, MOD_BAN_VERSION " not enabled");
     return -1;
   }
@@ -1784,8 +1806,8 @@ static int ban_handle_ban(pr_ctrls_t *ctrl, int reqargc,
     return ban_handle_info(ctrl, reqargc, reqargv);
 
   } else {
-    pr_ctrls_add_response(ctrl, "unknown ban type requested: '%s'",
-      reqargv[optind]);
+    pr_ctrls_add_response(ctrl, "unknown ban action requested: '%s'",
+      reqargv[0]);
     return -1;
   }
 
@@ -1814,7 +1836,7 @@ static int ban_handle_permit(pr_ctrls_t *ctrl, int reqargc,
     return -1;
   }
 
-  if (ban_engine != TRUE) {
+  if (ban_engine_overall != TRUE) {
     pr_ctrls_add_response(ctrl, MOD_BAN_VERSION " not enabled");
     return -1;
   }
@@ -2027,7 +2049,7 @@ static int ban_handle_permit(pr_ctrls_t *ctrl, int reqargc,
     ban_lock_shm(LOCK_UN);
  
   } else {
-    pr_ctrls_add_response(ctrl, "unknown ban type requested: '%s'",
+    pr_ctrls_add_response(ctrl, "unknown ban action requested: '%s'",
       reqargv[0]);
     return -1;
   }
@@ -2168,22 +2190,28 @@ MODRET set_banctrlsacls(cmd_rec *cmd) {
 
 /* usage: BanEngine on|off */
 MODRET set_banengine(cmd_rec *cmd) {
-  int bool = -1, ctxt_type;
+  int engine = -1, ctx_type;
   config_rec *c;
 
   CHECK_ARGS(cmd, 1);
 
-  bool = get_boolean(cmd, 1);
-  if (bool == -1)
+  engine = get_boolean(cmd, 1);
+  if (engine == -1) {
     CONF_ERROR(cmd, "expected Boolean parameter");
+  }
 
   CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
 
-  ctxt_type = (cmd->config && cmd->config->config_type != CONF_PARAM ?
+  if (engine == TRUE) {
+    /* If "BanEngine on" is configured anywhere, then set this flag. */
+    ban_engine_overall = engine;
+  }
+
+  ctx_type = (cmd->config && cmd->config->config_type != CONF_PARAM ?
      cmd->config->config_type : cmd->server->config_type ?
      cmd->server->config_type : CONF_ROOT);
 
-  if (ctxt_type == CONF_ROOT) {
+  if (ctx_type == CONF_ROOT) {
     /* If ban_engine has not been initialized yet, and this is the
      * "server config" section, we can do it here.  And even if the
      * previously initialized value is 0 ("BanEngine off"), if the
@@ -2193,17 +2221,17 @@ MODRET set_banengine(cmd_rec *cmd) {
      */
 
     if (ban_engine == -1) {
-      ban_engine = bool;
+      ban_engine = engine;
     }
 
-    if (bool == TRUE) {
-      ban_engine = bool;
+    if (engine == TRUE) {
+      ban_engine = engine;
     }
   }
 
   c = add_config_param(cmd->argv[0], 1, NULL);
   c->argv[0] = palloc(c->pool, sizeof(int));
-  *((int *) c->argv[0]) = bool;
+  *((int *) c->argv[0]) = engine;
 
   return PR_HANDLED(cmd);
 }
@@ -2346,6 +2374,11 @@ MODRET set_banonevent(cmd_rec *cmd) {
     bee->bee_type = BAN_EV_TYPE_TIMEOUT_NO_TRANSFER;
     pr_event_register(&ban_module, "core.timeout-no-transfer",
       ban_timeoutnoxfer_ev, bee);
+
+  } else if (strcasecmp(cmd->argv[1], "TLSHandshake") == 0) {
+    bee->bee_type = BAN_EV_TYPE_TLS_HANDSHAKE;
+    pr_event_register(&ban_module, "mod_tls.ctrl-handshake",
+      ban_tlshandshake_ev, bee);
 
   } else if (strcasecmp(cmd->argv[1], "UnhandledCommand") == 0) {
     bee->bee_type = BAN_EV_TYPE_UNHANDLED_CMD;
@@ -2517,24 +2550,37 @@ static void ban_handle_event(unsigned int ev_type, int ban_type,
 
         end_session = TRUE;
 
-      } else
+      } else {
         (void) pr_log_writefile(ban_logfd, MOD_BAN_VERSION,
           "updated count for %s event entry: %u curr, %u max", event,
           bee->bee_count_curr, bee->bee_count_max);
+      }
     }
   }
 
   ban_lock_shm(LOCK_UN);
 
   if (end_session) {
+    char *ban_desc;
+
     (void) pr_log_writefile(ban_logfd, MOD_BAN_VERSION,
       "%s autoban threshold reached, ending session", event);
     pr_log_debug(DEBUG3, MOD_BAN_VERSION
       ": autoban threshold reached, ending session");
+
+    /* Generate a specific event for listeners who want to know when mod_ban
+     * disconnects a client, and why.
+     */
+    ban_desc = pstrcat(tmp_pool,
+      ban_type == BAN_TYPE_USER ? "USER:" :
+        ban_type == BAN_TYPE_HOST ? "HOST:" : "CLASS:", event, NULL);
+    pr_event_generate("mod_ban.ban.client-disconnected", ban_desc);
+
     ban_send_mesg(tmp_pool, ban_type == BAN_TYPE_USER ? src : "(none)", NULL);
     pr_session_disconnect(&ban_module, PR_SESS_DISCONNECT_BANNED, NULL);
   }
 
+  destroy_pool(tmp_pool);
   return;
 }
 
@@ -2721,13 +2767,15 @@ static void ban_mod_unload_ev(const void *event_data, void *user_data) {
 static void ban_postparse_ev(const void *event_data, void *user_data) {
   struct ban_data *lists;
   int xerrno;
+  struct stat st;
 
-  if (ban_engine != TRUE)
+  if (ban_engine_overall != TRUE) {
     return;
+  }
 
   /* Open the BanLog. */
   if (ban_log &&
-      strcasecmp(ban_log, "none") != 0) {
+      strncasecmp(ban_log, "none", 5) != 0) {
     int res;
 
     PRIVS_ROOT
@@ -2772,6 +2820,27 @@ static void ban_postparse_ev(const void *event_data, void *user_data) {
     pr_log_pri(PR_LOG_NOTICE, MOD_BAN_VERSION
       ": unable to open BanTable '%s': %s", ban_table, strerror(xerrno));
     pr_session_disconnect(&ban_module, PR_SESS_DISCONNECT_BAD_CONFIG, NULL);
+  }
+
+  if (pr_fsio_fstat(ban_tabfh, &st) < 0) {
+    xerrno = errno;
+
+    pr_log_pri(PR_LOG_NOTICE, MOD_BAN_VERSION
+      ": unable to stat BanTable '%s': %s", ban_table, strerror(xerrno));
+    pr_fsio_close(ban_tabfh);
+    ban_tabfh = NULL;
+    pr_session_disconnect(&ban_module, PR_SESS_DISCONNECT_BAD_CONFIG, NULL);
+  }
+
+  if (S_ISDIR(st.st_mode)) {
+    xerrno = EISDIR;
+
+    pr_log_pri(PR_LOG_NOTICE, MOD_BAN_VERSION
+      ": unable to use BanTable '%s': %s", ban_table, strerror(xerrno));
+    pr_fsio_close(ban_tabfh);
+    ban_tabfh = NULL;
+    pr_session_disconnect(&ban_module, PR_SESS_DISCONNECT_BAD_CONFIG, NULL);
+
   }
 
   if (ban_tabfh->fh_fd <= STDERR_FILENO) {
@@ -2839,6 +2908,7 @@ static void ban_restart_ev(const void *event_data, void *user_data) {
   pr_event_unregister(&ban_module, "mod_auth.max-login-attempts", NULL);
   pr_event_unregister(&ban_module, "mod_auth.max-users-per-host", NULL);
   pr_event_unregister(&ban_module, "mod_ban.client-connect-rate", NULL);
+  pr_event_unregister(&ban_module, "mod_tls.ctrl-handshake", NULL);
 
   /* Close the BanLog file descriptor; it will be reopened by the postparse
    * event listener.
@@ -2897,6 +2967,22 @@ static void ban_timeoutnoxfer_ev(const void *event_data, void *user_data) {
     return;
   
   ban_handle_event(BAN_EV_TYPE_TIMEOUT_NO_TRANSFER, BAN_TYPE_HOST, ipstr, tmpl);
+}
+
+static void ban_tlshandshake_ev(const void *event_data, void *user_data) {
+
+  /* For this event, event_data is the client. */
+  conn_t *c = (conn_t *) event_data;
+  const char *ipstr;
+
+  /* user_data is a template of the ban event entry. */
+  struct ban_event_entry *tmpl = user_data;
+
+  if (ban_engine != TRUE)
+    return;
+
+  ipstr = pr_netaddr_get_ipstr(c->remote_addr);
+  ban_handle_event(BAN_EV_TYPE_TLS_HANDSHAKE, BAN_TYPE_HOST, ipstr, tmpl);
 }
 
 static void ban_unhandledcmd_ev(const void *event_data, void *user_data) {

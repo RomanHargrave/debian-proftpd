@@ -1,4 +1,4 @@
-<!-- $Id: mod_tls.html,v 1.36 2012/12/29 02:49:35 castaglia Exp $ -->
+<!-- $Id: mod_tls.html,v 1.41 2013/03/06 17:45:08 castaglia Exp $ -->
 <!-- $Source: /cvsroot/proftp/proftpd/doc/contrib/mod_tls.html,v $ -->
 
 <html>
@@ -57,6 +57,7 @@ is based.  His module can be found here:
   <li><a href="#TLSDSACertificateKeyFile">TLSDSACertificateKeyFile</a>
   <li><a href="#TLSEngine">TLSEngine</a>
   <li><a href="#TLSLog">TLSLog</a>
+  <li><a href="#TLSMasqueradeAddress">TLSMasqueradeAddress</a>
   <li><a href="#TLSOptions">TLSOptions</a>
   <li><a href="#TLSPKCS12File">TLSPKCS12File</a>
   <li><a href="#TLSPassPhraseProvider">TLSPassPhraseProvider</a>
@@ -69,6 +70,7 @@ is based.  His module can be found here:
   <li><a href="#TLSServerCipherPreference">TLSServerCipherPreference</a>
   <li><a href="#TLSSessionCache">TLSSessionCache</a>
   <li><a href="#TLSTimeoutHandshake">TLSTimeoutHandshake</a>
+  <li><a href="#TLSUserName">TLSUserName</a>
   <li><a href="#TLSVerifyClient">TLSVerifyClient</a>
   <li><a href="#TLSVerifyDepth">TLSVerifyDepth</a>
   <li><a href="#TLSVerifyOrder">TLSVerifyOrder</a>
@@ -448,11 +450,25 @@ may be used to list all of the engine drivers supported by OpenSSL.
 
 <p>
 The <code>TLSDHParamFile</code> directive is used to configure a file that
-<code>mod_tls</code> will use when engaging in a Diffie-Hellman key exchange.
-Such a key exchange can be computationally intensive, in terms for parameter
-generation; to help speed up the process, the parameters used may be generated
-in advance, and stored in a file.  The <code>dhparam</code> utility that comes
-with OpenSSL may be used to generate an appropriate file for this directive.
+contains pre-computed Diffie-Hellman (DH) group parameters.  The
+<code>mod_tls</code> module will use these parameters when engaging in
+Diffie-Hellman key exchanges.
+
+<p>
+Such key exchanges can be computationally intensive, in terms for parameter
+generation.  To help speed up the process and avoid latency for Diffie-Hellman
+key exchanges, the DH group parameters used may be generated in advance, and
+stored in a <code>TLSDHParamFile</code>.  The <code>dhparam</code> utility
+that comes with OpenSSL may be used to generate an appropriate file for this
+directive:
+<pre>
+  # openssl dhparam -outform PEM -2 <i>nbits</i> &gt;&gt; dhparams.pem
+  # openssl dhparam -outform PEM -5 <i>nbits</i> &gt;&gt; dhparams.pem
+<pre>
+Using either -2 or -5 as the generator is fine. The <em>nbits</em> value used
+should vary between 512 and 4096, inclusive.
+
+<p>
 The <em>file</em> parameter must be an absolute path.
 
 <p>
@@ -545,6 +561,66 @@ parameter given must be the full path to the file to use for logging.
 Note that this path must <b>not</b> be to a world-writable directory and,
 unless <code>AllowLogSymlinks</code> is explicitly set to <em>on</em>
 (generally a bad idea), the path must <b>not</b> be a symbolic link.
+
+<p>
+<hr>
+<h2><a name="TLSMasqueradeAddress">TLSMasqueradeAddress</a></h2>
+<strong>Syntax:</strong> TLSMasqueradeAddress <em>ip-address|dns-name|device-name</em><br>
+<strong>Default:</strong> None<br>
+<strong>Context:</strong> server config, <code>&lt;VirtualHost&gt;</code><br>
+<strong>Module:</strong> mod_tls<br>
+<strong>Compatibility:</strong> 1.3.5rc2 and later
+
+<p>
+The <code>TLSMasqueradeAddress</code> directive functions exactly like the
+<a href="../modules/mod_core.html#MasqueradeAddress"><code>MasqueradeAddress</code></a>, except that it applies <b>only to FTPS sessions</b>.  (Note that if
+<em>both</em> <code>MasqueradeAddress</code> <b>and</b>
+<code>TLSMasqueradeAddress</code> are configured, then the
+<code>TLSMasqueradeAddress</code> directive will take precedence, but only
+for FTPS sessions.)
+
+<p>
+<b><i>Discussion</i></b><br>
+Why is something like <code>TLSMasqueradeAddress</code> needed?  There are
+cases where some sites run <code>proftpd</code> within a restricted VLAN/DMZ,
+with some sort of firewall/proxy/router device which handles FTP and FTPS
+connections from the Internet to that <code>proftpd</code> server:
+<pre>
+  <i>client</i> &lt;---&gt; <i>firewall</i> &lt;---&gt; <i>load balancer</i> &lt;---&gt; <i>server</i>
+</pre>
+In many cases, the firewall/proxy/router device will look at the FTP responses
+for the <code>PASV</code>/<code>EPSV</code> commands (in which
+<code>proftpd</code> may be sending its internal, non-public IP address), and
+rewrite the responses to have the IP address of the firewall/proxy/router
+device.
+
+<p>
+Normally, the <code>MasqueradeAddress</code> directive can be used for such
+cases, so that <code>proftpd</code> sends the configured address in the
+<code>PASV</code>/<code>EPSV</code> responses.  With that configuration,
+the firewall/proxy/router device will not need to rewrite the responses.
+And this approach works for FTPS sessions as well, where the
+firewall/proxy/router device <b><i>cannot</i></b> rewrite the response due to
+the SSL/TLS protection.
+
+<p>
+Sometimes, though, sites <b>want</b> their firewall/proxy/router device to be
+able to properly rewrite FTP responses.  But due to bugs/implementation details
+in the firewall/proxy/router devices, <i>if</i> a
+<code>PASV</code>/<code>EPSV</code> response contains a public IP address, the
+device will drop/break that FTP connection.
+
+<p>
+This leaves the site in a case where it does <b>not</b> want to use
+<code>MasqueradeAddress</code> (so that the device can properly rewrite FTP
+responses), which works -- but only for plain FTP sessions.  Yet the site
+<b>does</b> want to use <code>MasqueradeAddress</code> -- but only for FTPS
+sessions, since the device cannot rewrite FTPS responses.
+
+<p>
+For these situations, then, the <code>TLSMasqueradeAddress</code> directive
+can/should be used: it provides <code>MasqueradeAddress</code> functionality,
+but only for FTPS sessions.
 
 <p>
 <hr>
@@ -1007,7 +1083,7 @@ Example:
 <h2><a name="TLSProtocol">TLSProtocol</a></h2>
 <strong>Syntax:</strong> TLSProtocol <em>protocol1</em> ... <em>protocolN</em><br>
 <strong>Default:</strong> SSLv3 TLSv1<br>
-<strong>Context:</strong> server config<br>
+<strong>Context:</strong> server config, <code>&lt;VirtualHost&gt;</code>, <code>&lt;Global&gt;</code><br>
 <strong>Module:</strong> mod_tls<br>
 <strong>Compatibility:</strong> 1.2.7rc1 and later
 
@@ -1065,8 +1141,7 @@ All use of SSLv2 is disabled.  SSLv2 <b>should not</b> be used.
 <h2><a name="TLSRandomSeed">TLSRandomSeed</a></h2>
 <strong>Syntax:</strong> TLSRandomSeed <em>seed</em><br>
 <strong>Default:</strong> <i>openssl-dir</i><code>/.rnd</code><br>
-<strong>Context:</strong> server config, <code>&lt;VirtualHost&gt;</code>, <code
->&lt;Global&gt;</code><br>
+<strong>Context:</strong> server config, <code>&lt;VirtualHost&gt;</code>, <code>&lt;Global&gt;</code><br>
 <strong>Module:</strong> mod_tls<br>
 <strong>Compatibility:</strong> 1.2.7rc1 and later
 
@@ -1312,7 +1387,7 @@ For example:
 <p>
 <hr>
 <h2><a name="TLSSessionCache">TLSSessionCache</a></h2>
-<strong>Syntax:</strong> TLSSessionCache <em>type:/info [timeout]</em><br>
+<strong>Syntax:</strong> TLSSessionCache <em>"off"|type:/info [timeout]</em><br>
 <strong>Default:</strong> None<br>
 <strong>Context:</strong> server config<br>
 <strong>Module:</strong> mod_tls<br>
@@ -1363,6 +1438,12 @@ as low as 15 for testing, but should be set to higher values like 600 in real
 life.  The default timeout is 1800 seconds (30 minutes).
 
 <p>
+Use of SSL session caching can be disabled entirely by using:
+<pre>
+  TLSSessionCache off
+</pre>
+
+<p>
 <hr>
 <h2><a name="TLSTimeoutHandshake">TLSTimeoutHandshake</a></h2>
 <strong>Syntax:</strong> TLSTimeoutHandshake <em>seconds</em><br>
@@ -1376,6 +1457,56 @@ The <code>TLSTimeoutHandshake</code> directive configures the maximum number
 of seconds for <code>mod_tls</code> to accept an SSL/TLS handshake.  If set to
 zero, <code>mod_tls</code> will wait forever for a handshake to complete.  The
 default is 300 seconds (five minutes).
+
+<p>
+<hr>
+<h2><a name="TLSUserName">TLSUserName</a></h2>
+<strong>Syntax:</strong> TLSUserName <em>attribute</em><br>
+<strong>Default:</strong> off<br>
+<strong>Context:</strong> server config, <code>&lt;VirtualHost&gt;</code>, <code>&lt;Global&gt;</code><br>
+<strong>Module:</strong> mod_tls<br>
+<strong>Compatibility:</strong> 1.3.5rc2 and later
+
+<p>
+The <code>TLSUserName</code> directive configures which <em>attribute</em>
+of a client certificate to match against the name provided by the FTPS client
+in its <code>USER</code> command.  If the certificate <em>attribute</em>
+value matches the <code>USER</code> name, the user is considered to be
+authenticated <b>without requiring that password be sent over the network</b>.
+
+<p>
+The <em>attribute</em> can either be "CommonName" (to match the CN of the
+client certificate to the requested <code>USER</code> name),
+"EmailSubjAltName" (to match <b>any</b> Email Subject Alternative Names (SANs)
+to the requested <code>USER</code> name), or a custom OID.
+
+<p>
+Examples:
+<pre>
+  # Match the CN
+  TLSUserName CommonName 
+
+  # Match any Email SANs
+  TLSUserName EmailSubjAltName
+
+  # Match specific (custom) OID
+  TLSUserName 1.2.3.4.5 
+</pre>
+
+<p>
+Note that for the <code>TLSUserName</code> directive to be effective,
+<code>mod_tls</code> has to be configured to request that clients provide
+certificates, <i>i.e.</i>:
+<pre>
+  # Verify clients
+  TLSVerifyClient on
+
+  # and possibly verify the user based on the client certs
+  TLSUserName CommonName
+</pre>
+
+<p>
+See also: <a href="#TLSVerifyClient"><code>TLSVerifyClient</code></a>
 
 <p>
 <hr>
@@ -1621,11 +1752,11 @@ in your <code>configure</i> command, <i>e.g.</i>:
 <p>
 <hr><br>
 Author: <i>$Author: castaglia $</i><br>
-Last Updated: <i>$Date: 2012/12/29 02:49:35 $</i><br>
+Last Updated: <i>$Date: 2013/03/06 17:45:08 $</i><br>
 
 <hr>
 <font size=2><b><i>
-&copy; Copyright 2002-2012 TJ Saunders<br>
+&copy; Copyright 2002-2013 TJ Saunders<br>
  All Rights Reserved<br>
 </i></b></font>
 

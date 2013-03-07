@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2012 The ProFTPD Project team
+ * Copyright (c) 2001-2013 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* Resource allocation code
- * $Id: pool.c,v 1.65 2012/05/10 02:59:15 castaglia Exp $
+ * $Id: pool.c,v 1.67 2013/01/30 22:37:04 castaglia Exp $
  */
 
 #include "conf.h"
@@ -142,6 +142,7 @@ static union block_hdr *malloc_block(size_t size) {
 static void chk_on_blk_list(union block_hdr *blok, union block_hdr *free_blk,
     const char *pool_tag) {
 
+#ifdef PR_USE_DEVEL
   /* Debug code */
 
   while (free_blk) {
@@ -154,6 +155,7 @@ static void chk_on_blk_list(union block_hdr *blok, union block_hdr *free_blk,
      "in pool '%s'", pool_tag ? pool_tag : "<unnamed>");
     exit(1);
   }
+#endif /* PR_USE_DEVEL */
 }
 
 /* Free a chain of blocks -- _must_ call with alarms blocked. */
@@ -549,6 +551,11 @@ static void *alloc_pool(struct pool_rec *p, size_t reqsz, int exact) {
   union block_hdr *blok = p->last;
   char *first_avail = blok->h.first_avail;
   char *new_first_avail;
+
+  if (reqsz == 0) {
+    /* Don't try to allocate memory of zero length. */
+    return NULL;
+  }
 
   new_first_avail = first_avail + sz;
 

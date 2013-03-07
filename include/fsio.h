@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2012 The ProFTPD Project
+ * Copyright (c) 2001-2013 The ProFTPD Project
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,7 +26,7 @@
 
 /* ProFTPD virtual/modular filesystem support.
  *
- * $Id: fsio.h,v 1.31 2012/12/28 00:02:35 castaglia Exp $
+ * $Id: fsio.h,v 1.34 2013/01/25 17:11:33 castaglia Exp $
  */
 
 #ifndef PR_FSIO_H
@@ -275,6 +275,11 @@ int pr_fsio_utimes(const char *, struct timeval *);
 int pr_fsio_futimes(pr_fh_t *, struct timeval *);
 off_t pr_fsio_lseek(pr_fh_t *, off_t, int);
 
+/* Set a flag determining whether to use mkdtemp(3) (if available) or not.
+ * Returns the previously-set value.
+ */
+int pr_fsio_set_use_mkdtemp(int);
+
 /* FS-related functions */
 
 char *pr_fsio_getline(char *, int, pr_fh_t *, unsigned int *);
@@ -335,6 +340,17 @@ off_t pr_fs_getsize(char *);
  * filesystem stats.
  */
 int pr_fs_getsize2(char *, off_t *);
+
+/* Similar to pr_fs_getsize2(), except that this operates on an already-opened
+ * file descriptor, rather than a path.
+ */
+int pr_fs_fgetsize(int, off_t *);
+
+/* Returns TRUE if the given path is on an NFS-mounted filesystem, FALSE
+ * if not on an NFS-mounted filesystem, and -1 if there was an error
+ * determining which (with errno set appropriately).
+ */
+int pr_fs_is_nfs(const char *path);
 
 /* For internal use only. */
 int init_fs(void);
