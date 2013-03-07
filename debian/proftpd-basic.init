@@ -46,9 +46,10 @@ test -f $DAEMON || exit 0
 #
 if ! egrep -qi "^[[:space:]]*ServerType.*standalone" $CONFIG_FILE
 then
-	if egrep -qi "server[[:space:]]*=[[:space:]]*/usr/sbin/proftpd" /etc/xinetd.conf 2>/dev/null || \
-	   egrep -qi "server[[:space:]]*=[[:space:]]*/usr/sbin/proftpd" /etc/xinetd.d/* 2>/dev/null || \
-       egrep -qi "^ftp.*/usr/sbin/proftpd" /etc/inetd.conf 2>/dev/null
+	if egrep -qi "server[[:space:]]*=[[:space:]]*/usr/sbin/(in\.)?proftpd" /etc/xinetd.conf 2>/dev/null || \
+	   egrep -qi "server[[:space:]]*=[[:space:]]*/usr/sbin/(in\.)?proftpd" /etc/xinetd.d/* 2>/dev/null || \
+	   egrep -qi "^ftp.*/usr/sbin/(in\.)?proftpd" /etc/inetd.d/* 2>/dev/null || \
+	   egrep -qi "^ftp.*/usr/sbin/(in\.)?proftpd" /etc/inetd.conf 2>/dev/null
 	then
     		RUN="no"
     		INETD="yes"
@@ -70,7 +71,8 @@ fi
 
 inetd_check()
 {
-	if [ ! -x /usr/sbin/inetd -a ! -x /usr/sbin/xinetd ]; then
+	if [ ! -x /usr/sbin/inetd -a ! -x /usr/sbin/xinetd -a \
+	     ! -x /usr/sbin/inetutils-inetd ]; then
 		echo "Neither inetd nor xinetd appears installed: check your configuration."
 	fi
 }
