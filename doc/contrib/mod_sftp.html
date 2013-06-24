@@ -1,4 +1,4 @@
-<!-- $Id: mod_sftp.html,v 1.69 2013/02/04 05:39:10 castaglia Exp $ -->
+<!-- $Id: mod_sftp.html,v 1.74 2013/06/06 23:39:28 castaglia Exp $ -->
 <!-- $Source: /cvsroot/proftp/proftpd/doc/contrib/mod_sftp.html,v $ -->
 
 <html>
@@ -258,8 +258,10 @@ of users.  The configured file may contain several public keys in RFC4716
 format, in no particular order.
 
 <p>
-<b>Note</b> that a <code>SFTPAuthorizedUserKeys</code> directive is
-required for <code>mod_sftp</code> to handle sessions properly.
+Example:
+<pre>
+  SFTPAuthorizedUserKeys file:~/.sftp/authorized_keys
+</pre>
 
 <p>
 <b>Note:</b> In order to use OpenSSH public keys in a
@@ -566,6 +568,7 @@ of supported MAC algorithms is:
   <li>hmac-md5
   <li>hmac-md5-96
   <li>hmac-ripemd160
+  <li>umac-64@openssh.com
 </ul>
 By default, all of the above MAC algorithms are presented to the client,
 in the above order, during the key exchange.  <b>Note</b> that some algorithms
@@ -592,13 +595,14 @@ by default are:
   <li>hmac-ripemd160
   <li>hmac-sha1-96
   <li>hmac-md5-96
+  <li>umac-64@openssh.com
 </ul>
 Thus if you wanted to configure <code>mod_sftp</code> to present the same
 MAC algorithms as OpenSSH, you would use:
 <pre>
   # Make mod_sftp present the MAC ciphers as OpenSSH
   SFTPDigests hmac-md5 hmac-sha1 hmac-sha2-256 hmac-sha2-512 \
-    hmac-ripemd160 hmac-sha1-96 hmac-md5-96
+    hmac-ripemd160 hmac-sha1-96 hmac-md5-96 umac-64@openssh.com
 </pre>
 
 <p>
@@ -648,6 +652,7 @@ The extension names used for the <code>SFTPExtensions</code> directive are:
 <ul>
   <li>checkFile
   <li>copyFile
+  <li>fsync
   <li>vendorID
   <li>versionSelect
   <li>posixRename
@@ -2000,11 +2005,54 @@ configuration is:
   SFTPCiphers aes256-ctr aes192-ctr aes128-ctr blowfish-ctr arcfour256 arcfour128 3des-ctr
 </pre>
 
+<p><a name="SFTPLocalisedTimes">
+<font color=red>Question</font>: When I use <code>mod_sftp</code> and get
+a directory listing, I notice that the timestamps on the files are
+localised (<i>e.g.</i> are in French).  When I use OpenSSH, the timestamps
+are always in English.  How I get get <code>mod_sftp</code> to behave like
+OpenSSH, and not localise the timestamps?<br>
+<font color=blue>Answer</font>: This happens when your <code>proftpd</code>
+has been built with the <code>--enable-nls</code> configure option.  To
+check, use <code>`proftpd -V'</code>:
+<pre>
+  ...
+  Features:
+    ...
+    + NLS support
+    ...
+</pre>
+This means that <code>proftpd</code> honors any locale-related environment
+variables when it starts up.  The reason you see localised timestamps
+in the directory listings is probably because your environment has something
+like <code>LANG=fr_FR.utf8</code>.
+
+<p>
+To tell <code>proftpd</code> to ignore that environment variable, you need
+to use this at the top of your <code>proftpd.conf</code>:
+<pre>
+  Unsetenv LANG
+</pre>
+
+<p><a name="SFTPNotUnderstood">
+<font color=red>Question</font>: When I use my SFTP client, I see something
+like this when I try to connect to <code>proftpd</code> with
+<code>mod_sftp</code>:
+<pre>
+  500 SSH-2.0-OPENSSH 6.2 not understood
+</pre>
+Why would this happen?<br>
+<font color=blue>Answer</font>: A "500 ... not understood" is an
+<b><i>FTP</i></b> response, not an SFTP response.  This usually happens
+when your SFTP client connects to an FTP virtual host/port (versus an SFTP
+virtual host/port).  So either <i>a)</i> the SFTP client is connecting to
+the wrong port on your server, or <i>b)</i> perhaps "SFTPEngine on" is not
+set in the virtual host for that port.
+
 <p>
 <hr><br>
 
 Author: <i>$Author: castaglia $</i><br>
-Last Updated: <i>$Date: 2013/02/04 05:39:10 $</i><br>
+Last Updated: <i>$Date: 2013/06/06 23:39:28 $</i><br>
 
 <br><hr>
 

@@ -25,7 +25,7 @@
  */
 
 /* ProFTPD virtual/modular file-system support
- * $Id: fsio.c,v 1.134 2013/02/27 17:32:10 castaglia Exp $
+ * $Id: fsio.c,v 1.136 2013/03/08 19:45:28 castaglia Exp $
  */
 
 #include "conf.h"
@@ -4398,7 +4398,7 @@ int pr_fs_fgetsize(int fd, off_t *fs_size) {
 }
 
 int pr_fs_is_nfs(const char *path) {
-#ifdef HAVE_STATFS
+#if defined(HAVE_STATFS_F_TYPE) || defined(HAVE_STATFS_F_FSTYPENAME)
   struct statfs fs;
   int res = FALSE;
 
@@ -4429,25 +4429,22 @@ int pr_fs_is_nfs(const char *path) {
   if (fs.f_type == NFS_SUPER_MAGIC) {
     pr_trace_msg(trace_channel, 12,
       "path '%s' resides on an NFS_SUPER_MAGIC filesystem (type 0x%08x)", path,
-      fs.f_type);
+      (int) fs.f_type);
     res = TRUE;
 
   } else {
     pr_trace_msg(trace_channel, 12,
       "path '%s' resides on a filesystem of type 0x%08x (not NFS_SUPER_MAGIC)",
-      path, fs.f_type);
+      path, (int) fs.f_type);
   }
-# else
-  pr_trace_msg(trace_channel, 12,
-    "unable to determine filesystem type for path '%s'", path);
-# endif /* No HAVE_STATFS_F_FSTYPENAME or HAVE_STATFS_F_TYPE */
+# endif
 
   return res;
 
 #else
   errno = ENOSYS;
   return -1;
-#endif /* HAVE_STATFS */
+#endif /* No HAVE_STATFS_F_FSTYPENAME or HAVE_STATFS_F_TYPE */
 }
 
 int pr_fsio_puts(const char *buf, pr_fh_t *fh) {
