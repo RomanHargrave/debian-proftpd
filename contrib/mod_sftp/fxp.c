@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: fxp.c,v 1.188 2013/02/28 01:20:02 castaglia Exp $
+ * $Id: fxp.c,v 1.192 2013/04/11 04:37:35 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -1228,34 +1228,6 @@ static uint16_t fxp_msg_read_short(pool *p, char **buf, uint32_t *buflen) {
 }
 #endif
 
-static uint64_t fxp_msg_read_long(pool *p, unsigned char **buf,
-    uint32_t *buflen) {
-  uint64_t val;
-  unsigned char data[8];
-
-  if (*buflen < sizeof(data)) {
-    (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
-      "SFTP message format error: unable to read long (buflen = %lu)",
-      (unsigned long) *buflen); 
-    SFTP_DISCONNECT_CONN(SFTP_SSH2_DISCONNECT_BY_APPLICATION, NULL);
-  }
-
-  memcpy(data, *buf, sizeof(data));
-  (*buf) += sizeof(data);
-  (*buflen) -= sizeof(data);
-
-  val = (uint64_t) data[0] << 56;
-  val |= (uint64_t) data[1] << 48;
-  val |= (uint64_t) data[2] << 40;
-  val |= (uint64_t) data[3] << 32;
-  val |= (uint64_t) data[4] << 24;
-  val |= (uint64_t) data[5] << 16;
-  val |= (uint64_t) data[6] << 8;
-  val |= (uint64_t) data[7];
-
-  return val;
-}
-
 static struct fxp_extpair *fxp_msg_read_extpair(pool *p, unsigned char **buf,
     uint32_t *buflen) {
   uint32_t namelen, datalen;
@@ -1311,29 +1283,6 @@ static uint32_t fxp_msg_write_short(unsigned char **buf, uint32_t *buflen,
   (*buflen) -= len;
 
   return len;
-}
-
-static uint32_t fxp_msg_write_long(unsigned char **buf, uint32_t *buflen,
-    uint64_t val) {
-  unsigned char data[8];
-
-  if (*buflen < sizeof(uint64_t)) {
-    (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
-      "SFTP message format error: unable to write long (buflen = %lu)",
-      (unsigned long) *buflen);
-    SFTP_DISCONNECT_CONN(SFTP_SSH2_DISCONNECT_BY_APPLICATION, NULL);
-  }
-
-  data[0] = (unsigned char) (val >> 56) & 0xFF;
-  data[1] = (unsigned char) (val >> 48) & 0xFF;
-  data[2] = (unsigned char) (val >> 40) & 0xFF;
-  data[3] = (unsigned char) (val >> 32) & 0xFF;
-  data[4] = (unsigned char) (val >> 24) & 0xFF;
-  data[5] = (unsigned char) (val >> 16) & 0xFF;
-  data[6] = (unsigned char) (val >> 8) & 0xFF;
-  data[7] = (unsigned char) val & 0xFF;
-
-  return sftp_msg_write_data(buf, buflen, data, sizeof(data), FALSE);
 }
 
 static void fxp_msg_write_extpair(unsigned char **buf, uint32_t *buflen,
@@ -1920,7 +1869,7 @@ static struct stat *fxp_attrs_read(struct fxp_packet *fxp, unsigned char **buf,
 
   if (fxp_session->client_version <= 3) {
     if (*flags & SSH2_FX_ATTR_SIZE) {
-      st->st_size = fxp_msg_read_long(fxp->pool, buf, buflen);
+      st->st_size = sftp_msg_read_long(fxp->pool, buf, buflen);
     }
 
     if (*flags & SSH2_FX_ATTR_UIDGID) {
@@ -1995,14 +1944,14 @@ static struct stat *fxp_attrs_read(struct fxp_packet *fxp, unsigned char **buf,
     }
 
     if (*flags & SSH2_FX_ATTR_SIZE) {
-      st->st_size = fxp_msg_read_long(fxp->pool, buf, buflen);
+      st->st_size = sftp_msg_read_long(fxp->pool, buf, buflen);
     }
 
     if (*flags & SSH2_FX_ATTR_ALLOCATION_SIZE) {
       /* Read (and ignore) any allocation size attribute. */
       uint64_t allosz;
 
-      allosz = fxp_msg_read_long(fxp->pool, buf, buflen);
+      allosz = sftp_msg_read_long(fxp->pool, buf, buflen);
       pr_trace_msg(trace_channel, 15,
         "protocol version %lu: read ALLOCATION_SIZE attribute: %" PR_LU,
         (unsigned long) fxp_session->client_version, (pr_off_t) allosz);
@@ -2091,7 +2040,7 @@ static struct stat *fxp_attrs_read(struct fxp_packet *fxp, unsigned char **buf,
     }
 
     if (*flags & SSH2_FX_ATTR_ACCESSTIME) {
-      st->st_atime = fxp_msg_read_long(fxp->pool, buf, buflen);
+      st->st_atime = sftp_msg_read_long(fxp->pool, buf, buflen);
 
       if (*flags & SSH2_FX_ATTR_SUBSECOND_TIMES) {
         /* Read (and ignore) the nanoseconds field. */
@@ -2109,7 +2058,7 @@ static struct stat *fxp_attrs_read(struct fxp_packet *fxp, unsigned char **buf,
       /* Read (and ignore) the create time attribute. */
       uint64_t create_time;
 
-      create_time = fxp_msg_read_long(fxp->pool, buf, buflen);
+      create_time = sftp_msg_read_long(fxp->pool, buf, buflen);
       pr_trace_msg(trace_channel, 15,
         "protocol version %lu: read CREATETIME attribute: %" PR_LU,
         (unsigned long) fxp_session->client_version, (pr_off_t) create_time);
@@ -2127,7 +2076,7 @@ static struct stat *fxp_attrs_read(struct fxp_packet *fxp, unsigned char **buf,
     }
 
     if (*flags & SSH2_FX_ATTR_MODIFYTIME) {
-      st->st_mtime = fxp_msg_read_long(fxp->pool, buf, buflen);
+      st->st_mtime = sftp_msg_read_long(fxp->pool, buf, buflen);
 
       if (*flags & SSH2_FX_ATTR_SUBSECOND_TIMES) {
         /* Read (and ignore) the nanoseconds field. */
@@ -2145,7 +2094,7 @@ static struct stat *fxp_attrs_read(struct fxp_packet *fxp, unsigned char **buf,
       /* Read (and ignore) the ctime attribute. */
       uint64_t change_time;
 
-      change_time = fxp_msg_read_long(fxp->pool, buf, buflen);
+      change_time = sftp_msg_read_long(fxp->pool, buf, buflen);
       pr_trace_msg(trace_channel, 15,
         "protocol version %lu: read CTIME attribute: %" PR_LU,
         (unsigned long) fxp_session->client_version, (pr_off_t) change_time);
@@ -2341,7 +2290,7 @@ static uint32_t fxp_attrs_write(pool *p, unsigned char **buf, uint32_t *buflen,
     perms = st->st_mode;
 
     len += sftp_msg_write_int(buf, buflen, flags);
-    len += fxp_msg_write_long(buf, buflen, st->st_size);
+    len += sftp_msg_write_long(buf, buflen, st->st_size);
     len += sftp_msg_write_int(buf, buflen, st->st_uid);
     len += sftp_msg_write_int(buf, buflen, st->st_gid);
     len += sftp_msg_write_int(buf, buflen, perms);
@@ -2365,7 +2314,7 @@ static uint32_t fxp_attrs_write(pool *p, unsigned char **buf, uint32_t *buflen,
 
     len += sftp_msg_write_int(buf, buflen, flags);
     len += sftp_msg_write_byte(buf, buflen, file_type);
-    len += fxp_msg_write_long(buf, buflen, st->st_size);
+    len += sftp_msg_write_long(buf, buflen, st->st_size);
 
     if (user_owner == NULL) {
       len += sftp_msg_write_string(buf, buflen,
@@ -2384,8 +2333,8 @@ static uint32_t fxp_attrs_write(pool *p, unsigned char **buf, uint32_t *buflen,
     }
 
     len += sftp_msg_write_int(buf, buflen, perms);
-    len += fxp_msg_write_long(buf, buflen, st->st_atime);
-    len += fxp_msg_write_long(buf, buflen, st->st_mtime);
+    len += sftp_msg_write_long(buf, buflen, st->st_atime);
+    len += sftp_msg_write_long(buf, buflen, st->st_mtime);
   }
 
   return len;
@@ -2794,15 +2743,18 @@ static int fxp_handle_abort(const void *key_data, size_t key_datasz,
   fxh->fh = NULL;
 
   if (fxh->fh_flags != O_RDONLY) {
-    if (delete_aborted_stores != NULL &&
-        *delete_aborted_stores == TRUE) {
-      (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
-        "removing aborted uploaded file '%s'", curr_path);
-
-      if (pr_fsio_unlink(curr_path) < 0) {
+    if (fxh->fh_real_path) {
+      /* This is a HiddenStores file. */
+      if (delete_aborted_stores == NULL ||
+          *delete_aborted_stores == TRUE) {
         (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
-          "error unlinking file '%s': %s", curr_path,
-          strerror(errno));
+          "removing aborted uploaded file '%s'", curr_path);
+
+        if (pr_fsio_unlink(curr_path) < 0) {
+          (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+            "error unlinking file '%s': %s", curr_path,
+            strerror(errno));
+        }
       }
     }
   }
@@ -3293,7 +3245,7 @@ static void fxp_version_add_vendor_id_ext(pool *p, unsigned char **buf,
   sftp_msg_write_string(&buf2, &buflen2, vendor_name);
   sftp_msg_write_string(&buf2, &buflen2, product_name);
   sftp_msg_write_string(&buf2, &buflen2, product_version);
-  fxp_msg_write_long(&buf2, &buflen2, build_number);
+  sftp_msg_write_long(&buf2, &buflen2, build_number);
 
   ext.ext_name = "vendor-id";
   ext.ext_data = ptr2;
@@ -3384,6 +3336,18 @@ static void fxp_version_add_openssh_exts(pool *p, unsigned char **buf,
   (void) p;
 
   /* These are OpenSSH-specific SFTP extensions. */
+
+  if (fxp_ext_flags & SFTP_FXP_EXT_FSYNC) {
+    struct fxp_extpair ext;
+
+    ext.ext_name = "fsync@openssh.com";
+    ext.ext_data = (unsigned char *) "1";
+    ext.ext_datalen = 1;
+
+    pr_trace_msg(trace_channel, 11, "+ SFTP extension: %s = '%s'", ext.ext_name,
+      ext.ext_data);
+    fxp_msg_write_extpair(buf, buflen, &ext);
+  }
 
   if (fxp_ext_flags & SFTP_FXP_EXT_POSIX_RENAME) {
     struct fxp_extpair ext;
@@ -4283,6 +4247,58 @@ static int fxp_handle_ext_copy_file(struct fxp_packet *fxp, char *src,
   return fxp_packet_write(resp);
 }
 
+static int fxp_handle_ext_fsync(struct fxp_packet *fxp,
+    struct fxp_handle *fxh) {
+  unsigned char *buf, *ptr;
+  char *args;
+  const char *path, *reason;
+  uint32_t buflen, bufsz, status_code;
+  struct fxp_packet *resp;
+  cmd_rec *cmd;
+  int res, xerrno;
+
+  path = fxh->fh->fh_path;
+  args = pstrdup(fxp->pool, path);
+
+  cmd = fxp_cmd_alloc(fxp->pool, "FSYNC", args);
+  cmd->cmd_class = CL_MISC;
+  pr_cmd_dispatch_phase(cmd, PRE_CMD, 0);
+
+  buflen = bufsz = FXP_RESPONSE_DATA_DEFAULT_SZ;
+  buf = ptr = palloc(fxp->pool, bufsz);
+
+  res = fsync(PR_FH_FD(fxh->fh));
+  if (res < 0) {
+    xerrno = errno;
+
+    (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+      "error calling fsync(2) on '%s': %s", path, strerror(xerrno));
+
+    errno = xerrno;
+
+  } else {
+    /* No errors. */
+    xerrno = errno = 0;
+  }
+
+  status_code = fxp_errno2status(xerrno, &reason);
+
+  pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s' "
+    "('%s' [%d])", (unsigned long) status_code, reason,
+    xerrno != EOF ? strerror(errno) : "End of file", xerrno);
+
+  fxp_status_write(&buf, &buflen, fxp->request_id, status_code, reason, NULL);
+
+  pr_cmd_dispatch_phase(cmd, xerrno == 0 ? POST_CMD : POST_CMD_ERR, 0);
+  pr_cmd_dispatch_phase(cmd, xerrno == 0 ? LOG_CMD : LOG_CMD_ERR, 0);
+
+  resp = fxp_packet_create(fxp->pool, fxp->channel_id);
+  resp->payload = ptr;
+  resp->payload_sz = (bufsz - buflen);
+
+  return fxp_packet_write(resp);
+}
+
 static int fxp_handle_ext_posix_rename(struct fxp_packet *fxp, char *src,
     char *dst) {
   unsigned char *buf, *ptr;
@@ -4640,16 +4656,16 @@ static int fxp_handle_ext_space_avail(struct fxp_packet *fxp, char *path) {
   sftp_msg_write_int(&buf, &buflen, fxp->request_id);
 
   /* Total bytes on device */
-  fxp_msg_write_long(&buf, &buflen, (uint64_t) get_fs_bytes_total(&fs));
+  sftp_msg_write_long(&buf, &buflen, (uint64_t) get_fs_bytes_total(&fs));
 
   /* Unused bytes on device. */
-  fxp_msg_write_long(&buf, &buflen, (uint64_t) get_fs_bytes_unused(&fs));
+  sftp_msg_write_long(&buf, &buflen, (uint64_t) get_fs_bytes_unused(&fs));
 
   /* Total bytes available to user. */
-  fxp_msg_write_long(&buf, &buflen, (uint64_t) get_user_bytes_avail(&fs));
+  sftp_msg_write_long(&buf, &buflen, (uint64_t) get_user_bytes_avail(&fs));
 
   /* Unused bytes available to user. */
-  fxp_msg_write_long(&buf, &buflen, (uint64_t) get_user_bytes_unused(&fs));
+  sftp_msg_write_long(&buf, &buflen, (uint64_t) get_user_bytes_unused(&fs));
 
   fxp_msg_write_short(&buf, &buflen, (uint32_t) fs.f_frsize);
 
@@ -4711,14 +4727,14 @@ static int fxp_handle_ext_statvfs(struct fxp_packet *fxp, const char *path) {
 
   sftp_msg_write_byte(&buf, &buflen, SFTP_SSH2_FXP_EXTENDED_REPLY);
   sftp_msg_write_int(&buf, &buflen, fxp->request_id);
-  fxp_msg_write_long(&buf, &buflen, fs.f_bsize);
-  fxp_msg_write_long(&buf, &buflen, fs.f_frsize);
-  fxp_msg_write_long(&buf, &buflen, fs.f_blocks);
-  fxp_msg_write_long(&buf, &buflen, fs.f_bfree);
-  fxp_msg_write_long(&buf, &buflen, fs.f_bavail);
-  fxp_msg_write_long(&buf, &buflen, fs.f_files);
-  fxp_msg_write_long(&buf, &buflen, fs.f_ffree);
-  fxp_msg_write_long(&buf, &buflen, fs.f_favail);
+  sftp_msg_write_long(&buf, &buflen, fs.f_bsize);
+  sftp_msg_write_long(&buf, &buflen, fs.f_frsize);
+  sftp_msg_write_long(&buf, &buflen, fs.f_blocks);
+  sftp_msg_write_long(&buf, &buflen, fs.f_bfree);
+  sftp_msg_write_long(&buf, &buflen, fs.f_bavail);
+  sftp_msg_write_long(&buf, &buflen, fs.f_files);
+  sftp_msg_write_long(&buf, &buflen, fs.f_ffree);
+  sftp_msg_write_long(&buf, &buflen, fs.f_favail);
 
   /* AIX requires this machination because a) its statvfs struct has
    * non-standard data types for the fsid value:
@@ -4736,7 +4752,7 @@ static int fxp_handle_ext_statvfs(struct fxp_packet *fxp, const char *path) {
 #if !defined(AIX4) && !defined(AIX5)
   memcpy(&fs_id, &(fs.f_fsid), sizeof(fs_id));
 #endif
-  fxp_msg_write_long(&buf, &buflen, fs_id);
+  sftp_msg_write_long(&buf, &buflen, fs_id);
 
   /* These flags and values are defined by OpenSSH's PROTOCOL document.
    *
@@ -4756,8 +4772,8 @@ static int fxp_handle_ext_statvfs(struct fxp_packet *fxp, const char *path) {
   }
 #endif
 
-  fxp_msg_write_long(&buf, &buflen, fs_flags);
-  fxp_msg_write_long(&buf, &buflen, fs.f_namemax);
+  sftp_msg_write_long(&buf, &buflen, fs_flags);
+  sftp_msg_write_long(&buf, &buflen, fs.f_namemax);
 
   resp = fxp_packet_create(fxp->pool, fxp->channel_id);
   resp->payload = ptr;
@@ -4784,7 +4800,7 @@ static int fxp_handle_ext_vendor_id(struct fxp_packet *fxp) {
   product_version = sftp_msg_read_string(fxp->pool, &fxp->payload,
     &fxp->payload_sz);
 
-  build_number = fxp_msg_read_long(fxp->pool, &fxp->payload, &fxp->payload_sz);
+  build_number = sftp_msg_read_long(fxp->pool, &fxp->payload, &fxp->payload_sz);
 
   if (fxp_session->client_version >= fxp_utf8_protocol_version) {
     vendor_name = sftp_utf8_decode_str(fxp->pool, vendor_name);
@@ -5301,8 +5317,8 @@ static int fxp_handle_extended(struct fxp_packet *fxp) {
     path = sftp_msg_read_string(fxp->pool, &fxp->payload, &fxp->payload_sz);
     digest_list = sftp_msg_read_string(fxp->pool, &fxp->payload,
       &fxp->payload_sz);
-    offset = fxp_msg_read_long(fxp->pool, &fxp->payload, &fxp->payload_sz);
-    len = fxp_msg_read_long(fxp->pool, &fxp->payload, &fxp->payload_sz);
+    offset = sftp_msg_read_long(fxp->pool, &fxp->payload, &fxp->payload_sz);
+    len = sftp_msg_read_long(fxp->pool, &fxp->payload, &fxp->payload_sz);
     blocksz = sftp_msg_read_int(fxp->pool, &fxp->payload, &fxp->payload_sz);
 
     res = fxp_handle_ext_check_file(fxp, digest_list, path, offset, len,
@@ -5370,8 +5386,8 @@ static int fxp_handle_extended(struct fxp_packet *fxp) {
 
     digest_list = sftp_msg_read_string(fxp->pool, &fxp->payload,
       &fxp->payload_sz);
-    offset = fxp_msg_read_long(fxp->pool, &fxp->payload, &fxp->payload_sz);
-    len = fxp_msg_read_long(fxp->pool, &fxp->payload, &fxp->payload_sz);
+    offset = sftp_msg_read_long(fxp->pool, &fxp->payload, &fxp->payload_sz);
+    len = sftp_msg_read_long(fxp->pool, &fxp->payload, &fxp->payload_sz);
     blocksz = sftp_msg_read_int(fxp->pool, &fxp->payload, &fxp->payload_sz);
 
     res = fxp_handle_ext_check_file(fxp, digest_list, path, offset, len,
@@ -5396,8 +5412,67 @@ static int fxp_handle_extended(struct fxp_packet *fxp) {
     return res;
   }
 
+  if ((fxp_ext_flags & SFTP_FXP_EXT_FSYNC) &&
+      strncmp(ext_request_name, "fsync@openssh.com", 18) == 0) {
+    const char *handle;
+    struct fxp_handle *fxh;
+
+    handle = sftp_msg_read_string(fxp->pool, &fxp->payload, &fxp->payload_sz);
+
+    fxh = fxp_handle_get(handle);
+    if (fxh == NULL) {
+      pr_trace_msg(trace_channel, 17,
+        "%s: unable to find handle for name '%s': %s", cmd->argv[0], handle,
+        strerror(errno));
+
+      status_code = SSH2_FX_INVALID_HANDLE;
+
+      pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s'",
+        (unsigned long) status_code, fxp_strerror(status_code));
+
+      fxp_status_write(&buf, &buflen, fxp->request_id, status_code,
+        fxp_strerror(status_code), NULL);
+
+      pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
+
+      resp = fxp_packet_create(fxp->pool, fxp->channel_id);
+      resp->payload = ptr;
+      resp->payload_sz = (bufsz - buflen);
+
+      return fxp_packet_write(resp);
+    }
+
+    if (fxh->fh == NULL) {
+      errno = EISDIR;
+
+      pr_trace_msg(trace_channel, 17,
+        "%s: handle '%s': %s", cmd->argv[0], handle, strerror(errno));
+
+      status_code = SSH2_FX_INVALID_HANDLE;
+
+      pr_trace_msg(trace_channel, 8, "sending response: STATUS %lu '%s'",
+        (unsigned long) status_code, fxp_strerror(status_code));
+
+      fxp_status_write(&buf, &buflen, fxp->request_id, status_code,
+        fxp_strerror(status_code), NULL);
+
+      pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
+
+      resp = fxp_packet_create(fxp->pool, fxp->channel_id);
+      resp->payload = ptr;
+      resp->payload_sz = (bufsz - buflen);
+
+      return fxp_packet_write(resp);
+    }
+
+    res = fxp_handle_ext_fsync(fxp, fxh);
+    pr_cmd_dispatch_phase(cmd, res == 0 ? LOG_CMD : LOG_CMD_ERR, 0);
+
+    return res;
+  }
+
   if ((fxp_ext_flags & SFTP_FXP_EXT_POSIX_RENAME) &&
-      strncmp(ext_request_name, "posix-rename@openssh.com", 17) == 0) {
+      strncmp(ext_request_name, "posix-rename@openssh.com", 25) == 0) {
     char *src, *dst;
 
     src = sftp_msg_read_string(fxp->pool, &fxp->payload, &fxp->payload_sz);
@@ -5428,7 +5503,7 @@ static int fxp_handle_extended(struct fxp_packet *fxp) {
   }
 
   if ((fxp_ext_flags & SFTP_FXP_EXT_STATVFS) &&
-      strncmp(ext_request_name, "statvfs@openssh.com", 12) == 0) {
+      strncmp(ext_request_name, "statvfs@openssh.com", 20) == 0) {
     const char *path;
 
     path = sftp_msg_read_string(fxp->pool, &fxp->payload, &fxp->payload_sz);
@@ -5440,7 +5515,7 @@ static int fxp_handle_extended(struct fxp_packet *fxp) {
   }
 
   if ((fxp_ext_flags & SFTP_FXP_EXT_STATVFS) &&
-      strncmp(ext_request_name, "fstatvfs@openssh.com", 13) == 0) {
+      strncmp(ext_request_name, "fstatvfs@openssh.com", 21) == 0) {
     const char *handle, *path;
     struct fxp_handle *fxh;
 
@@ -6162,8 +6237,8 @@ static int fxp_handle_lock(struct fxp_packet *fxp) {
   cmd_rec *cmd;
   
   name = sftp_msg_read_string(fxp->pool, &fxp->payload, &fxp->payload_sz);
-  offset = fxp_msg_read_long(fxp->pool, &fxp->payload, &fxp->payload_sz);
-  lock_len = fxp_msg_read_long(fxp->pool, &fxp->payload, &fxp->payload_sz);
+  offset = sftp_msg_read_long(fxp->pool, &fxp->payload, &fxp->payload_sz);
+  lock_len = sftp_msg_read_long(fxp->pool, &fxp->payload, &fxp->payload_sz);
   lock_flags = sftp_msg_read_int(fxp->pool, &fxp->payload, &fxp->payload_sz);
 
   cmd = fxp_cmd_alloc(fxp->pool, "LOCK", name);
@@ -7740,7 +7815,7 @@ static int fxp_handle_read(struct fxp_packet *fxp) {
   cmd_rec *cmd, *cmd2;
 
   name = sftp_msg_read_string(fxp->pool, &fxp->payload, &fxp->payload_sz);
-  offset = fxp_msg_read_long(fxp->pool, &fxp->payload, &fxp->payload_sz);
+  offset = sftp_msg_read_long(fxp->pool, &fxp->payload, &fxp->payload_sz);
   datalen = sftp_msg_read_int(fxp->pool, &fxp->payload, &fxp->payload_sz);
 
 #if 0
@@ -10297,7 +10372,7 @@ static int fxp_handle_write(struct fxp_packet *fxp) {
   cmd_rec *cmd, *cmd2;
 
   name = sftp_msg_read_string(fxp->pool, &fxp->payload, &fxp->payload_sz);
-  offset = fxp_msg_read_long(fxp->pool, &fxp->payload, &fxp->payload_sz);
+  offset = sftp_msg_read_long(fxp->pool, &fxp->payload, &fxp->payload_sz);
   datalen = sftp_msg_read_int(fxp->pool, &fxp->payload, &fxp->payload_sz);
   data = sftp_msg_read_data(fxp->pool, &fxp->payload, &fxp->payload_sz,
     datalen);
@@ -10647,8 +10722,8 @@ static int fxp_handle_unlock(struct fxp_packet *fxp) {
   cmd_rec *cmd;
   
   name = sftp_msg_read_string(fxp->pool, &fxp->payload, &fxp->payload_sz);
-  offset = fxp_msg_read_long(fxp->pool, &fxp->payload, &fxp->payload_sz);
-  lock_len = fxp_msg_read_long(fxp->pool, &fxp->payload, &fxp->payload_sz);
+  offset = sftp_msg_read_long(fxp->pool, &fxp->payload, &fxp->payload_sz);
+  lock_len = sftp_msg_read_long(fxp->pool, &fxp->payload, &fxp->payload_sz);
   lock_flags = sftp_msg_read_int(fxp->pool, &fxp->payload, &fxp->payload_sz);
 
   cmd = fxp_cmd_alloc(fxp->pool, "UNLOCK", name);

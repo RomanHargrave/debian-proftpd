@@ -23,7 +23,7 @@
  */
 
 /* Resource limit module
- * $Id: mod_rlimit.c,v 1.3 2013/02/21 19:21:22 castaglia Exp $
+ * $Id: mod_rlimit.c,v 1.6 2013/06/10 16:05:32 castaglia Exp $
  */
 
 #include "conf.h"
@@ -490,30 +490,6 @@ MODRET set_rlimitopenfiles(cmd_rec *cmd) {
 #endif
 }
 
-/* usage: RLimitProcesses on|off */
-MODRET set_rlimitprocesses(cmd_rec *cmd) {
-#if defined(RLIMIT_NPROC)
-  int set_nproc = 0;
-  config_rec *c = NULL;
-
-  CHECK_ARGS(cmd, 1);
-  CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
-
-  set_nproc = get_boolean(cmd, 1);
-  if (set_nproc == -1) {
-    CONF_ERROR(cmd, "expecting Boolean parameter");
-  }
-
-  c = add_config_param(cmd->argv[0], 1, NULL);
-  c->argv[0] = pcalloc(c->pool, sizeof(int));
-  *((int *) c->argv[0]) = set_nproc;
-
-  return PR_HANDLED(cmd);
-#else
-  CONF_ERROR(cmd, "RLimitProcesses is not supported on this platform");
-#endif
-}
-
 static int rlimit_set_core(int scope) {
   rlim_t current, max;
   int res, xerrno;
@@ -720,28 +696,6 @@ static int rlimit_set_memory(int scope) {
   return 0;
 }
 
-static int rlimit_set_nproc(int scope) {
-  rlim_t current, max;
-  int res, xerrno;
-
-  current = max = 0;
-
-  PRIVS_ROOT
-  res = pr_rlimit_set_nproc(current, max);
-  xerrno = errno;
-  PRIVS_RELINQUISH
-
-  if (res < 0) {
-    pr_log_pri(PR_LOG_ERR, "error setting nproc resource limits: %s",
-      strerror(xerrno));
-
-  } else {
-    pr_log_debug(DEBUG2, "set nproc resource limits for session");
-  }
-
-  return res;
-}
-
 /* Event listeners */
 
 static void rlimit_postparse_ev(const void *event_data, void *user_data) {
@@ -764,46 +718,6 @@ static int rlimit_init(void) {
 }
 
 static int rlimit_sess_init(void) {
-  int set_nproc = TRUE;
-
-  /* Since we're a child process, we do not need to set the core resource
-   * limits; we have inherited the limit from our parent.
-   */
- 
-  if (pr_module_exists("mod_exec.c")) {
-    /* If mod_exec is loaded, we need to check if it is enabled for this
-     * session.  If so, then we should NOT set the RLIMIT_NPROC limit,
-     * as that would prevent mod_exec from working properly.
-     */
-    config_rec *c;
-
-    c = find_config(main_server->conf, CONF_PARAM, "ExecEngine", FALSE);
-    if (c != NULL) {
-      int engine;
-
-      engine = *((int *) c->argv[0]);
-      if (engine == TRUE) {
-        set_nproc = FALSE;
-      }
-    }
-  }
-
-  if (set_nproc) {
-    config_rec *c;
-
-    /* Check whether RLimitProcesses was used to disable the default setting
-     * of the nproc limit.
-     */
-    c = find_config(main_server->conf, CONF_PARAM, "RLimitProcesses", FALSE);
-    if (c != NULL) {
-      set_nproc = *((int *) c->argv[0]);
-    }
-  }
-
-  if (set_nproc) { 
-    rlimit_set_nproc(SESSION_SCOPE);
-  }
-
   rlimit_set_cpu(SESSION_SCOPE);
   rlimit_set_memory(SESSION_SCOPE);
   rlimit_set_files(SESSION_SCOPE);
@@ -818,7 +732,6 @@ static conftable rlimit_conftab[] = {
   { "RLimitCPU",		set_rlimitcpu,			NULL },
   { "RLimitMemory",		set_rlimitmemory,		NULL },
   { "RLimitOpenFiles",		set_rlimitopenfiles,		NULL },
-  { "RLimitProcesses",		set_rlimitprocesses,		NULL },
 
   { NULL, NULL, NULL }
 };

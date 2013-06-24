@@ -1,4 +1,4 @@
-$Id: NEWS,v 1.1508 2013/03/06 19:04:35 castaglia Exp $
+$Id: NEWS,v 1.1531 2013/06/14 17:42:17 castaglia Exp $
 
 -----------------------------------------------------------------------------
   More details on the bugs listed below can be found by using the bug number
@@ -8,6 +8,37 @@ $Id: NEWS,v 1.1508 2013/03/06 19:04:35 castaglia Exp $
 
   where `N' is the bug number.
 -----------------------------------------------------------------------------
+
+1.3.5rc3 - Released 14-Jun-2013
+--------------------------------
+- Bug 3910 - Clang's scan-build warns on set[u][g]id unchecked return value.
+- Bug 3914 - 1.3.5rc2 fails to build on Solaris 10.
+- Bug 3917 - Make DeleteAbortedStores on by default when HiddenStores enabled.
+- Bug 3918 - mod_sftp segfault after SIGHUP when evaluating client banner.
+- Bug 3864 - Support SQL query to lookup/use primary key for logged-in
+  user/group.
+- Bug 3920 - Support umac-64@openssh.com digest for mod_sftp.
+- Bug 3921 - Single failed keyboard-interactive login attempt causes SSH
+  connection to close prematurely.
+- Bug 3923 - mod_cap does not revoke root privileges properly for SFTP
+  connections.
+- Bug 3926 - Support OpenSSH fsync SFTP extension.
+- Bug 3925 - SFTP directory listings are sensitive to locale environment
+  variables.
+- Bug 3924 - HideFiles does not filter symlinks.
+- Bug 3929 - pam_session_close() requires root privs on some platforms.
+- Bug 3932 - SQLAuthType Backend returns "password mismatch" for MySQL
+  PASSWORD().
+- Bug 3934 - HideUser/HideGroup do not work as expected for virtual users.
+- Bug 3935 - scp download of nonexistent file results in client hang.
+- Bug 3927 - Default ControlsSocket created despite custom ControlsSocket path.
+- Bug 3937 - Segfault when retrieving SSH public key from LDAP directory.
+- Added new mod_snmp contrib module.
+- Bug 3939 - Disable Controls for "ServerType inetd" servers.
+- Bug 3942 - mod_sftp_sql should support multiple keys concatenated together
+  in a single column.
+- Bug 3943 - Support for PBKDF2 passwords in mod_sql_passwd.
+- Bug 3941 - RLimitProcesses causes problems with setuid/setreuid.
 
 1.3.5rc2 - Released 06-Mar-2013
 --------------------------------

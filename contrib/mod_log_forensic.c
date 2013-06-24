@@ -163,7 +163,7 @@ static void forensic_add_msg(unsigned int log_type, int log_level,
 
 static const char *forensic_get_begin_marker(unsigned int criterion,
     size_t *markerlen) {
-  const char *marker;
+  const char *marker = NULL;
 
   switch (criterion) {
     case FORENSIC_CRIT_FAILED_LOGIN:
@@ -179,13 +179,16 @@ static const char *forensic_get_begin_marker(unsigned int criterion,
       break;
   }
 
-  *markerlen = strlen(marker);
+  if (marker != NULL) {
+    *markerlen = strlen(marker);
+  }
+
   return marker;
 }
 
 static const char *forensic_get_end_marker(unsigned int criterion,
     size_t *markerlen) {
-  const char *marker;
+  const char *marker = NULL;
 
   switch (criterion) {
     case FORENSIC_CRIT_FAILED_LOGIN:
@@ -201,7 +204,10 @@ static const char *forensic_get_end_marker(unsigned int criterion,
       break;
   }
 
-  *markerlen = strlen(marker);
+  if (marker != NULL) {
+    *markerlen = strlen(marker);
+  }
+
   return marker;
 }
 
@@ -501,8 +507,8 @@ static void forensic_write_msgs(unsigned int criterion) {
   register unsigned int i;
   unsigned int start_idx, end_idx;
   int res;
-  const char *crit_marker;
-  size_t crit_markerlen;
+  const char *crit_marker = NULL;
+  size_t crit_markerlen = 0;
 
   /* XXX An interesting optimization would be to rework this code so that
    * we used writev(2) to write out the buffer as quickly as possible,
@@ -510,7 +516,9 @@ static void forensic_write_msgs(unsigned int criterion) {
    */
 
   crit_marker = forensic_get_begin_marker(criterion, &crit_markerlen);
-  res = write(forensic_logfd, crit_marker, crit_markerlen);
+  if (crit_marker != NULL) {
+    res = write(forensic_logfd, crit_marker, crit_markerlen);
+  }
 
   forensic_write_metadata();
 
@@ -621,7 +629,9 @@ static void forensic_write_msgs(unsigned int criterion) {
   }
 
   crit_marker = forensic_get_end_marker(criterion, &crit_markerlen);
-  res = write(forensic_logfd, crit_marker, crit_markerlen);
+  if (crit_marker != NULL) {
+    res = write(forensic_logfd, crit_marker, crit_markerlen);
+  }
 }
 
 /* Configuration handlers
