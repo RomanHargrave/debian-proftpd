@@ -1,6 +1,14 @@
+proftpd-dfsg (1.3.5~rc3-1) unstable; urgency=low
+
+  * New upstream pre-release. 
+  * First upload in sid for 1.3.5 series.
+  * Policy bumped to 3.9.4, no changes required.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Mon, 24 Jun 2013 17:39:40 +0200
+
 proftpd-dfsg (1.3.5~rc2-1) experimental; urgency=low
 
-  * New upstream pre-releaese.
+  * New upstream pre-release.
     (closes: #671063)
   * Refreshed all Debian related patches.
   * Do not install ftpasswd.1 anymore.
