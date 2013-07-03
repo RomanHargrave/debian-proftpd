@@ -1,3 +1,14 @@
+proftpd-dfsg (1.3.5~rc3-2) UNRELEASED; urgency=low
+
+  * Added version for dependency on memcached, for completeness.
+    (closes: #699514)
+  * The old proftpd-mod-geoip addon module is now onbsoleted by core proftpd,
+    so required Breaks/Replaces are provided to avoid piuparts breakages.
+    (closes: #699647)
+  * Modified modules.conf template to suggest the geoip module.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Wed, 03 Jul 2013 14:09:32 +0200
+
 proftpd-dfsg (1.3.5~rc3-1) unstable; urgency=low
 
   * New upstream pre-release. 
