@@ -1,11 +1,11 @@
 Index: proftpd-dfsg/contrib/mod_load/Makefile.in
 ===================================================================
---- proftpd-dfsg.orig/contrib/mod_load/Makefile.in	2013-01-08 13:56:32.000000000 +0100
-+++ proftpd-dfsg/contrib/mod_load/Makefile.in	2013-01-10 14:30:50.000000000 +0100
+--- proftpd-dfsg.orig/contrib/mod_load/Makefile.in	2014-01-30 13:47:39.000000000 +0100
++++ proftpd-dfsg/contrib/mod_load/Makefile.in	2014-01-30 13:48:27.000000000 +0100
 @@ -17,6 +17,9 @@
  # Necessary redefinitions
  CPPFLAGS= -DHAVE_CONFIG_H $(DEFAULT_PATHS) $(PLATFORM) $(MODULE_INCLUDES)
- LDFLAGS=-L../../lib
+ LDFLAGS=-L../../lib @LDFLAGS@
 +# Add (hardening) flags.
 +CPPFLAGS += $(shell dpkg-buildflags --get CPPFLAGS)
 +LDFLAGS  += $(shell dpkg-buildflags --get LDFLAGS)
@@ -14,12 +14,12 @@ Index: proftpd-dfsg/contrib/mod_load/Makefile.in
  	$(CC) $(CPPFLAGS) $(CFLAGS) -c $<
 Index: proftpd-dfsg/contrib/mod_sftp/Makefile.in
 ===================================================================
---- proftpd-dfsg.orig/contrib/mod_sftp/Makefile.in	2013-01-09 13:06:28.000000000 +0100
-+++ proftpd-dfsg/contrib/mod_sftp/Makefile.in	2013-01-10 14:30:50.000000000 +0100
+--- proftpd-dfsg.orig/contrib/mod_sftp/Makefile.in	2014-01-30 13:47:39.000000000 +0100
++++ proftpd-dfsg/contrib/mod_sftp/Makefile.in	2014-01-30 13:49:51.000000000 +0100
 @@ -26,6 +26,9 @@
  INCLUDES=-I. -I../.. -I../../include @INCLUDES@
  CPPFLAGS= $(ADDL_CPPFLAGS) -DHAVE_CONFIG_H $(DEFAULT_PATHS) $(PLATFORM) $(INCLUDES)
- LDFLAGS=-L../../lib @LIBDIRS@
+ LDFLAGS=-L../../lib @LDFLAGS@
 +# Add (hardening) flags.
 +CPPFLAGS += $(shell dpkg-buildflags --get CPPFLAGS)
 +LDFLAGS  += $(shell dpkg-buildflags --get LDFLAGS)
@@ -28,12 +28,12 @@ Index: proftpd-dfsg/contrib/mod_sftp/Makefile.in
  	$(CC) $(CPPFLAGS) $(CFLAGS) -c $<
 Index: proftpd-dfsg/contrib/mod_wrap2/Makefile.in
 ===================================================================
---- proftpd-dfsg.orig/contrib/mod_wrap2/Makefile.in	2013-01-08 13:56:32.000000000 +0100
-+++ proftpd-dfsg/contrib/mod_wrap2/Makefile.in	2013-01-10 14:30:50.000000000 +0100
+--- proftpd-dfsg.orig/contrib/mod_wrap2/Makefile.in	2014-01-30 13:47:39.000000000 +0100
++++ proftpd-dfsg/contrib/mod_wrap2/Makefile.in	2014-01-30 13:50:18.000000000 +0100
 @@ -17,6 +17,9 @@
  # Necessary redefinitions
  CPPFLAGS= -DHAVE_CONFIG_H $(DEFAULT_PATHS) $(PLATFORM) $(MODULE_INCLUDES)
- LDFLAGS=-L../../lib
+ LDFLAGS=-L../../lib @LDFLAGS@
 +# Add (hardening) flags.
 +CPPFLAGS += $(shell dpkg-buildflags --get CPPFLAGS)
 +LDFLAGS  += $(shell dpkg-buildflags --get LDFLAGS)

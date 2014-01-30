@@ -4,9 +4,9 @@ Forwarded: not needed
 
 Index: proftpd-dfsg/contrib/xferstats.holger-preiss
 ===================================================================
---- proftpd-dfsg.orig/contrib/xferstats.holger-preiss	2011-10-05 18:19:34.000000000 +0200
-+++ proftpd-dfsg/contrib/xferstats.holger-preiss	2011-10-06 10:39:31.000000000 +0200
-@@ -38,6 +38,8 @@
+--- proftpd-dfsg.orig/contrib/xferstats.holger-preiss	2014-01-30 13:42:22.000000000 +0100
++++ proftpd-dfsg/contrib/xferstats.holger-preiss	2014-01-30 13:45:32.000000000 +0100
+@@ -45,6 +45,8 @@
  #  -added option A which compares the addresses end with a given pattern
  #  -added option i and o which reports either incoming or outgoing traffic only
  
@@ -15,17 +15,17 @@ Index: proftpd-dfsg/contrib/xferstats.holger-preiss
  @mydom = split(/\./, `dnsdomainname`);
  $mydom2 = pop(@mydom); chop($mydom2);
  $mydom1 = pop(@mydom);
-@@ -59,8 +61,7 @@
+@@ -66,8 +68,7 @@
  $opt_t = 1;
  $opt_l = 3;
  
 -require 'getopts.pl';
--&Getopts('f:rahdD:l:s:A:iou:');
-+getopts('f:rahdD:l:s:A:iou:');
+-&Getopts('f:rahdD:l:s:A:iotu:e');
++getopts('f:rahdD:l:s:A:iotu:e');
  
  if ($opt_r) { $real = 1;}
  if ($opt_a) { $anon = 1;}
-@@ -196,8 +197,8 @@
+@@ -209,8 +210,8 @@
  }
  close LOG;
  
@@ -36,7 +36,7 @@ Index: proftpd-dfsg/contrib/xferstats.holger-preiss
  
  if ($xferfiles == 0) {die "There was no data to process.\n";}
  
-@@ -231,7 +232,7 @@
+@@ -244,7 +245,7 @@
  
  # sort daily traffic by bytes sendt
  #foreach $date ( sort datecompare keys(nbytes) ) {
@@ -45,7 +45,7 @@ Index: proftpd-dfsg/contrib/xferstats.holger-preiss
  
     $nfiles = $xferfiles{$date};
     $nbytes = $xferbytes{$date};
-@@ -250,14 +251,14 @@
+@@ -263,14 +264,14 @@
  
  Total Transfers from each Archive Section (By bytes)
  
@@ -65,7 +65,7 @@ Index: proftpd-dfsg/contrib/xferstats.holger-preiss
  .
  
  $| = 1;
-@@ -266,7 +267,7 @@
+@@ -279,7 +280,7 @@
  $~ = line2;
  
  # sort total transfer for each archive by # files transfered
@@ -74,7 +74,7 @@ Index: proftpd-dfsg/contrib/xferstats.holger-preiss
  
     $files = $groupfiles{$section};
     $bytes = $groupbytes{$section};
-@@ -298,7 +299,7 @@
+@@ -311,7 +312,7 @@
  $~ = line3;
  
  # sort amount per domain by files
@@ -83,7 +83,7 @@ Index: proftpd-dfsg/contrib/xferstats.holger-preiss
  
     $files = $domainfiles{$domain};
     $bytes = $domainbytes{$domain};
-@@ -340,7 +341,7 @@
+@@ -353,7 +354,7 @@
  $~ = line8;
  
  # sort hourly transmission by sent bytes

@@ -8,6 +8,7 @@ proftpd-dfsg (1.3.5~rc4-1) unstable; urgency=low
       on upgrades from wheezy. Otherwise the buggy postrm script would delete
       some files from the newly unpacked package. 
     (closes: #699647)
+  * Refreshed patchset.
 
  -- Francesco Paolo Lovergine <frankie@debian.org>  Thu, 30 Jan 2014 13:20:53 +0100
 
