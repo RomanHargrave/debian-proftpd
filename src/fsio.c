@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2013 The ProFTPD Project
+ * Copyright (c) 2001-2014 The ProFTPD Project
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* ProFTPD virtual/modular file-system support
- * $Id: fsio.c,v 1.136 2013/03/08 19:45:28 castaglia Exp $
+ * $Id: fsio.c,v 1.155 2014/01/27 18:25:15 castaglia Exp $
  */
 
 #include "conf.h"
@@ -561,20 +561,24 @@ static pr_fs_t *lookup_file_fs(const char *path, char **deref, int op) {
 
       /* Determine which function to use, stat() or lstat(). */
       if (op == FSIO_FILE_STAT) {
-        while (fs && fs->fs_next && !fs->stat)
+        while (fs && fs->fs_next && !fs->stat) {
           fs = fs->fs_next;
+        }
 
         mystat = fs->stat;
 
       } else {
-        while (fs && fs->fs_next && !fs->lstat)
+        while (fs && fs->fs_next && !fs->lstat) {
           fs = fs->fs_next;
+        }
 
         mystat = fs->lstat;
       }
 
-      if (mystat(fs, path, &sbuf) == -1 || !S_ISLNK(sbuf.st_mode))
+      if (mystat(fs, path, &sbuf) == -1 ||
+          !S_ISLNK(sbuf.st_mode)) {
         return fs;
+      }
 
     } else {
 
@@ -591,8 +595,9 @@ static pr_fs_t *lookup_file_fs(const char *path, char **deref, int op) {
       if (i != -1) {
         linkbuf[i] = '\0';
         if (strchr(linkbuf, '/') == NULL) {
-          if (i + 3 > PR_TUNABLE_PATH_MAX)
+          if (i + 3 > PR_TUNABLE_PATH_MAX) {
             i = PR_TUNABLE_PATH_MAX - 3;
+          }
 
           memmove(&linkbuf[2], linkbuf, i + 1);
 
@@ -621,17 +626,20 @@ static pr_fs_t *lookup_file_canon_fs(const char *path, char **deref, int op) {
   if (pr_fs_resolve_partial(path, workpath, sizeof(workpath)-1,
       FSIO_FILE_OPEN) == -1) {
     if (*path == '/' || *path == '~') {
-      if (pr_fs_interpolate(path, workpath, sizeof(workpath)-1) != -1)
+      if (pr_fs_interpolate(path, workpath, sizeof(workpath)-1) != -1) {
         sstrncpy(workpath, path, sizeof(workpath));
+      }
 
     } else {
-      if (pr_fs_dircat(workpath, sizeof(workpath), cwd, path) < 0)
+      if (pr_fs_dircat(workpath, sizeof(workpath), cwd, path) < 0) {
         return NULL;
+      }
     }
   }
 
-  if (deref)
+  if (deref) {
     *deref = workpath;
+  }
 
   return lookup_file_fs(workpath, deref, op);
 }
@@ -761,7 +769,7 @@ int pr_fs_copy_file(const char *src, const char *dst) {
   bufsz = src_st.st_blksize;
   buf = malloc(bufsz);
   if (buf == NULL) {
-    pr_log_pri(PR_LOG_CRIT, "Out of memory!");
+    pr_log_pri(PR_LOG_ALERT, "Out of memory!");
     exit(1);
   }
 
@@ -886,8 +894,8 @@ int pr_fs_copy_file(const char *src, const char *dst) {
       aclent_t *acls;
 
       acls = malloc(sizeof(aclent_t) * nents);
-      if (!acls) {
-        pr_log_pri(PR_LOG_CRIT, "Out of memory!");
+      if (!acls) { 
+        pr_log_pri(PR_LOG_ALERT, "Out of memory!");
         exit(1);
       }
 
@@ -1033,7 +1041,7 @@ int pr_insert_fs(pr_fs_t *fs, const char *path) {
          * mounted is not the same as the one already present.
          */
         if (strcmp(fsi->fs_name, fs->fs_name) == 0) {
-          pr_log_pri(PR_LOG_DEBUG,
+          pr_log_pri(PR_LOG_NOTICE,
             "error: duplicate fs paths not allowed: '%s'", cleaned_path);
           errno = EEXIST;
           return FALSE;
@@ -1300,7 +1308,8 @@ pr_fs_match_t *pr_create_fs_match(pool *p, const char *name,
     pr_regexp_error(res, regexp, regerr, sizeof(regerr));
     pr_regexp_free(regexp);
 
-    pr_log_pri(PR_LOG_ERR, "unable to compile regex '%s': %s", pattern, regerr);
+    pr_log_pri(PR_LOG_WARNING, "unable to compile regex '%s': %s", pattern,
+      regerr);
 
     /* Destroy the just allocated pr_fs_match_t */
     destroy_pool(fsm->fsm_pool);
@@ -1496,33 +1505,44 @@ const char *pr_fs_getvwd(void) {
 
 int pr_fs_dircat(char *buf, int buflen, const char *dir1, const char *dir2) {
   /* Make temporary copies so that memory areas can overlap */
-  char *_dir1 = NULL, *_dir2 = NULL;
-  size_t dir1len = 0;
+  char *_dir1 = NULL, *_dir2 = NULL, *ptr = NULL;
+  size_t dir1len = 0, dir2len = 0;
 
-  if (!dir1 || !dir2) {
+  /* The shortest possible path is "/", which requires 2 bytes. */
+
+  if (buf == NULL ||
+      buflen < 2 ||
+      dir1 == NULL ||
+      dir2 == NULL) {
     errno = EINVAL;
     return -1;
   }
 
   /* This is a test to see if we've got reasonable directories to concatenate.
    */
-  if ((strlen(dir1) + strlen(dir2) + 1) >= PR_TUNABLE_PATH_MAX) {
+  dir1len = strlen(dir1);
+  dir2len = strlen(dir2);
+
+  if ((dir1len + dir2len + 1) >= PR_TUNABLE_PATH_MAX) {
     errno = ENAMETOOLONG;
     buf[0] = '\0';  
     return -1;
   }
 
   _dir1 = strdup(dir1);
-  if (!_dir1)
-    return -1;
-
-  _dir2 = strdup(dir2);
-  if (!_dir2) {
-    free(_dir1);
+  if (_dir1 == NULL) {
     return -1;
   }
 
-  dir1len = strlen(_dir1) - 1;
+  _dir2 = strdup(dir2);
+  if (_dir2 == NULL) {
+    int xerrno = errno;
+
+    free(_dir1);
+
+    errno = xerrno;
+    return -1;
+  }
 
   if (*_dir2 == '/') {
     sstrncpy(buf, _dir2, buflen);
@@ -1531,14 +1551,21 @@ int pr_fs_dircat(char *buf, int buflen, const char *dir1, const char *dir2) {
     return 0;
   }
 
-  sstrncpy(buf, _dir1, buflen);
+  ptr = buf;
+  sstrncpy(ptr, _dir1, buflen);
+  ptr += dir1len;
+  buflen -= dir1len;
 
-  if (buflen && *(_dir1 + dir1len) != '/')
-    sstrcat(buf, "/", buflen);
+  if (buflen > 0 &&
+     *(_dir1 + (dir1len-1)) != '/') {
+    sstrcat(ptr, "/", buflen);
+    ptr += 1;
+    buflen -= 1;
+  }
 
-  sstrcat(buf, _dir2, buflen);
+  sstrcat(ptr, _dir2, buflen);
 
-  if (!*buf) {
+  if (*buf == '\0') {
    *buf++ = '/';
    *buf = '\0';
   }
@@ -1695,8 +1722,8 @@ int pr_fs_resolve_partial(const char *path, char *buf, size_t buflen, int op) {
 
   pr_fs_t *fs = NULL;
   int len = 0, fini = 1, link_cnt = 0;
-  ino_t last_inode = 0;
-  dev_t last_device = 0;
+  ino_t prev_inode = 0;
+  dev_t prev_device = 0;
   struct stat sbuf;
 
   if (!path) {
@@ -1808,16 +1835,16 @@ int pr_fs_resolve_partial(const char *path, char *buf, size_t buflen, int op) {
         char linkpath[PR_TUNABLE_PATH_MAX + 1] = {'\0'};
 
         /* Detect an obvious recursive symlink */
-        if (sbuf.st_ino && (ino_t) sbuf.st_ino == last_inode &&
-            sbuf.st_dev && (dev_t) sbuf.st_dev == last_device) {
+        if (sbuf.st_ino && (ino_t) sbuf.st_ino == prev_inode &&
+            sbuf.st_dev && (dev_t) sbuf.st_dev == prev_device) {
           errno = ELOOP;
           return -1;
         }
 
-        last_inode = (ino_t) sbuf.st_ino;
-        last_device = (dev_t) sbuf.st_dev;
+        prev_inode = (ino_t) sbuf.st_ino;
+        prev_device = (dev_t) sbuf.st_dev;
 
-        if (++link_cnt > 32) {
+        if (++link_cnt > PR_FSIO_MAX_LINK_COUNT) {
           errno = ELOOP;
           return -1;
         }
@@ -1888,8 +1915,8 @@ int pr_fs_resolve_path(const char *path, char *buf, size_t buflen, int op) {
   pr_fs_t *fs = NULL;
 
   int len = 0, fini = 1, link_cnt = 0;
-  ino_t last_inode = 0;
-  dev_t last_device = 0;
+  ino_t prev_inode = 0;
+  dev_t prev_device = 0;
   struct stat sbuf;
 
   if (!path) {
@@ -1974,16 +2001,16 @@ int pr_fs_resolve_path(const char *path, char *buf, size_t buflen, int op) {
         char linkpath[PR_TUNABLE_PATH_MAX + 1] = {'\0'};
 
         /* Detect an obvious recursive symlink */
-        if (sbuf.st_ino && (ino_t) sbuf.st_ino == last_inode &&
-            sbuf.st_dev && (dev_t) sbuf.st_dev == last_device) {
+        if (sbuf.st_ino && (ino_t) sbuf.st_ino == prev_inode &&
+            sbuf.st_dev && (dev_t) sbuf.st_dev == prev_device) {
           errno = ELOOP;
           return -1;
         }
 
-        last_inode = (ino_t) sbuf.st_ino;
-        last_device = (dev_t) sbuf.st_dev;
+        prev_inode = (ino_t) sbuf.st_ino;
+        prev_device = (dev_t) sbuf.st_dev;
 
-        if (++link_cnt > 32) {
+        if (++link_cnt > PR_FSIO_MAX_LINK_COUNT) {
           errno = ELOOP;
           return -1;
         }
@@ -2045,22 +2072,33 @@ int pr_fs_resolve_path(const char *path, char *buf, size_t buflen, int op) {
   return 0;
 }
 
-void pr_fs_clean_path(const char *path, char *buf, size_t buflen) {
+int pr_fs_clean_path2(const char *path, char *buf, size_t buflen, int flags) {
   char workpath[PR_TUNABLE_PATH_MAX + 1] = {'\0'};
   char curpath[PR_TUNABLE_PATH_MAX + 1]  = {'\0'};
   char namebuf[PR_TUNABLE_PATH_MAX + 1]  = {'\0'};
-  char *where = NULL, *ptr = NULL, *last = NULL;
-  int fini = 1;
+  int fini = 1, have_abs_path = FALSE;
 
-  if (!path)
-    return;
+  if (path == NULL ||
+      buf == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  if (buflen == 0) {
+    return 0;
+  }
 
   sstrncpy(curpath, path, sizeof(curpath));
 
+  if (*curpath == '/') {
+    have_abs_path = TRUE;
+  }
+
   /* main loop */
   while (fini--) {
-    where = curpath;
+    char *where = NULL, *ptr = NULL, *last = NULL;
 
+    where = curpath;
     while (*where != '\0') {
       pr_signals_handle();
 
@@ -2081,8 +2119,12 @@ void pr_fs_clean_path(const char *path, char *buf, size_t buflen) {
         ptr = last = workpath;
 
         while (*ptr) {
-          if (*ptr == '/')
+          pr_signals_handle();
+
+          if (*ptr == '/') {
             last = ptr;
+          }
+
           ptr++;
         }
 
@@ -2096,34 +2138,46 @@ void pr_fs_clean_path(const char *path, char *buf, size_t buflen) {
         ptr = last = workpath;
 
         while (*ptr) {
-          if (*ptr == '/')
+          pr_signals_handle();
+
+          if (*ptr == '/') {
             last = ptr;
+          }
           ptr++;
         }
+
         *last = '\0';
         continue;
       }
-      ptr = strchr(where, '/');
 
-      if (!ptr) {
+      ptr = strchr(where, '/');
+      if (ptr == NULL) {
         size_t wherelen = strlen(where);
 
         ptr = where;
-        if (wherelen >= 1)
+        if (wherelen >= 1) {
           ptr += (wherelen - 1);
+        }
 
-      } else
+      } else {
         *ptr = '\0';
+      }
 
       sstrncpy(namebuf, workpath, sizeof(namebuf));
 
       if (*namebuf) {
         for (last = namebuf; *last; last++);
-        if (*--last != '/')
+        if (*--last != '/') {
           sstrcat(namebuf, "/", sizeof(namebuf)-1);
+        }
 
-      } else
-        sstrcat(namebuf, "/", sizeof(namebuf)-1);
+      } else {
+        if (have_abs_path ||
+            (flags & PR_FSIO_CLEAN_PATH_FL_MAKE_ABS_PATH)) {
+          sstrcat(namebuf, "/", sizeof(namebuf)-1);
+          have_abs_path = FALSE;
+        }
+      }
 
       sstrcat(namebuf, where, sizeof(namebuf)-1);
       namebuf[sizeof(namebuf)-1] = '\0';
@@ -2134,10 +2188,16 @@ void pr_fs_clean_path(const char *path, char *buf, size_t buflen) {
     }
   }
 
-  if (!workpath[0])
+  if (!workpath[0]) {
     sstrncpy(workpath, "/", sizeof(workpath));
+  }
 
   sstrncpy(buf, workpath, buflen);
+  return 0;
+}
+
+void pr_fs_clean_path(const char *path, char *buf, size_t buflen) {
+  pr_fs_clean_path2(path, buf, buflen, PR_FSIO_CLEAN_PATH_FL_MAKE_ABS_PATH);
 }
 
 int pr_fs_use_encoding(int bool) {
@@ -2151,6 +2211,12 @@ char *pr_fs_decode_path(pool *p, const char *path) {
 #ifdef PR_USE_NLS
   size_t outlen;
   char *res;
+
+  if (p == NULL ||
+      path == NULL) {
+    errno = EINVAL;
+    return NULL;
+  }
 
   if (!use_encoding) {
     return (char *) path;
@@ -2194,6 +2260,12 @@ char *pr_fs_encode_path(pool *p, const char *path) {
 #ifdef PR_USE_NLS
   size_t outlen;
   char *res;
+
+  if (p == NULL ||
+      path == NULL) {
+    errno = EINVAL;
+    return NULL;
+  }
 
   if (!use_encoding) {
     return (char *) path;
@@ -2246,8 +2318,9 @@ int pr_fs_valid_path(const char *path) {
     for (i = 0; i < fs_map->nelts; i++) {
       fsi = fs_objs[i];
 
-      if (strncmp(fsi->fs_path, path, strlen(fsi->fs_path)) == 0)
+      if (strncmp(fsi->fs_path, path, strlen(fsi->fs_path)) == 0) {
         return 0;
+      }
     }
   }
 
@@ -2630,6 +2703,118 @@ int pr_fsio_set_use_mkdtemp(int value) {
   return prev_value;
 }
 
+/* Directory-specific "safe" chmod(2) which attempts to avoid/mitigate
+ * symlink attacks.
+ * 
+ * To do this, we first open a file descriptor on the given path, using
+ * O_NOFOLLOW to avoid symlinks.  If the fd is not to a directory, it's
+ * an error.  Then we use fchmod(2) to set the perms.  There is still a
+ * race condition here, between the time the directory is created and
+ * when we call open(2).  But hopefully the ensuing checks on the fd
+ * (i.e. that it IS a directory) can mitigate that race.
+ *
+ * The fun part is ensuring that the OS/filesystem will give us an fd
+ * on a directory path (using O_RDONLY to avoid getting an EISDIR error),
+ * whilst being able to do a write (effectively) on the fd by changing
+ * its permissions.
+ */
+static int schmod_dir(pool *p, const char *path, mode_t perms, int use_root) {
+  int flags, fd, res, xerrno = 0;
+  struct stat st;
+
+  /* We're not using the pool at the moment. */
+  (void) p;
+
+  /* Open an fd on the path using O_RDONLY|O_NOFOLLOW, so that we a)
+   * avoid symlinks, and b) get an fd on the (hopefully) directory.
+   */
+  flags = O_RDONLY|O_NOFOLLOW;
+  fd = open(path, flags);
+  xerrno = errno;
+
+  if (fd < 0) {
+    pr_trace_msg(trace_channel, 3,
+      "schmod: unable to open path '%s': %s", path, strerror(xerrno));
+    errno = xerrno;
+    return -1;
+  }
+
+  res = fstat(fd, &st);
+  if (res < 0) {
+    xerrno = errno;
+
+    (void) close(fd);
+
+    pr_trace_msg(trace_channel, 3,
+      "schmod: unable to fstat path '%s': %s", path, strerror(xerrno));
+    errno = xerrno;
+    return -1;
+  }
+
+  /* We expect only directories. */
+  if (!S_ISDIR(st.st_mode)) {
+    xerrno = ENOTDIR;
+
+    (void) close(fd);
+  
+    pr_trace_msg(trace_channel, 3,
+      "schmod: unable to use path '%s': %s", path, strerror(xerrno));
+
+    /* This is such an unexpected (and possibly malicious) situation that
+     * it warrants louder logging.
+     */
+    pr_log_pri(PR_LOG_WARNING,
+      "WARNING: detected non-directory '%s' during directory creation: "
+      "possible symlink attack", path);
+
+    errno = xerrno;
+    return -1;
+  }
+
+  if (use_root) {
+    PRIVS_ROOT
+  }
+
+  res = fchmod(fd, perms);
+  xerrno = xerrno;
+
+  if (use_root) {
+    PRIVS_RELINQUISH
+  }
+
+  /* At this point, succeed or fail, we're done with the fd. */
+  (void) close(fd);
+
+  if (res < 0) {
+    /* Note: Some filesystem implementations, particularly via FUSE,
+     * may not actually implement ownership/permissions (e.g. FAT-based
+     * filesystems).  In such cases, chmod(2) et al will return ENOSYS
+     * (see Bug#3986).
+     *
+     * Should this fail the entire operation?  I'm of two minds about this.
+     * On the one hand, such filesystem behavior can undermine wider site
+     * security policies; on the other, prohibiting a MKD/MKDIR operation
+     * on such filesystems, deliberately used by the site admin, is not
+     * useful/friendly behavior.
+     *
+     * Maybe this exception for ENOSYS here should be made configurable?
+     */
+    if (xerrno != ENOSYS) {
+      pr_trace_msg(trace_channel, 3,
+        "schmod: unable to set perms %04o on path '%s': %s", perms, path,
+        strerror(xerrno));
+      errno = xerrno;
+      return -1;
+    }
+
+    pr_log_debug(DEBUG0, "mkdir: unable to set perms %04o on "
+      "path '%s': %s (chmod(2) not supported by underlying filesystem?)",
+      perms, path, strerror(xerrno));
+  }
+
+  return 0;
+}
+
 /* "safe mkdir" variant of mkdir(2), uses mkdtemp(3), lchown(2), and
  * rename(2) to create a directory which cannot be hijacked by a symlink
  * race (hopefully) before the UserOwner/GroupOwner ownership changes are
@@ -2637,8 +2822,7 @@ int pr_fsio_set_use_mkdtemp(int value) {
  */
 int pr_fsio_smkdir(pool *p, const char *path, mode_t mode, uid_t uid,
     gid_t gid) {
-  int res, parent_suid = FALSE, parent_sgid = FALSE, use_root_privs = TRUE,
-    xerrno = 0;
+  int res, set_sgid = FALSE, xerrno = 0;
   char *tmpl_path;
   char *dst_dir, *tmpl;
   size_t dst_dirlen, tmpl_len;
@@ -2649,7 +2833,7 @@ int pr_fsio_smkdir(pool *p, const char *path, mode_t mode, uid_t uid,
   }
 
   pr_trace_msg(trace_channel, 9,
-    "smkdir: path '%s', mode %04o, UID %lu, GID %lu", path, mode,
+    "smkdir: path '%s', mode %04o, UID %lu, GID %lu", path, (unsigned int) mode,
     (unsigned long) uid, (unsigned long) gid);
 
 #ifdef HAVE_MKDTEMP
@@ -2683,21 +2867,17 @@ int pr_fsio_smkdir(pool *p, const char *path, mode_t mode, uid_t uid,
       return -1;
     }
 
-    if (st.st_mode & S_ISUID) {
-      parent_suid = TRUE;
-    }
-
     if (st.st_mode & S_ISGID) {
-      parent_sgid = TRUE;
+      set_sgid = TRUE;
     }
 
     /* Allocate enough space for the temporary name: the length of the
      * destination directory, a slash, 9 X's, 3 for the prefix, and 1 for the
      * trailing NUL.
      */
-    tmpl_len = dst_dirlen + 14;
+    tmpl_len = dst_dirlen + 15;
     tmpl = pcalloc(p, tmpl_len);
-    snprintf(tmpl, tmpl_len-1, "%s/dstXXXXXXXXX",
+    snprintf(tmpl, tmpl_len-1, "%s/.dstXXXXXXXXX",
       dst_dirlen > 1 ? dst_dir : "");
 
     /* Use mkdtemp(3) to create the temporary directory (in the same destination
@@ -2726,6 +2906,62 @@ int pr_fsio_smkdir(pool *p, const char *path, mode_t mode, uid_t uid,
   tmpl_path = pstrdup(p, path);
 #endif /* HAVE_MKDTEMP */
 
+  if (use_mkdtemp == TRUE) {
+    mode_t mask, *dir_umask, perms;
+
+    /* mkdtemp(3) creates a directory with 0700 perms; we are given the
+     * target mode (modulo the configured Umask).
+     */
+    dir_umask = get_param_ptr(CURRENT_CONF, "DirUmask", FALSE);
+    if (dir_umask == NULL) {
+      /* If Umask was configured with a single parameter, then DirUmask
+       * would not be present; we still should check for Umask.
+       */
+      dir_umask = get_param_ptr(CURRENT_CONF, "Umask", FALSE);
+    }
+
+    if (dir_umask) {
+      mask = *dir_umask;
+
+    } else {
+      mask = (mode_t) 0022;
+    }
+
+    perms = (mode & ~mask);
+
+    if (set_sgid) {
+      perms |= S_ISGID;
+    }
+
+    /* If we're setting the SGID bit, we need to use root privs, in order
+     * to reliably set the SGID bit.  Sigh.
+     */
+    res = schmod_dir(p, tmpl_path, perms, set_sgid);
+    xerrno = errno;
+
+    if (set_sgid) {
+      if (res < 0 &&
+          xerrno == EPERM) {
+        /* Try again, this time without root privs.  NFS situations which
+         * squash root privs could cause the above chmod(2) to fail; it
+         * might succeed now that we've dropped root privs (Bug#3962).
+         */
+        res = schmod_dir(p, tmpl_path, perms, FALSE);
+        xerrno = errno;
+      }
+    }
+
+    if (res < 0) {
+      pr_log_pri(PR_LOG_WARNING, "chmod(%s) failed: %s", tmpl_path,
+        strerror(xerrno));
+
+      (void) rmdir(tmpl_path);
+
+      errno = xerrno;
+      return -1;
+    }
+  }
+
   if (uid != (uid_t) -1) {
     PRIVS_ROOT
     res = pr_fsio_lchown(tmpl_path, uid, gid);
@@ -2749,85 +2985,40 @@ int pr_fsio_smkdir(pool *p, const char *path, mode_t mode, uid_t uid,
 
   } else if (gid != (gid_t) -1) {
     register unsigned int i;
+    int use_root_chown = TRUE;
 
     /* Check if session.fsgid is in session.gids.  If not, use root privs.  */
     for (i = 0; i < session.gids->nelts; i++) {
       gid_t *group_ids = session.gids->elts;
 
       if (group_ids[i] == gid) {
-        use_root_privs = FALSE;
+        use_root_chown = FALSE;
         break;
       }
     }
 
-    if (use_root_privs) {
+    if (use_root_chown) {
       PRIVS_ROOT
     }
 
     res = pr_fsio_lchown(tmpl_path, (uid_t) -1, gid);
     xerrno = errno;
 
-    if (use_root_privs) {
+    if (use_root_chown) {
       PRIVS_RELINQUISH
     }
 
     if (res < 0) {
       pr_log_pri(PR_LOG_WARNING, "%slchown(%s) failed: %s",
-        use_root_privs ? "root " : "", tmpl_path, strerror(xerrno));
+        use_root_chown ? "root " : "", tmpl_path, strerror(xerrno));
 
     } else {
       pr_log_debug(DEBUG2, "%slchown(%s) to GID %lu successful",
-        use_root_privs ? "root " : "", tmpl_path, (unsigned long) gid);
+        use_root_chown ? "root " : "", tmpl_path, (unsigned long) gid);
     }
   }
 
   if (use_mkdtemp == TRUE) {
-    mode_t mask, *dir_umask, perms;
-
-    /* Use chmod(2) to set the permission that we want.
-     *
-     * mkdtemp(3) creates a directory with 0700 perms; we are given the
-     * target mode (modulo the configured Umask).
-     */
-    dir_umask = get_param_ptr(CURRENT_CONF, "DirUmask", FALSE);
-    if (dir_umask) {
-      mask = *dir_umask;
-
-    } else {
-      mask = (mode_t) 0022;
-    }
-
-    perms = (mode & ~mask);
-
-    if (parent_suid) {
-      perms |= S_ISUID;
-    }
-
-    if (parent_sgid) {
-      perms |= S_ISGID;
-    }
-
-    if (use_root_privs) {
-      PRIVS_ROOT
-    }
-
-    res = chmod(tmpl_path, perms);
-    xerrno = errno;
-
-    if (use_root_privs) {
-      PRIVS_RELINQUISH
-    }
-
-    if (res < 0) {
-      pr_log_pri(PR_LOG_WARNING, "%schmod(%s) failed: %s",
-        use_root_privs ? "root " : "", tmpl_path, strerror(xerrno));
-
-      (void) rmdir(tmpl_path);
-
-      errno = xerrno;
-      return -1;
-    }
-
     /* Use rename(2) to move the temporary directory into place at the
      * target path.
      */
@@ -3966,12 +4157,14 @@ char *pr_fsio_gets(char *buf, size_t size, pr_fh_t *fh) {
   int toread = 0;
   pr_buffer_t *pbuf = NULL;
 
-  if (!buf || !fh || size <= 0) {
+  if (buf == NULL ||
+      fh  == NULL ||
+      size <= 0) {
     errno = EINVAL;
     return NULL;
   }
 
-  if (!fh->fh_buf) {
+  if (fh->fh_buf == NULL) {
     size_t bufsz;
 
     /* Conscientious callers who want the optimal IO on the file should
@@ -3990,27 +4183,29 @@ char *pr_fsio_gets(char *buf, size_t size, pr_fh_t *fh) {
   while (size) {
     pr_signals_handle();
 
-    if (!pbuf->current ||
+    if (pbuf->current == NULL ||
         pbuf->remaining == pbuf->buflen) { /* empty buffer */
 
-      toread = pr_fsio_read(fh, pbuf->buf,
-        size < pbuf->buflen ? size : pbuf->buflen);
-
+      toread = pr_fsio_read(fh, pbuf->buf, pbuf->buflen);
       if (toread <= 0) {
         if (bp != buf) {
           *bp = '\0';
           return buf;
+        }
 
-        } else
-          return NULL;
+        return NULL;
       }
 
       pbuf->remaining = pbuf->buflen - toread;
       pbuf->current = pbuf->buf;
 
-    } else
+    } else {
       toread = pbuf->buflen - pbuf->remaining;
+    }
 
+    /* TODO: Improve the efficiency of this copy by using a strnchr(3)
+     * scan to find the next LF, and then a memmove(2) to do the copy.
+     */
     while (size &&
            toread > 0 &&
            *pbuf->current != '\n' &&
@@ -4032,8 +4227,9 @@ char *pr_fsio_gets(char *buf, size_t size, pr_fh_t *fh) {
       break;
     }
 
-    if (!toread)
+    if (!toread) {
       pbuf->current = NULL;
+    }
   }
 
   *bp = '\0';
@@ -4172,6 +4368,33 @@ int pr_fs_get_usable_fd(int fd) {
   }
 
   return fdi;
+}
+
+int pr_fs_get_usable_fd2(int *fd) {
+  int new_fd = -1, res = 0;
+
+  if (fd == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  if (*fd > STDERR_FILENO) {
+    /* No need to obtain a different fd; the given one is already not one
+     * of the big three.
+     */
+    return 0;
+  }
+
+  new_fd = pr_fs_get_usable_fd(*fd);
+  if (new_fd >= 0) {
+    (void) close(*fd);
+    *fd = new_fd;
+
+  } else {
+    res = -1;
+  }
+
+  return res;
 }
 
 /* Simple multiplication and division doesn't work with very large
@@ -4389,6 +4612,7 @@ off_t pr_fs_getsize(char *path) {
 }
 #endif /* !HAVE_STATFS && !HAVE_SYS_STATVFS && !HAVE_SYS_VFS */
 
+/* Returns the size in KB via the `fs_size' argument. */
 int pr_fs_getsize2(char *path, off_t *fs_size) {
   return fs_getsize(-1, path, fs_size);
 }
@@ -4526,7 +4750,7 @@ int init_fs(void) {
     /* Do not insert this fs into the FS map.  This will allow other
      * modules to insert filesystems at "/", if they want.
      */
-    pr_log_pri(PR_LOG_ERR, "error: unable to initialize default fs");
+    pr_log_pri(PR_LOG_WARNING, "error: unable to initialize default FS");
     exit(1);
   }
 

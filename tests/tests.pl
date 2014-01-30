@@ -100,6 +100,7 @@ if (scalar(@ARGV) > 0) {
     t/config/accessdenymsg.t
     t/config/accessgrantmsg.t
     t/config/allowfilter.t
+    t/config/allowforeignaddress.t
     t/config/allowoverwrite.t
     t/config/anonrejectpasswords.t
     t/config/anonrequirepassword.t
@@ -113,6 +114,7 @@ if (scalar(@ARGV) > 0) {
     t/config/createhome.t
     t/config/defaultchdir.t
     t/config/defaultroot.t
+    t/config/deferwelcome.t
     t/config/deleteabortedstores.t
     t/config/denyfilter.t
     t/config/dirfakegroup.t
@@ -158,6 +160,7 @@ if (scalar(@ARGV) > 0) {
     t/config/rootrevoke.t
     t/config/serveradmin.t
     t/config/serverident.t
+    t/config/setenv.t
     t/config/showsymlinks.t
     t/config/socketoptions.t
     t/config/storeuniqueprefix.t

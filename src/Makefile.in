@@ -35,7 +35,7 @@ auth.o: ../include/str.h ../include/ascii.h ../include/table.h
 auth.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 auth.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 auth.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-auth.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+auth.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 auth.o: ../include/stash.h ../include/auth.h ../include/response.h
 auth.o: ../include/timers.h ../include/inet.h ../include/child.h
 auth.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -54,7 +54,7 @@ bindings.o: ../include/str.h ../include/ascii.h ../include/table.h
 bindings.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 bindings.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 bindings.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-bindings.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+bindings.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 bindings.o: ../include/stash.h ../include/auth.h ../include/response.h
 bindings.o: ../include/timers.h ../include/inet.h ../include/child.h
 bindings.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -73,7 +73,7 @@ child.o: ../include/str.h ../include/ascii.h ../include/table.h
 child.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 child.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 child.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-child.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+child.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 child.o: ../include/stash.h ../include/auth.h ../include/response.h
 child.o: ../include/timers.h ../include/inet.h ../include/child.h
 child.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -92,7 +92,7 @@ class.o: ../include/str.h ../include/ascii.h ../include/table.h
 class.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 class.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 class.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-class.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+class.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 class.o: ../include/stash.h ../include/auth.h ../include/response.h
 class.o: ../include/timers.h ../include/inet.h ../include/child.h
 class.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -111,7 +111,7 @@ cmd.o: ../include/str.h ../include/ascii.h ../include/table.h
 cmd.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 cmd.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 cmd.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-cmd.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+cmd.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 cmd.o: ../include/stash.h ../include/auth.h ../include/response.h
 cmd.o: ../include/timers.h ../include/inet.h ../include/child.h
 cmd.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -130,7 +130,7 @@ ctrls.o: ../include/str.h ../include/ascii.h ../include/table.h
 ctrls.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 ctrls.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 ctrls.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-ctrls.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+ctrls.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 ctrls.o: ../include/stash.h ../include/auth.h ../include/response.h
 ctrls.o: ../include/timers.h ../include/inet.h ../include/child.h
 ctrls.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -150,7 +150,7 @@ data.o: ../include/str.h ../include/ascii.h ../include/table.h
 data.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 data.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 data.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-data.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+data.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 data.o: ../include/stash.h ../include/auth.h ../include/response.h
 data.o: ../include/timers.h ../include/inet.h ../include/child.h
 data.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -169,7 +169,7 @@ dirtree.o: ../include/str.h ../include/ascii.h ../include/table.h
 dirtree.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 dirtree.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 dirtree.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-dirtree.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+dirtree.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 dirtree.o: ../include/stash.h ../include/auth.h ../include/response.h
 dirtree.o: ../include/timers.h ../include/inet.h ../include/child.h
 dirtree.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -189,7 +189,7 @@ display.o: ../include/str.h ../include/ascii.h ../include/table.h
 display.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 display.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 display.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-display.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+display.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 display.o: ../include/stash.h ../include/auth.h ../include/response.h
 display.o: ../include/timers.h ../include/inet.h ../include/child.h
 display.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -208,7 +208,7 @@ encode.o: ../include/str.h ../include/ascii.h ../include/table.h
 encode.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 encode.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 encode.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-encode.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+encode.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 encode.o: ../include/stash.h ../include/auth.h ../include/response.h
 encode.o: ../include/timers.h ../include/inet.h ../include/child.h
 encode.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -227,7 +227,7 @@ env.o: ../include/str.h ../include/ascii.h ../include/table.h
 env.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 env.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 env.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-env.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+env.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 env.o: ../include/stash.h ../include/auth.h ../include/response.h
 env.o: ../include/timers.h ../include/inet.h ../include/child.h
 env.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -246,7 +246,7 @@ event.o: ../include/str.h ../include/ascii.h ../include/table.h
 event.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 event.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 event.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-event.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+event.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 event.o: ../include/stash.h ../include/auth.h ../include/response.h
 event.o: ../include/timers.h ../include/inet.h ../include/child.h
 event.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -265,7 +265,7 @@ expr.o: ../include/str.h ../include/ascii.h ../include/table.h
 expr.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 expr.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 expr.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-expr.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+expr.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 expr.o: ../include/stash.h ../include/auth.h ../include/response.h
 expr.o: ../include/timers.h ../include/inet.h ../include/child.h
 expr.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -284,7 +284,7 @@ feat.o: ../include/str.h ../include/ascii.h ../include/table.h
 feat.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 feat.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 feat.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-feat.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+feat.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 feat.o: ../include/stash.h ../include/auth.h ../include/response.h
 feat.o: ../include/timers.h ../include/inet.h ../include/child.h
 feat.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -303,7 +303,7 @@ filter.o: ../include/str.h ../include/ascii.h ../include/table.h
 filter.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 filter.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 filter.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-filter.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+filter.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 filter.o: ../include/stash.h ../include/auth.h ../include/response.h
 filter.o: ../include/timers.h ../include/inet.h ../include/child.h
 filter.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -322,7 +322,7 @@ fsio.o: ../include/str.h ../include/ascii.h ../include/table.h
 fsio.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 fsio.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 fsio.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-fsio.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+fsio.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 fsio.o: ../include/stash.h ../include/auth.h ../include/response.h
 fsio.o: ../include/timers.h ../include/inet.h ../include/child.h
 fsio.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -341,7 +341,7 @@ ftpdctl.o: ../include/str.h ../include/ascii.h ../include/table.h
 ftpdctl.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 ftpdctl.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 ftpdctl.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-ftpdctl.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+ftpdctl.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 ftpdctl.o: ../include/stash.h ../include/auth.h ../include/response.h
 ftpdctl.o: ../include/timers.h ../include/inet.h ../include/child.h
 ftpdctl.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -361,7 +361,7 @@ help.o: ../include/str.h ../include/ascii.h ../include/table.h
 help.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 help.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 help.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-help.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+help.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 help.o: ../include/stash.h ../include/auth.h ../include/response.h
 help.o: ../include/timers.h ../include/inet.h ../include/child.h
 help.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -380,7 +380,7 @@ inet.o: ../include/str.h ../include/ascii.h ../include/table.h
 inet.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 inet.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 inet.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-inet.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+inet.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 inet.o: ../include/stash.h ../include/auth.h ../include/response.h
 inet.o: ../include/timers.h ../include/inet.h ../include/child.h
 inet.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -399,7 +399,7 @@ lastlog.o: ../include/str.h ../include/ascii.h ../include/table.h
 lastlog.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 lastlog.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 lastlog.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-lastlog.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+lastlog.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 lastlog.o: ../include/stash.h ../include/auth.h ../include/response.h
 lastlog.o: ../include/timers.h ../include/inet.h ../include/child.h
 lastlog.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -418,7 +418,7 @@ log.o: ../include/str.h ../include/ascii.h ../include/table.h
 log.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 log.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 log.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-log.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+log.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 log.o: ../include/stash.h ../include/auth.h ../include/response.h
 log.o: ../include/timers.h ../include/inet.h ../include/child.h
 log.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -437,7 +437,7 @@ main.o: ../include/str.h ../include/ascii.h ../include/table.h
 main.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 main.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 main.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-main.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+main.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 main.o: ../include/stash.h ../include/auth.h ../include/response.h
 main.o: ../include/timers.h ../include/inet.h ../include/child.h
 main.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -456,7 +456,7 @@ memcache.o: ../include/str.h ../include/ascii.h ../include/table.h
 memcache.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 memcache.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 memcache.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-memcache.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+memcache.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 memcache.o: ../include/stash.h ../include/auth.h ../include/response.h
 memcache.o: ../include/timers.h ../include/inet.h ../include/child.h
 memcache.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -475,7 +475,7 @@ mkhome.o: ../include/str.h ../include/ascii.h ../include/table.h
 mkhome.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 mkhome.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 mkhome.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-mkhome.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+mkhome.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 mkhome.o: ../include/stash.h ../include/auth.h ../include/response.h
 mkhome.o: ../include/timers.h ../include/inet.h ../include/child.h
 mkhome.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -495,7 +495,7 @@ modules.o: ../include/str.h ../include/ascii.h ../include/table.h
 modules.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 modules.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 modules.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-modules.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+modules.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 modules.o: ../include/stash.h ../include/auth.h ../include/response.h
 modules.o: ../include/timers.h ../include/inet.h ../include/child.h
 modules.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -514,7 +514,7 @@ netacl.o: ../include/str.h ../include/ascii.h ../include/table.h
 netacl.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 netacl.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 netacl.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-netacl.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+netacl.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 netacl.o: ../include/stash.h ../include/auth.h ../include/response.h
 netacl.o: ../include/timers.h ../include/inet.h ../include/child.h
 netacl.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -533,7 +533,7 @@ netaddr.o: ../include/str.h ../include/ascii.h ../include/table.h
 netaddr.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 netaddr.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 netaddr.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-netaddr.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+netaddr.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 netaddr.o: ../include/stash.h ../include/auth.h ../include/response.h
 netaddr.o: ../include/timers.h ../include/inet.h ../include/child.h
 netaddr.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -552,7 +552,7 @@ netio.o: ../include/str.h ../include/ascii.h ../include/table.h
 netio.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 netio.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 netio.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-netio.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+netio.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 netio.o: ../include/stash.h ../include/auth.h ../include/response.h
 netio.o: ../include/timers.h ../include/inet.h ../include/child.h
 netio.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -571,7 +571,7 @@ parser.o: ../include/str.h ../include/ascii.h ../include/table.h
 parser.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 parser.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 parser.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-parser.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+parser.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 parser.o: ../include/stash.h ../include/auth.h ../include/response.h
 parser.o: ../include/timers.h ../include/inet.h ../include/child.h
 parser.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -590,7 +590,7 @@ pidfile.o: ../include/str.h ../include/ascii.h ../include/table.h
 pidfile.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 pidfile.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 pidfile.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-pidfile.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+pidfile.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 pidfile.o: ../include/stash.h ../include/auth.h ../include/response.h
 pidfile.o: ../include/timers.h ../include/inet.h ../include/child.h
 pidfile.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -610,7 +610,7 @@ pool.o: ../include/str.h ../include/ascii.h ../include/table.h
 pool.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 pool.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 pool.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-pool.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+pool.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 pool.o: ../include/stash.h ../include/auth.h ../include/response.h
 pool.o: ../include/timers.h ../include/inet.h ../include/child.h
 pool.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -629,7 +629,7 @@ privs.o: ../include/str.h ../include/ascii.h ../include/table.h
 privs.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 privs.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 privs.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-privs.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+privs.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 privs.o: ../include/stash.h ../include/auth.h ../include/response.h
 privs.o: ../include/timers.h ../include/inet.h ../include/child.h
 privs.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -649,7 +649,7 @@ proctitle.o: ../include/pool.h ../include/str.h ../include/ascii.h
 proctitle.o: ../include/table.h ../include/proftpd.h ../include/class.h
 proctitle.o: ../include/netacl.h ../include/support.h ../include/sets.h
 proctitle.o: ../include/dirtree.h ../include/expr.h ../include/rlimit.h
-proctitle.o: ../include/filter.h ../include/netio.h ../include/modules.h
+proctitle.o: ../include/filter.h ../include/modules.h ../include/netio.h
 proctitle.o: ../include/regexp.h ../include/stash.h ../include/auth.h
 proctitle.o: ../include/response.h ../include/timers.h ../include/inet.h
 proctitle.o: ../include/child.h ../include/netaddr.h ../include/cmd.h
@@ -669,7 +669,7 @@ regexp.o: ../include/str.h ../include/ascii.h ../include/table.h
 regexp.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 regexp.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 regexp.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-regexp.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+regexp.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 regexp.o: ../include/stash.h ../include/auth.h ../include/response.h
 regexp.o: ../include/timers.h ../include/inet.h ../include/child.h
 regexp.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -688,7 +688,7 @@ response.o: ../include/str.h ../include/ascii.h ../include/table.h
 response.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 response.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 response.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-response.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+response.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 response.o: ../include/stash.h ../include/auth.h ../include/response.h
 response.o: ../include/timers.h ../include/inet.h ../include/child.h
 response.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -707,7 +707,7 @@ rlimit.o: ../include/str.h ../include/ascii.h ../include/table.h
 rlimit.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 rlimit.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 rlimit.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-rlimit.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+rlimit.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 rlimit.o: ../include/stash.h ../include/auth.h ../include/response.h
 rlimit.o: ../include/timers.h ../include/inet.h ../include/child.h
 rlimit.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -726,7 +726,7 @@ scoreboard.o: ../include/pool.h ../include/str.h ../include/ascii.h
 scoreboard.o: ../include/table.h ../include/proftpd.h ../include/class.h
 scoreboard.o: ../include/netacl.h ../include/support.h ../include/sets.h
 scoreboard.o: ../include/dirtree.h ../include/expr.h ../include/rlimit.h
-scoreboard.o: ../include/filter.h ../include/netio.h ../include/modules.h
+scoreboard.o: ../include/filter.h ../include/modules.h ../include/netio.h
 scoreboard.o: ../include/regexp.h ../include/stash.h ../include/auth.h
 scoreboard.o: ../include/response.h ../include/timers.h ../include/inet.h
 scoreboard.o: ../include/child.h ../include/netaddr.h ../include/cmd.h
@@ -746,7 +746,7 @@ session.o: ../include/str.h ../include/ascii.h ../include/table.h
 session.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 session.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 session.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-session.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+session.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 session.o: ../include/stash.h ../include/auth.h ../include/response.h
 session.o: ../include/timers.h ../include/inet.h ../include/child.h
 session.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -765,7 +765,7 @@ sets.o: ../include/str.h ../include/ascii.h ../include/table.h
 sets.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 sets.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 sets.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-sets.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+sets.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 sets.o: ../include/stash.h ../include/auth.h ../include/response.h
 sets.o: ../include/timers.h ../include/inet.h ../include/child.h
 sets.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -784,7 +784,7 @@ stash.o: ../include/str.h ../include/ascii.h ../include/table.h
 stash.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 stash.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 stash.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-stash.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+stash.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 stash.o: ../include/stash.h ../include/auth.h ../include/response.h
 stash.o: ../include/timers.h ../include/inet.h ../include/child.h
 stash.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -803,7 +803,7 @@ str.o: ../include/str.h ../include/ascii.h ../include/table.h
 str.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 str.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 str.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-str.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+str.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 str.o: ../include/stash.h ../include/auth.h ../include/response.h
 str.o: ../include/timers.h ../include/inet.h ../include/child.h
 str.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -822,7 +822,7 @@ support.o: ../include/str.h ../include/ascii.h ../include/table.h
 support.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 support.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 support.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-support.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+support.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 support.o: ../include/stash.h ../include/auth.h ../include/response.h
 support.o: ../include/timers.h ../include/inet.h ../include/child.h
 support.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -841,7 +841,7 @@ table.o: ../include/str.h ../include/ascii.h ../include/table.h
 table.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 table.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 table.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-table.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+table.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 table.o: ../include/stash.h ../include/auth.h ../include/response.h
 table.o: ../include/timers.h ../include/inet.h ../include/child.h
 table.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -860,7 +860,7 @@ throttle.o: ../include/str.h ../include/ascii.h ../include/table.h
 throttle.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 throttle.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 throttle.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-throttle.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+throttle.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 throttle.o: ../include/stash.h ../include/auth.h ../include/response.h
 throttle.o: ../include/timers.h ../include/inet.h ../include/child.h
 throttle.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -879,7 +879,7 @@ timers.o: ../include/str.h ../include/ascii.h ../include/table.h
 timers.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 timers.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 timers.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-timers.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+timers.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 timers.o: ../include/stash.h ../include/auth.h ../include/response.h
 timers.o: ../include/timers.h ../include/inet.h ../include/child.h
 timers.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -898,7 +898,7 @@ trace.o: ../include/str.h ../include/ascii.h ../include/table.h
 trace.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 trace.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 trace.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-trace.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+trace.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 trace.o: ../include/stash.h ../include/auth.h ../include/response.h
 trace.o: ../include/timers.h ../include/inet.h ../include/child.h
 trace.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -918,7 +918,7 @@ var.o: ../include/str.h ../include/ascii.h ../include/table.h
 var.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 var.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 var.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-var.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+var.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 var.o: ../include/stash.h ../include/auth.h ../include/response.h
 var.o: ../include/timers.h ../include/inet.h ../include/child.h
 var.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -937,7 +937,7 @@ version.o: ../include/str.h ../include/ascii.h ../include/table.h
 version.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 version.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 version.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-version.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+version.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 version.o: ../include/stash.h ../include/auth.h ../include/response.h
 version.o: ../include/timers.h ../include/inet.h ../include/child.h
 version.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -956,7 +956,7 @@ wtmp.o: ../include/str.h ../include/ascii.h ../include/table.h
 wtmp.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 wtmp.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 wtmp.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-wtmp.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+wtmp.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 wtmp.o: ../include/stash.h ../include/auth.h ../include/response.h
 wtmp.o: ../include/timers.h ../include/inet.h ../include/child.h
 wtmp.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h
@@ -975,7 +975,7 @@ xferlog.o: ../include/str.h ../include/ascii.h ../include/table.h
 xferlog.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 xferlog.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 xferlog.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-xferlog.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+xferlog.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 xferlog.o: ../include/stash.h ../include/auth.h ../include/response.h
 xferlog.o: ../include/timers.h ../include/inet.h ../include/child.h
 xferlog.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h

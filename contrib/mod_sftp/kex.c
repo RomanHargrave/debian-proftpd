@@ -1,6 +1,6 @@
 /*
  * ProFTPD - mod_sftp key exchange (kex)
- * Copyright (c) 2008-2012 TJ Saunders
+ * Copyright (c) 2008-2013 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: kex.c,v 1.37 2012/07/12 22:20:26 castaglia Exp $
+ * $Id: kex.c,v 1.39 2013/10/02 06:18:53 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -1603,10 +1603,12 @@ static int get_session_names(struct sftp_kex *kex, int *correct_guess) {
   server_pref = get_preferred_name(tmp_pool, server_list);
 
   /* Did the client correctly guess at the key exchange algorithm that
-   * we would list first in our server list?
+   * we would list first in our server list, if it says it sent
+   * a guess KEX packet?
    */
 
-  if (*correct_guess == TRUE &&
+  if (kex->first_kex_follows == TRUE &&
+      *correct_guess == TRUE &&
       client_pref != NULL &&
       server_pref != NULL) {
 
@@ -3569,8 +3571,10 @@ int sftp_kex_handle(struct ssh2_packet *pkt) {
   if (!kex->use_kexrsa) {
     /* Read the client key exchange mesg. */
     pkt = read_kex_packet(kex_pool, kex,
-      SFTP_SSH2_DISCONNECT_KEY_EXCHANGE_FAILED, &mesg_type, 2,
-      SFTP_SSH2_MSG_KEX_DH_INIT, SFTP_SSH2_MSG_KEX_DH_GEX_REQUEST);
+      SFTP_SSH2_DISCONNECT_KEY_EXCHANGE_FAILED, &mesg_type, 3,
+      SFTP_SSH2_MSG_KEX_DH_INIT,
+      SFTP_SSH2_MSG_KEX_DH_GEX_REQUEST,
+      SFTP_SSH2_MSG_KEX_ECDH_INIT);
 
     switch (mesg_type) {
       case SFTP_SSH2_MSG_KEX_DH_INIT:
@@ -3609,7 +3613,11 @@ int sftp_kex_handle(struct ssh2_packet *pkt) {
 
       default:
         (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+#ifdef PR_USE_OPENSSL_ECC
+          "expecting KEX_DH_INIT, KEX_ECDH_INIT or KEX_DH_GEX_GROUP message, "
+#else
           "expecting KEX_DH_INIT or KEX_DH_GEX_GROUP message, "
+#endif /* PR_USE_OPENSSL_ECC */
           "received %s (%d), disconnecting",
           sftp_ssh2_packet_get_mesg_type_desc(mesg_type), mesg_type);
         destroy_kex(kex);

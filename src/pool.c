@@ -25,7 +25,7 @@
  */
 
 /* Resource allocation code
- * $Id: pool.c,v 1.67 2013/01/30 22:37:04 castaglia Exp $
+ * $Id: pool.c,v 1.72 2013/10/07 05:51:30 castaglia Exp $
  */
 
 #include "conf.h"
@@ -103,7 +103,7 @@ static void *null_alloc(size_t size) {
   }
 
   if (ret == NULL) {
-    pr_log_pri(PR_LOG_ERR, "fatal: Memory exhausted");
+    pr_log_pri(PR_LOG_ALERT, "Out of memory!");
 #ifdef PR_USE_DEVEL
     if (debug_flags & PR_POOL_DEBUG_FL_OOM_DUMP_POOLS) {
       pr_pool_debug_memory(oom_printf);
@@ -151,8 +151,8 @@ static void chk_on_blk_list(union block_hdr *blok, union block_hdr *free_blk,
       continue;
     }
 
-    pr_log_pri(PR_LOG_ERR, "Fatal: DEBUG: Attempt to free already free block "
-     "in pool '%s'", pool_tag ? pool_tag : "<unnamed>");
+    pr_log_pri(PR_LOG_WARNING, "fatal: DEBUG: Attempt to free already free "
+     "block in pool '%s'", pool_tag ? pool_tag : "<unnamed>");
     exit(1);
   }
 #endif /* PR_USE_DEVEL */

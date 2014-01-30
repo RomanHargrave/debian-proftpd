@@ -23,7 +23,7 @@
  */
 
 /* ProFTPD scoreboard support.
- * $Id: scoreboard.c,v 1.79 2013/02/03 01:04:18 castaglia Exp $
+ * $Id: scoreboard.c,v 1.81 2013/12/09 19:16:14 castaglia Exp $
  */
 
 #include "conf.h"
@@ -617,15 +617,9 @@ int pr_open_scoreboard(int flags) {
   }
 
   /* Find a usable fd for the just-opened scoreboard fd. */
-  if (scoreboard_fd <= STDERR_FILENO) {
-    res = pr_fs_get_usable_fd(scoreboard_fd);
-    if (res < 0) {
-      pr_log_debug(DEBUG0, "warning: unable to find good fd for "
-        "ScoreboardFile fd %d: %s", scoreboard_fd, strerror(errno));
-
-    } else {
-      scoreboard_fd = res;
-    }
+  if (pr_fs_get_usable_fd2(&scoreboard_fd) < 0) {
+    pr_log_debug(DEBUG0, "warning: unable to find good fd for ScoreboardFile "
+      "fd %d: %s", scoreboard_fd, strerror(errno));
   }
 
   /* Make certain that the scoreboard mode will be read-only for everyone
@@ -673,16 +667,9 @@ int pr_open_scoreboard(int flags) {
     }
 
     /* Find a usable fd for the just-opened mutex fd. */
-    if (scoreboard_mutex_fd <= STDERR_FILENO) {
-      res = pr_fs_get_usable_fd(scoreboard_mutex_fd);
-      if (res < 0) {
-        pr_log_debug(DEBUG0, "warning: unable to find good fd for "
-          "ScoreboardMutex fd %d: %s", scoreboard_mutex_fd, strerror(errno));
-
-      } else {
-        close(scoreboard_mutex_fd);
-        scoreboard_mutex_fd = res;
-      }
+    if (pr_fs_get_usable_fd2(&scoreboard_mutex_fd) < 0) {
+      pr_log_debug(DEBUG0, "warning: unable to find good fd for "
+        "ScoreboardMutex fd %d: %s", scoreboard_mutex_fd, strerror(errno));
     }
 
   } else {

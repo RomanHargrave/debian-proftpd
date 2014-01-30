@@ -39,7 +39,7 @@ ftpshut.o: ../include/str.h ../include/ascii.h ../include/table.h
 ftpshut.o: ../include/proftpd.h ../include/class.h ../include/netacl.h
 ftpshut.o: ../include/support.h ../include/sets.h ../include/dirtree.h
 ftpshut.o: ../include/expr.h ../include/rlimit.h ../include/filter.h
-ftpshut.o: ../include/netio.h ../include/modules.h ../include/regexp.h
+ftpshut.o: ../include/modules.h ../include/netio.h ../include/regexp.h
 ftpshut.o: ../include/stash.h ../include/auth.h ../include/response.h
 ftpshut.o: ../include/timers.h ../include/inet.h ../include/child.h
 ftpshut.o: ../include/netaddr.h ../include/cmd.h ../include/bindings.h

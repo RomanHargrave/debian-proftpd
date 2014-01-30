@@ -23,7 +23,7 @@
  */
 
 /* Display of files
- * $Id: display.c,v 1.10 2013/01/25 17:11:33 castaglia Exp $
+ * $Id: display.c,v 1.12 2013/09/25 16:08:50 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -32,17 +32,21 @@
 #include "msg.h"
 
 static void format_size_str(char *buf, size_t buflen, off_t size) {
-  char units[] = {'K', 'M', 'G', 'T', 'P'};
+  char *units[] = {"", "K", "M", "G", "T", "P"};
+  unsigned int nunits = 6;
   register unsigned int i = 0;
 
   /* Determine the appropriate units label to use. */
-  while (size > 1024) {
+  while (size > 1024 &&
+         i < nunits) {
+    pr_signals_handle();
+
     size /= 1024;
     i++;
   }
 
   /* Now, prepare the buffer. */
-  snprintf(buf, buflen, "%.3" PR_LU "%cB", (pr_off_t) size, units[i]);
+  snprintf(buf, buflen, "%.3" PR_LU "%sB", (pr_off_t) size, units[i]);
 }
 
 const char *sftp_display_fh_get_msg(pool *p, pr_fh_t *fh) {

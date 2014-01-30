@@ -23,7 +23,7 @@
  */
 
 /* Configuration parser
- * $Id: parser.c,v 1.38 2013/02/20 06:53:52 castaglia Exp $
+ * $Id: parser.c,v 1.40 2013/12/30 06:38:59 castaglia Exp $
  */
 
 #include "conf.h"
@@ -65,10 +65,10 @@ static struct config_src *parser_sources = NULL;
  */
 
 static void add_config_ctxt(config_rec *c) {
-  if (!*parser_curr_config)
+  if (!*parser_curr_config) {
     *parser_curr_config = c;
 
-  else {
+  } else {
     parser_curr_config = (config_rec **) push_array(parser_confstack);
     *parser_curr_config = c;
   }
@@ -84,10 +84,10 @@ static struct config_src *add_config_source(pr_fh_t *fh) {
   cs->cs_fh = fh;
   cs->cs_lineno = 0;
 
-  if (!parser_sources)
+  if (!parser_sources) {
     parser_sources = cs;
 
-  else {
+  } else {
     cs->cs_next = parser_sources;
     parser_sources = cs;
   }
@@ -427,7 +427,7 @@ int pr_parser_parse_file(pool *p, const char *path, config_rec *start,
           if (MODRET_ISERROR(mr)) {
 
             if (!(flags & PR_PARSER_FL_DYNAMIC_CONFIG)) {
-              pr_log_pri(PR_LOG_ERR, "Fatal: %s on line %u of '%s'",
+              pr_log_pri(PR_LOG_WARNING, "fatal: %s on line %u of '%s'",
                 MODRET_ERRMSG(mr), cs->cs_lineno, report_path);
               exit(1);
 
@@ -452,7 +452,7 @@ int pr_parser_parse_file(pool *p, const char *path, config_rec *start,
       if (!found) {
 
         if (!(flags & PR_PARSER_FL_DYNAMIC_CONFIG)) {
-          pr_log_pri(PR_LOG_ERR, "Fatal: unknown configuration directive "
+          pr_log_pri(PR_LOG_WARNING, "fatal: unknown configuration directive "
             "'%s' on line %u of '%s'", cmd->argv[0], cs->cs_lineno,
             report_path);
           exit(1);

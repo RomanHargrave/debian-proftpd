@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: auth.c,v 1.49 2013/02/14 19:29:15 castaglia Exp $
+ * $Id: auth.c,v 1.52 2013/10/13 16:48:08 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -173,7 +173,8 @@ static char *get_default_root(pool *p) {
         (void) pr_fs_interpolate(path, interp_path, sizeof(interp_path) - 1);
 
         pr_log_pri(PR_LOG_NOTICE,
-          "notice: unable to use %s (resolved to '%s'): %s", path, interp_path,
+          "notice: unable to use DefaultRoot %s (resolved to '%s'): %s",
+            path, interp_path,
           strerror(xerrno));
       }
     }
@@ -285,14 +286,14 @@ static int setup_env(pool *p, char *user) {
       if (*((int *) c->argv[0]) == FALSE) {
         (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
           "root login attempted, denied by RootLogin configuration");
-        pr_log_auth(PR_LOG_CRIT, "SECURITY VIOLATION: Root login attempted.");
+        pr_log_auth(PR_LOG_NOTICE, "SECURITY VIOLATION: Root login attempted.");
         return -1;
       }
 
     } else {
       (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
         "root login attempted, denied by RootLogin configuration");
-      pr_log_auth(PR_LOG_CRIT, "SECURITY VIOLATION: Root login attempted.");
+      pr_log_auth(PR_LOG_NOTICE, "SECURITY VIOLATION: Root login attempted.");
       return -1;
     }
   }
@@ -457,7 +458,7 @@ static int setup_env(pool *p, char *user) {
   PRIVS_RELINQUISH
 
   if (res < 0) {
-    pr_log_pri(PR_LOG_ERR, "unable to set process groups: %s",
+    pr_log_pri(PR_LOG_WARNING, "unable to set process groups: %s",
       strerror(xerrno));
   }
 
@@ -466,7 +467,7 @@ static int setup_env(pool *p, char *user) {
     ensure_open_passwd(p);
 
     if (pr_auth_chroot(default_root) < 0) {
-      pr_log_pri(PR_LOG_ERR, "unable to set DefaultRoot directory '%s'",
+      pr_log_pri(PR_LOG_WARNING, "unable to set DefaultRoot directory '%s'",
         default_root);
       return -1;
     }
@@ -506,14 +507,15 @@ static int setup_env(pool *p, char *user) {
 #ifdef HAVE_GETEUID
   if (getegid() != pw->pw_gid ||
       geteuid() != pw->pw_uid) {
-    pr_log_pri(PR_LOG_ERR, "process effective IDs do not match expected IDs");
+    pr_log_pri(PR_LOG_WARNING,
+      "process effective IDs do not match expected IDs");
     return -1;
   }
 #endif
 
   if (pw->pw_dir == NULL ||
       strncmp(pw->pw_dir, "", 1) == 0) {
-    pr_log_pri(PR_LOG_ERR, "Home directory for user '%s' is NULL/empty",
+    pr_log_pri(PR_LOG_WARNING, "Home directory for user '%s' is NULL/empty",
       session.user);
     return -1;
   }
@@ -538,7 +540,7 @@ static int setup_env(pool *p, char *user) {
       if (pr_fsio_chdir_canon("/", !show_symlinks) == -1) {
         xerrno = errno;
 
-        pr_log_pri(PR_LOG_ERR, "%s chdir(\"/\"): %s", session.user,
+        pr_log_pri(PR_LOG_NOTICE, "%s chdir(\"/\") failed: %s", session.user,
           strerror(xerrno));
         errno = xerrno;
         return -1;
@@ -551,15 +553,15 @@ static int setup_env(pool *p, char *user) {
       if (pr_fsio_chdir_canon(pw->pw_dir, !show_symlinks) == -1) {
         xerrno = errno;
 
-        pr_log_pri(PR_LOG_ERR, "%s chdir(\"%s\"): %s", session.user,
+        pr_log_pri(PR_LOG_NOTICE, "%s chdir(\"%s\") failed: %s", session.user,
           session.cwd, strerror(xerrno));
         errno = xerrno;
         return -1;
       }
 
     } else {
-      pr_log_pri(PR_LOG_ERR, "%s chdir(\"%s\"): %s", session.user, session.cwd,
-        strerror(xerrno));
+      pr_log_pri(PR_LOG_NOTICE, "%s chdir(\"%s\") failed: %s", session.user,
+        session.cwd, strerror(xerrno));
       errno = xerrno;
       return -1;
     }
@@ -580,7 +582,7 @@ static int setup_env(pool *p, char *user) {
   session.proc_prefix = pstrdup(session.pool, session.c->remote_name);
   session.sf_flags = 0;
 
-  pr_log_auth(PR_LOG_NOTICE, "USER %s: Login successful", user);
+  pr_log_auth(PR_LOG_INFO, "USER %s: Login successful", user);
 
   if (pw->pw_uid == PR_ROOT_UID) {
     pr_log_auth(PR_LOG_WARNING, "ROOT SFTP login successful");

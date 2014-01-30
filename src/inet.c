@@ -25,7 +25,7 @@
  */
 
 /* Inet support functions, many wrappers for netdb functions
- * $Id: inet.c,v 1.152 2013/04/16 19:58:56 castaglia Exp $
+ * $Id: inet.c,v 1.156 2013/10/07 05:51:30 castaglia Exp $
  */
 
 #include "conf.h"
@@ -132,8 +132,12 @@ conn_t *pr_inet_copy_conn(pool *p, conn_t *c) {
   if (c->local_addr) {
     res->local_addr = pr_netaddr_alloc(res->pool);
 
-    pr_netaddr_set_family(res->local_addr,
-      pr_netaddr_get_family(c->local_addr));
+    if (pr_netaddr_set_family(res->local_addr,
+        pr_netaddr_get_family(c->local_addr)) < 0) {
+      destroy_pool(res->pool);
+      return NULL;
+    }
+
     pr_netaddr_set_sockaddr(res->local_addr,
       pr_netaddr_get_sockaddr(c->local_addr));
   }
@@ -141,14 +145,19 @@ conn_t *pr_inet_copy_conn(pool *p, conn_t *c) {
   if (c->remote_addr) {
     res->remote_addr = pr_netaddr_alloc(res->pool);
 
-    pr_netaddr_set_family(res->remote_addr,
-      pr_netaddr_get_family(c->remote_addr));
+    if (pr_netaddr_set_family(res->remote_addr,
+        pr_netaddr_get_family(c->remote_addr)) < 0) {
+      destroy_pool(res->pool);
+      return NULL;
+    }
+
     pr_netaddr_set_sockaddr(res->remote_addr,
       pr_netaddr_get_sockaddr(c->remote_addr));
   }
 
-  if (c->remote_name)
+  if (c->remote_name) {
     res->remote_name = pstrdup(res->pool, c->remote_name);
+  }
 
   register_cleanup(res->pool, (void *) res, conn_cleanup_cb, conn_cleanup_cb);
   return res;
@@ -225,6 +234,7 @@ static conn_t *init_conn(pool *p, int fd, pr_netaddr_t *bind_addr,
 #if defined(SOLARIS2) || defined(FREEBSD2) || defined(FREEBSD3) || \
     defined(FREEBSD4) || defined(FREEBSD5) || defined(FREEBSD6) || \
     defined(FREEBSD7) || defined(FREEBSD8) || defined(FREEBSD9) || \
+    defined(FREEBSD10) || \
     defined(__OpenBSD__) || defined(__NetBSD__) || \
     defined(DARWIN6) || defined(DARWIN7) || defined(DARWIN8) || \
     defined(DARWIN9) || defined(DARWIN10) || defined(DARWIN11) || \
@@ -248,6 +258,7 @@ static conn_t *init_conn(pool *p, int fd, pr_netaddr_t *bind_addr,
 #if defined(SOLARIS2) || defined(FREEBSD2) || defined(FREEBSD3) || \
     defined(FREEBSD4) || defined(FREEBSD5) || defined(FREEBSD6) || \
     defined(FREEBSD7) || defined(FREEBSD8) || defined(FREEBSD9) || \
+    defined(FREEBSD10) || \
     defined(__OpenBSD__) || defined(__NetBSD__) || \
     defined(DARWIN6) || defined(DARWIN7) || defined(DARWIN8) || \
     defined(DARWIN9) || defined(DARWIN10) || defined(DARWIN11) || \
@@ -268,8 +279,9 @@ static conn_t *init_conn(pool *p, int fd, pr_netaddr_t *bind_addr,
 
       /* On failure, destroy the connection and return NULL. */
       if (reporting) {
-        pr_log_pri(PR_LOG_ERR, "socket() failed in connection initialization: "
-          "%s", strerror(inet_errno));
+        pr_log_pri(PR_LOG_WARNING,
+          "socket() failed in connection initialization: %s",
+          strerror(inet_errno));
       }
 
       destroy_pool(c->pool);
@@ -292,7 +304,10 @@ static conn_t *init_conn(pool *p, int fd, pr_netaddr_t *bind_addr,
     }
 
     memset(&na, 0, sizeof(na));
-    pr_netaddr_set_family(&na, addr_family);
+    if (pr_netaddr_set_family(&na, addr_family) < 0) {
+      destroy_pool(c->pool);
+      return NULL;
+    }
 
     if (bind_addr) {
       pr_netaddr_set_sockaddr(&na, pr_netaddr_get_sockaddr(bind_addr));
@@ -540,7 +555,7 @@ conn_t *pr_inet_create_conn_portrange(pool *p, pr_netaddr_t *bind_addr,
 
       if (!c &&
           inet_errno != EADDRINUSE) {
-        pr_log_pri(PR_LOG_ERR, "error initializing connection: %s",
+        pr_log_pri(PR_LOG_WARNING, "error initializing connection: %s",
           strerror(inet_errno));
         pr_session_disconnect(NULL, PR_SESS_DISCONNECT_BY_APPLICATION, NULL);
       }
@@ -551,6 +566,9 @@ conn_t *pr_inet_create_conn_portrange(pool *p, pr_netaddr_t *bind_addr,
 }
 
 void pr_inet_close(pool *p, conn_t *c) {
+  if (c == NULL) {
+    return;
+  }
 
   /* It is not necessary to close the fds or schedule netio streams for
    * removal, because the creator of the connection (either

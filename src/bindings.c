@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server daemon
- * Copyright (c) 2001-2012 The ProFTPD Project team
+ * Copyright (c) 2001-2013 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@
  */
 
 /* Routines to work with ProFTPD bindings
- * $Id: bindings.c,v 1.47 2012/04/15 18:04:15 castaglia Exp $
+ * $Id: bindings.c,v 1.52 2013/11/09 23:34:34 castaglia Exp $
  */
 
 #include "conf.h"
@@ -55,14 +55,16 @@ static void server_cleanup_cb(void *conn) {
  * is stolen from Apache's http_vhost.c
  */
 static unsigned int ipbind_hash_addr(pr_netaddr_t *addr) {
-  size_t offset = pr_netaddr_get_inaddr_len(addr);
+  size_t offset;
+  unsigned int key;
+
+  offset = pr_netaddr_get_inaddr_len(addr);
 
   /* The key is the last four bytes of the IP address.
    * For IPv4, this is the entire address, as always.
    * For IPv6, this is usually part of the MAC address.
    */
-  unsigned int key = *(unsigned *) ((char *) pr_netaddr_get_inaddr(addr) +
-    offset - 4);
+  key = *(unsigned *) ((char *) pr_netaddr_get_inaddr(addr) + offset - 4);
 
   key ^= (key >> 16);
   return ((key >> 8) ^ key) % PR_BINDINGS_TABLE_SIZE;
@@ -154,6 +156,10 @@ conn_t *pr_ipbind_get_listening_conn(server_rec *server, pr_netaddr_t *addr,
   lr->pool = p;
   lr->conn = l;
   lr->addr = pr_netaddr_dup(p, addr);
+  if (lr->addr == NULL &&
+      errno != EINVAL) {
+    return NULL;
+  }
   lr->port = port;
   lr->claimed = TRUE;
 
@@ -201,7 +207,7 @@ conn_t *pr_ipbind_accept_conn(fd_set *readfds, int *listenfd) {
          */
         if (listener->mode == CM_ERROR) {
           pr_log_pri(PR_LOG_ERR, "error: unable to accept an incoming "
-            "connection (%s)", strerror(listener->xerrno));
+            "connection: %s", strerror(listener->xerrno));
           listener->xerrno = 0;
           listener->mode = CM_LISTEN;
           return NULL;
@@ -234,7 +240,7 @@ int pr_ipbind_add_binds(server_rec *serv) {
 
     addr = pr_netaddr_get_addr(serv->pool, c->argv[0], NULL);
     if (addr == NULL) {
-      pr_log_pri(PR_LOG_NOTICE,
+      pr_log_pri(PR_LOG_WARNING,
        "notice: unable to determine IP address of '%s'", (char *) c->argv[0]);
       c = find_config_next(c, c->next, CONF_PARAM, "_bind_", FALSE);
       continue;
@@ -422,7 +428,7 @@ int pr_ipbind_create(server_rec *server, pr_netaddr_t *addr,
         ipbind->ib_port == port) {
 
       /* An ipbind already exists for this IP address */
-      pr_log_pri(PR_LOG_NOTICE, "notice: '%s' (%s:%u) already bound to '%s'",
+      pr_log_pri(PR_LOG_WARNING, "notice: '%s' (%s:%u) already bound to '%s'",
         server->ServerName, pr_netaddr_get_ipstr(addr), port,
         ipbind->ib_server->ServerName);
 
@@ -1049,7 +1055,8 @@ static int init_inetd_bindings(void) {
   if (pr_inet_get_conn_info(main_server->listen, STDIN_FILENO) == -1) {
     int xerrno = errno;
 
-    pr_log_pri(PR_LOG_ERR, "fatal: %s", strerror(xerrno));
+    pr_log_pri(PR_LOG_WARNING, "fatal: unable to get connection info: %s",
+      strerror(xerrno));
 
     if (xerrno == ENOTSOCK) {
       pr_log_pri(PR_LOG_ERR, "(Running from command line? "
@@ -1119,8 +1126,10 @@ static int init_standalone_bindings(void) {
         pr_inet_set_default_family(NULL, AF_INET6);
 
       } else {
-        pr_inet_set_default_family(NULL,
-          pr_netaddr_get_family(main_server->addr));
+        int default_family;
+
+        default_family = pr_netaddr_get_family(main_server->addr);
+        pr_inet_set_default_family(NULL, default_family);
       }
 #else
       pr_inet_set_default_family(NULL,

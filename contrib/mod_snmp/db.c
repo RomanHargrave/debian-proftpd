@@ -1,6 +1,6 @@
 /*
  * ProFTPD - mod_snmp database storage
- * Copyright (c) 2008-2013 TJ Saunders
+ * Copyright (c) 2008-2014 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -819,7 +819,7 @@ int snmp_db_unlock(unsigned int field) {
 }
 
 int snmp_db_open(pool *p, int db_id) {
-  int db_fd, mmap_flags, res, xerrno;
+  int db_fd, mmap_flags, xerrno;
   char *db_path;
   size_t db_datasz;
   void *db_data;
@@ -853,10 +853,7 @@ int snmp_db_open(pool *p, int db_id) {
   }
 
   /* Make sure the fd isn't one of the big three. */
-  res = pr_fs_get_usable_fd(db_fd);
-  if (res >= 0) {
-    db_fd = res;
-  }
+  (void) pr_fs_get_usable_fd2(&db_fd);
 
   pr_trace_msg(trace_channel, 19, "opened fd %d for SNMPTable '%s'", db_fd,
     db_path);

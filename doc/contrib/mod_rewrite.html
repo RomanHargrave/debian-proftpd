@@ -1,4 +1,4 @@
-<!-- $Id: mod_rewrite.html,v 1.8 2012/03/27 06:32:56 castaglia Exp $ -->
+<!-- $Id: mod_rewrite.html,v 1.10 2013/08/14 21:40:18 castaglia Exp $ -->
 <!-- $Source: /cvsroot/proftp/proftpd/doc/contrib/mod_rewrite.html,v $ -->
 
 <html>
@@ -346,7 +346,7 @@ FIFO. It is not required for other types of rewriting maps.
 <strong>Compatibility:</strong> 1.2.6rc1 and later
 
 <p>
-The <code>RewriteLog</code> directive is used to a specify a log file for
+The <code>RewriteLog</code> directive is used to specify a log file for
 <code>mod_rewrite</code> reporting and debugging, and can be done a per-server
 basis.  The <em>file</em> parameter must be the full path to the file to use for
 logging.  Note that this path must <b>not</b> be to a world-writeable
@@ -893,20 +893,35 @@ To install <code>mod_rewrite</code>, follow the usual steps for using
 third-party modules in proftpd:
 <pre>
   ./configure --with-modules=mod_rewrite
-  make
+</pre>
+To build <code>mod_rewrite</code> as a DSO module:
+<pre>
+  ./configure --enable-dso --with-shared=mod_rewrite
+</pre>
+Then follow the usual steps:
+<pre>
+  make 
   make install
+</pre>
+
+<p>
+Alternatively, if your proftpd was compiled with DSO support, you can
+use the <code>prxs</code> tool to build <code>mod_rewrite</code> as a shared
+module:
+<pre>
+  prxs -c -i -d mod_rewrite.c
 </pre>
 
 <p>
 <hr><br>
 
 Author: <i>$Author: castaglia $</i><br>
-Last Updated: <i>$Date: 2012/03/27 06:32:56 $</i><br>
+Last Updated: <i>$Date: 2013/08/14 21:40:18 $</i><br>
 
 <br><hr>
 
 <font size=2><b><i>
-&copy; Copyright 2000-2012 TJ Saunders<br>
+&copy; Copyright 2000-2013 TJ Saunders<br>
  All Rights Reserved<br>
 </i></b></font>
 

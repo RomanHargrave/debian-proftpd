@@ -23,7 +23,7 @@
  */
 
 /* String manipulation functions
- * $Id: str.c,v 1.16 2013/02/15 22:39:00 castaglia Exp $
+ * $Id: str.c,v 1.21 2013/11/24 00:45:30 castaglia Exp $
  */
 
 #include "conf.h"
@@ -277,11 +277,10 @@ char *pstrndup(pool *p, const char *str, size_t n) {
 }
 
 char *pdircat(pool *p, ...) {
-  char *argp, *res;
+  char *argp, *ptr, *res;
   char last;
-
   int count = 0;
-  size_t len = 0;
+  size_t len = 0, res_len = 0;
   va_list ap;
 
   if (p == NULL) {
@@ -297,35 +296,46 @@ char *pdircat(pool *p, ...) {
     /* If the first argument is "", we have to account for a leading /
      * which must be added.
      */
-    if (!count++ && !*res)
+    if (!count++ && !*res) {
       len++;
 
-    else if (last && last != '/' && *res != '/')
+    } else if (last && last != '/' && *res != '/') {
       len++;
 
-    else if (last && last == '/' && *res == '/')
+    } else if (last && last == '/' && *res == '/') {
       len--;
+    }
 
-    len += strlen(res);
-    last = (*res ? res[strlen(res) - 1] : 0);
+    res_len = strlen(res);
+    len += res_len;
+    last = (*res ? res[res_len-1] : 0);
   }
 
   va_end(ap);
-  res = (char *) pcalloc(p, len + 1);
+  ptr = res = (char *) pcalloc(p, len + 1);
 
   va_start(ap, p);
 
-  last = 0;
+  last = res_len = 0;
 
   while ((argp = va_arg(ap, char *)) != NULL) {
-    if (last && last == '/' && *argp == '/')
+    size_t arglen;
+
+    if (last && last == '/' && *argp == '/') {
       argp++;
 
-    else if (last && last != '/' && *argp != '/')
-      sstrcat(res, "/", len + 1);
+    } else if (last && last != '/' && *argp != '/') {
+      sstrcat(ptr, "/", len + 1);
+      ptr += 1;
+      res_len += 1;
+    }
 
-    sstrcat(res, argp, len + 1);
-    last = (*res ? res[strlen(res) - 1] : 0);
+    arglen = strlen(argp);
+    sstrcat(ptr, argp, len + 1);
+    ptr += arglen;
+    res_len += arglen;
+ 
+    last = (*res ? res[res_len-1] : 0);
   }
 
   va_end(ap);
@@ -334,8 +344,7 @@ char *pdircat(pool *p, ...) {
 }
 
 char *pstrcat(pool *p, ...) {
-  char *argp, *res;
-
+  char *argp, *ptr, *res;
   size_t len = 0;
   va_list ap;
 
@@ -346,19 +355,71 @@ char *pstrcat(pool *p, ...) {
 
   va_start(ap, p);
 
-  while ((res = va_arg(ap, char *)) != NULL)
+  while ((res = va_arg(ap, char *)) != NULL) {
     len += strlen(res);
+  }
 
   va_end(ap);
 
-  res = pcalloc(p, len + 1);
+  ptr = res = pcalloc(p, len + 1);
 
   va_start(ap, p);
 
-  while ((argp = va_arg(ap, char *)) != NULL)
-    sstrcat(res, argp, len + 1);
+  while ((argp = va_arg(ap, char *)) != NULL) {
+    size_t arglen;
+
+    arglen = strlen(argp);
+    sstrcat(ptr, argp, len + 1);
+    ptr += arglen;
+  }
 
   va_end(ap);
+
+  return res;
+}
+
+int pr_strnrstr(const char *s, size_t slen, const char *suffix,
+    size_t suffixlen, int flags) {
+  int res = FALSE;
+
+  if (s == NULL ||
+      suffix == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  if (slen == 0) {
+    slen = strlen(s);
+  }
+
+  if (suffixlen == 0) {
+    suffixlen = strlen(suffix);
+  }
+
+  if (slen == 0 &&
+      suffixlen == 0) {
+    return TRUE;
+  }
+
+  if (slen == 0 ||
+      suffixlen == 0) {
+    return FALSE;
+  }
+
+  if (suffixlen > slen) {
+    return FALSE;
+  }
+
+  if (flags & PR_STR_FL_IGNORE_CASE) {
+    if (strncasecmp(s + (slen - suffixlen), suffix, suffixlen) == 0) {
+      res = TRUE;
+    }
+
+  } else {
+    if (strncmp(s + (slen - suffixlen), suffix, suffixlen) == 0) {
+      res = TRUE;
+    }
+  }
 
   return res;
 }
@@ -411,6 +472,141 @@ char *pr_str_strip_end(char *s, char *ch) {
   }
 
   return s;
+}
+
+/* NOTE: Update mod_ban's ban_parse_timestr() to use this function. */
+int pr_str_get_duration(const char *str, int *duration) {
+  unsigned int hours, mins, secs;
+  int flags = PR_STR_FL_IGNORE_CASE, has_suffix = FALSE;
+  size_t len;
+  char *ptr = NULL;
+
+  if (str == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  if (sscanf(str, "%2u:%2u:%2u", &hours, &mins, &secs) == 3) {
+    if (hours > INT_MAX ||
+        mins > INT_MAX ||
+        secs > INT_MAX) {
+      errno = ERANGE;
+      return -1;
+    }
+
+    if (duration != NULL) {
+      *duration = (hours * 60 * 60) + (mins * 60) + secs;
+    }
+
+    return 0;
+  }
+
+  len = strlen(str);
+  if (len == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  /* Handle the "single component" formats:
+   *
+   * If ends with "S", "s", or "sec": parse secs
+   * If ends with "M", "m", or "min": parse minutes
+   * If ends with "H", "h", or "hr": parse hours
+   *
+   * Otherwise, try to parse as just a number of seconds.
+   */
+
+  has_suffix = pr_strnrstr(str, len, "s", 1, flags);
+  if (has_suffix == FALSE) {
+    has_suffix = pr_strnrstr(str, len, "sec", 3, flags);
+  }
+  if (has_suffix == TRUE) {
+    /* Parse seconds */
+
+    if (sscanf(str, "%u", &secs) == 1) {
+      if (secs > INT_MAX) {
+        errno = ERANGE;
+        return -1;
+      }
+
+      if (duration != NULL) {
+        *duration = secs;
+      }
+
+      return 0;
+    }
+
+    errno = EINVAL;
+    return -1;
+  }
+
+  has_suffix = pr_strnrstr(str, len, "m", 1, flags);
+  if (has_suffix == FALSE) {
+    has_suffix = pr_strnrstr(str, len, "min", 3, flags);
+  }
+  if (has_suffix == TRUE) {
+    /* Parse minutes */
+
+    if (sscanf(str, "%u", &mins) == 1) {
+      if (mins > INT_MAX) {
+        errno = ERANGE;
+        return -1;
+      }
+
+      if (duration != NULL) {
+        *duration = (mins * 60);
+      }
+  
+      return 0;
+    }
+
+    errno = EINVAL;
+    return -1;
+  }
+
+  has_suffix = pr_strnrstr(str, len, "h", 1, flags);
+  if (has_suffix == FALSE) {
+    has_suffix = pr_strnrstr(str, len, "hr", 2, flags);
+  }
+  if (has_suffix == TRUE) {
+    /* Parse hours */
+
+    if (sscanf(str, "%u", &hours) == 1) {
+      if (hours > INT_MAX) {
+        errno = ERANGE;
+        return -1;
+      }
+
+      if (duration != NULL) {
+        *duration = (hours * 60 * 60);
+      }
+ 
+      return 0;
+    }
+
+    errno = EINVAL;
+    return -1;
+  }
+
+  /* Use strtol(3) here, check for trailing garbage, etc. */
+  secs = (int) strtol(str, &ptr, 10);
+  if (ptr && *ptr) {
+    /* Not a bare number, but a string with non-numeric characters. */
+    errno = EINVAL;
+    return -1;
+  }
+
+  if (secs < 0 ||
+      secs > INT_MAX) {
+    errno = ERANGE;
+    return -1;
+  }
+
+  if (duration != NULL) {
+    *duration = secs;
+  }
+
+  return 0;
 }
 
 int pr_str_get_nbytes(const char *str, const char *units, off_t *nbytes) {
@@ -544,27 +740,43 @@ char *pr_str_get_word(char **cp, int flags) {
  * non-separator in the string.  If the src string is empty or NULL, the next
  * token returned is NULL.
  */
-char *pr_str_get_token(char **s, char *sep) {
-  char *res;
+char *pr_str_get_token2(char **src, char *sep, size_t *token_len) {
+  char *token;
+  size_t len = 0;
 
-  if (s == NULL ||
-      *s == NULL ||
-      **s == '\0' ||
+  if (src == NULL ||
+      *src == NULL ||
+      **src == '\0' ||
       sep == NULL) {
+
+    if (token_len != NULL) {
+      *token_len = len;
+    }
+
     errno = EINVAL;
     return NULL;
   }
 
-  res = *s;
+  token = *src;
 
-  while (**s && !strchr(sep, **s)) {
-    (*s)++;
+  while (**src && !strchr(sep, **src)) {
+    (*src)++;
+    len++;
   }
 
-  if (**s)
-    *(*s)++ = '\0';
+  if (**src) {
+    *(*src)++ = '\0';
+  }
 
-  return res;
+  if (token_len != NULL) {
+    *token_len = len;
+  }
+
+  return token;
+}
+
+char *pr_str_get_token(char **src, char *sep) {
+  return pr_str_get_token2(src, sep, NULL);
 }
 
 int pr_str_is_boolean(const char *str) {

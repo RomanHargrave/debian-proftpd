@@ -1,6 +1,6 @@
 /*
  * ProFTPD - mod_sftp key mgmt (keys)
- * Copyright (c) 2008-2013 TJ Saunders
+ * Copyright (c) 2008-2014 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: keys.c,v 1.30 2013/03/14 21:59:53 castaglia Exp $
+ * $Id: keys.c,v 1.39 2014/01/28 17:26:17 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -247,8 +247,12 @@ static int exec_passphrase_provider(server_rec *s, char *buf, int buflen,
 
   pid = fork();
   if (pid < 0) {
-    pr_log_pri(PR_LOG_ERR, MOD_SFTP_VERSION ": error: unable to fork: %s",
-      strerror(errno));
+    int xerrno = errno;
+
+    pr_log_pri(PR_LOG_ALERT,
+      MOD_SFTP_VERSION ": error: unable to fork: %s", strerror(xerrno));
+
+    errno = xerrno;
     status = -1;
 
   } else if (pid == 0) {
@@ -257,6 +261,7 @@ static int exec_passphrase_provider(server_rec *s, char *buf, int buflen,
     char *stdin_argv[4];
 
     /* Child process */
+    session.pid = getpid();
 
     /* Note: there is no need to clean up this temporary pool, as we've
      * forked.  If the exec call succeeds, this child process will exit
@@ -478,7 +483,7 @@ static char *get_page(size_t sz, void **ptr) {
 
   d = malloc(sz + (pagesz-1));
   if (d == NULL) {
-    pr_log_pri(PR_LOG_ERR, "Out of memory!");
+    pr_log_pri(PR_LOG_ALERT, MOD_SFTP_VERSION ": Out of memory!");
     exit(1);
   }
 
@@ -609,7 +614,7 @@ static int get_passphrase(struct sftp_pkey *k, const char *path) {
 
   k->host_pkey = get_page(PEM_BUFSIZE, &k->host_pkey_ptr);
   if (k->host_pkey == NULL) {
-    pr_log_pri(PR_LOG_ERR, "Out of memory!");
+    pr_log_pri(PR_LOG_ALERT, MOD_SFTP_VERSION ": Out of memory!");
     exit(1);
   }
 
@@ -1384,20 +1389,20 @@ int sftp_keys_compare_keys(pool *p, unsigned char *client_pubkey_data,
       case EVP_PKEY_EC: {
         EC_KEY *client_ec, *file_ec;
 
-        client_ec = EVP_PKEY_get1_EC_KEY(client_pkey);
         file_ec = EVP_PKEY_get1_EC_KEY(file_pkey);
+        client_ec = EVP_PKEY_get1_EC_KEY(client_pkey);
 
-        if (EC_GROUP_cmp(EC_KEY_get0_group(client_ec),
-            EC_KEY_get0_group(file_ec), NULL) != 0) {
+        if (EC_GROUP_cmp(EC_KEY_get0_group(file_ec),
+            EC_KEY_get0_group(client_ec), NULL) != 0) {
           pr_trace_msg(trace_channel, 17, "%s",
             "ECC key mismatch: client-sent curve does not "
             "match local ECC curve");
           res = FALSE;
 
         } else {
-          if (EC_POINT_cmp(EC_KEY_get0_group(client_ec),
-              EC_KEY_get0_public_key(client_ec),
-              EC_KEY_get0_public_key(file_ec), NULL) != 0) {
+          if (EC_POINT_cmp(EC_KEY_get0_group(file_ec),
+              EC_KEY_get0_public_key(file_ec),
+              EC_KEY_get0_public_key(client_ec), NULL) != 0) {
             pr_trace_msg(trace_channel, 17, "%s",
               "ECC key mismatch: client-sent public key 'Q' does not "
               "match local ECC public key 'Q'");
@@ -1623,12 +1628,14 @@ static int handle_hostkey(pool *p, EVP_PKEY *pkey,
       if (rsa) {
         if (RSA_blinding_on(rsa, NULL) != 1) {
           (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
-            "error enabling RSA blinding for key '%s': %s", path,
+            "error enabling RSA blinding for key '%s': %s",
+            file_path ? file_path : agent_path,
             sftp_crypto_get_errors());
 
         } else {
           (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
-            "RSA blinding enabled for key '%s'", path);
+            "RSA blinding enabled for key '%s'",
+            file_path ? file_path : agent_path);
         }
 
         RSA_free(rsa);
@@ -2676,12 +2683,34 @@ int sftp_keys_verify_signed_data(pool *p, const char *pubkey_algo,
   if (strncmp(sig_type, "ssh-rsa", 8) == 0) {
     RSA *rsa;
     int ok;
+    unsigned int modulus_len;
 
     rsa = EVP_PKEY_get1_RSA(pkey);
+    modulus_len = RSA_size(rsa);
 
     sig_len = sftp_msg_read_int(p, &signature, &signaturelen);
     sig = (unsigned char *) sftp_msg_read_data(p, &signature, &signaturelen,
       sig_len);
+
+    /* If the signature provided by the client is less than the expected
+     * key length, the verification will fail.  In such cases, we need to
+     * pad the provided signature with trailing zeros (Bug#3992).
+     */
+    if (sig_len < modulus_len) {
+      unsigned int padding_len;
+      unsigned char *padded_sig;
+
+      padding_len = modulus_len - sig_len;
+      padded_sig = pcalloc(p, modulus_len);
+     
+      pr_trace_msg(trace_channel, 12, "padding client-sent "
+        "RSA signature (%lu) bytes with %u bytes of zeroed data",
+        (unsigned long) sig_len, padding_len);
+      memmove(padded_sig + padding_len, sig, sig_len);
+
+      sig = padded_sig;
+      sig_len = (uint32_t) modulus_len;
+    }
 
     EVP_DigestInit(&ctx, EVP_sha1());
     EVP_DigestUpdate(&ctx, sig_data, sig_datalen);
@@ -2881,7 +2910,7 @@ void sftp_keys_get_passphrases(void) {
 
         errstr = sftp_crypto_get_errors();
 
-        pr_log_pri(PR_LOG_NOTICE, MOD_SFTP_VERSION
+        pr_log_pri(PR_LOG_WARNING, MOD_SFTP_VERSION
           ": error reading passphrase for SFTPHostKey '%s': %s",
           (const char *) c->argv[0], errstr ? errstr : strerror(xerrno));
 
