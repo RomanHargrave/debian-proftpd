@@ -1,12 +1,39 @@
-proftpd-dfsg (1.3.5~rc3-3) UNRELEASED; urgency=medium
+proftpd-dfsg (1.3.5~rc4-1) unstable; urgency=low
 
+  * New upstream pre-release, with fix for CVE-2013-4359.
+    (closes: #723179)
   * Included fix by Andreas Beckmann:
     - Cleanup Breaks+Replaces.
     - Add proftpd-mod-geoip.preinst script to delete the old buggy postrm script
       on upgrades from wheezy. Otherwise the buggy postrm script would delete
-      some files from the newly unpacked package. (Closes: #699647)
+      some files from the newly unpacked package. 
+    (closes: #699647)
 
  -- Francesco Paolo Lovergine <frankie@debian.org>  Thu, 30 Jan 2014 13:20:53 +0100
+
+proftpd-dfsg (1.3.5~rc3-2.2) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * Cleanup Breaks+Replaces.
+  * Add proftpd-mod-geoip.preinst script to delete the old buggy postrm script
+    on upgrades from wheezy. Otherwise the buggy postrm script would delete
+    some files from the newly unpacked package.  (Closes: #699647)
+
+ -- Andreas Beckmann <anbe@debian.org>  Sun, 26 Jan 2014 04:05:47 +0100
+
+proftpd-dfsg (1.3.5~rc3-2.1) unstable; urgency=low
+
+  * Non-maintainer upload.
+  * Add CVE-2013-4359.patch patch.
+    CVE-2013-4359: Fix invalid pool authentication in mod_sftp/mod_sftp_pam
+    during kbdint authentication leading to DoS conditions. (Closes: #723179)
+  * Correct Breaks and Replaces on proftpd-mod-geoip package.
+    The old proftpd-mod-geoip addon module is now obsoleted by core proftpd.
+    Adjusted the Breaks/Replaces to 1.3.5~rc1-1 which introduced the geoip
+    module in proftpd core.
+    Thanks to Andreas Beckmann <anbe@debian.org> (Closes: #699647)
+
+ -- Salvatore Bonaccorso <carnil@debian.org>  Sat, 05 Oct 2013 14:51:36 +0200
 
 proftpd-dfsg (1.3.5~rc3-2) unstable; urgency=low
 
