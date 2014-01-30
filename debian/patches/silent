@@ -5,9 +5,9 @@ Forwarded: not needed
 
 Index: proftpd-dfsg/src/dirtree.c
 ===================================================================
---- proftpd-dfsg.orig/src/dirtree.c	2013-06-24 17:56:32.000000000 +0200
-+++ proftpd-dfsg/src/dirtree.c	2013-06-24 17:56:32.000000000 +0200
-@@ -3262,9 +3262,6 @@
+--- proftpd-dfsg.orig/src/dirtree.c	2014-01-30 13:55:12.000000000 +0100
++++ proftpd-dfsg/src/dirtree.c	2014-01-30 13:55:12.000000000 +0100
+@@ -3323,9 +3323,6 @@
        }
      }
  
@@ -15,5 +15,5 @@ Index: proftpd-dfsg/src/dirtree.c
 -      dup_path);
 -
      dirh = pr_fsio_opendir(dup_path);
-     if (!dirh) {
-       pr_log_pri(PR_LOG_ERR,
+     if (dirh == NULL) {
+       pr_log_pri(PR_LOG_WARNING,
