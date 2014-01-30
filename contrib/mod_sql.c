@@ -23,7 +23,7 @@
  * the resulting executable, without including the source code for OpenSSL in
  * the source distribution.
  *
- * $Id: mod_sql.c,v 1.237 2013/03/16 04:45:27 castaglia Exp $
+ * $Id: mod_sql.c,v 1.245 2013/11/11 01:34:03 castaglia Exp $
  */
 
 #include "conf.h"
@@ -2463,6 +2463,101 @@ static const char *resolve_long_tag(cmd_rec *cmd, char *tag) {
   }
 
   if (long_tag == NULL &&
+      strncmp(tag, "basename", 9) == 0) {
+    const char *path = NULL;
+
+    if (pr_cmd_cmp(cmd, PR_CMD_RNTO_ID) == 0) {
+      path = pr_fs_decode_path(cmd->tmp_pool, cmd->arg);
+
+    } else if (pr_cmd_cmp(cmd, PR_CMD_RETR_ID) == 0) {
+      path = pr_table_get(cmd->notes, "mod_xfer.retr-path", NULL);
+
+    } else if (pr_cmd_cmp(cmd, PR_CMD_APPE_ID) == 0 ||
+               pr_cmd_cmp(cmd, PR_CMD_STOR_ID) == 0) {
+      path = pr_table_get(cmd->notes, "mod_xfer.store-path", NULL);
+
+    } else if (session.xfer.p &&
+               session.xfer.path) {
+      path = session.xfer.path;
+
+    } else if (pr_cmd_cmp(cmd, PR_CMD_CDUP_ID) == 0 ||
+               pr_cmd_cmp(cmd, PR_CMD_PWD_ID) == 0 ||
+               pr_cmd_cmp(cmd, PR_CMD_XCUP_ID) == 0 ||
+               pr_cmd_cmp(cmd, PR_CMD_XPWD_ID) == 0) {
+      path = pr_fs_getcwd();
+
+    } else if (pr_cmd_cmp(cmd, PR_CMD_CWD_ID) == 0 ||
+               pr_cmd_cmp(cmd, PR_CMD_XCWD_ID) == 0) {
+
+      if (session.chroot_path) {
+        /* Chrooted session. */
+        path = strcmp(pr_fs_getvwd(), "/") ? pr_fs_getvwd() :
+          session.chroot_path;
+
+      } else {
+        /* Non-chrooted session. */
+        path = pr_fs_getcwd();
+      }
+
+    } else if (pr_cmd_cmp(cmd, PR_CMD_SITE_ID) == 0 &&
+               (strncasecmp(cmd->argv[1], "CHGRP", 6) == 0 ||
+                strncasecmp(cmd->argv[1], "CHMOD", 6) == 0 ||
+                strncasecmp(cmd->argv[1], "UTIME", 6) == 0)) {
+      register unsigned int i;
+      char *tmp = "";
+
+      for (i = 3; i <= cmd->argc-1; i++) {
+        tmp = pstrcat(cmd->tmp_pool, tmp, *tmp ? " " : "",
+          pr_fs_decode_path(cmd->tmp_pool, cmd->argv[i]), NULL);
+      }
+
+      path = tmp;
+
+    } else {
+      /* Some commands (i.e. DELE, MKD, RMD, XMKD, and XRMD) have associated
+       * filenames that are not stored in the session.xfer structure; these
+       * should be expanded properly as well.
+       */
+      if (pr_cmd_cmp(cmd, PR_CMD_DELE_ID) == 0 ||
+          pr_cmd_cmp(cmd, PR_CMD_LIST_ID) == 0 ||
+          pr_cmd_cmp(cmd, PR_CMD_MDTM_ID) == 0 ||
+          pr_cmd_cmp(cmd, PR_CMD_MKD_ID) == 0 ||
+          pr_cmd_cmp(cmd, PR_CMD_MLSD_ID) == 0 ||
+          pr_cmd_cmp(cmd, PR_CMD_MLST_ID) == 0 ||
+          pr_cmd_cmp(cmd, PR_CMD_NLST_ID) == 0 ||
+          pr_cmd_cmp(cmd, PR_CMD_RMD_ID) == 0 ||
+          pr_cmd_cmp(cmd, PR_CMD_XMKD_ID) == 0 ||
+          pr_cmd_cmp(cmd, PR_CMD_XRMD_ID) == 0) {
+        path = pr_fs_decode_path(cmd->tmp_pool, cmd->arg);
+
+      } else if (pr_cmd_cmp(cmd, PR_CMD_MFMT_ID) == 0) {
+        /* MFMT has, as its filename, the second argument. */
+        path = pr_fs_decode_path(cmd->tmp_pool, cmd->argv[2]);
+      }
+    }
+
+    if (path != NULL) {
+      char *ptr = NULL;
+
+      ptr = strrchr(path, '/');
+      if (ptr != NULL) {
+        if (ptr != path) {
+          long_tag = pstrdup(cmd->tmp_pool, ptr + 1);
+
+        } else if (*(ptr+1) != '\0') {
+          long_tag = pstrdup(cmd->tmp_pool, ptr + 1);
+
+        } else {
+          long_tag = pstrdup(cmd->tmp_pool, path);
+        }
+
+      } else {
+        long_tag = pstrdup(cmd->tmp_pool, path);
+      }
+    }
+  }
+
+  if (long_tag == NULL &&
       strncmp(tag, "transfer-failure", 17) == 0) {
 
     /* If the current command is one that incurs a data transfer, then we
@@ -2493,7 +2588,8 @@ static const char *resolve_long_tag(cmd_rec *cmd, char *tag) {
            * determine when to use "failed" versus "success".
            */
           res = pr_response_get_last(cmd->tmp_pool, &resp_code, &resp_msg);
-          if (res == 0) {
+          if (res == 0 &&
+              resp_code != NULL) {
             if (*resp_code != '2' &&
                 *resp_code != '1') {
               char *ptr;
@@ -2557,7 +2653,8 @@ static const char *resolve_long_tag(cmd_rec *cmd, char *tag) {
            * determine when to use "failed" versus "success".
            */
           res = pr_response_get_last(cmd->tmp_pool, &resp_code, &resp_msg);
-          if (res == 0) {
+          if (res == 0 &&
+              resp_code != NULL) {
             if (*resp_code == '2') {
               if (pr_cmd_cmp(cmd, PR_CMD_ABOR_ID) != 0) {
                 long_tag = pstrdup(cmd->tmp_pool, "success");
@@ -2678,7 +2775,10 @@ static char *resolve_short_tag(cmd_rec *cmd, char tag) {
 
       if (pr_cmd_cmp(cmd, PR_CMD_CDUP_ID) == 0 ||
           pr_cmd_cmp(cmd, PR_CMD_CWD_ID) == 0 ||
+          pr_cmd_cmp(cmd, PR_CMD_LIST_ID) == 0 ||
+          pr_cmd_cmp(cmd, PR_CMD_MLSD_ID) == 0 ||
           pr_cmd_cmp(cmd, PR_CMD_MKD_ID) == 0 ||
+          pr_cmd_cmp(cmd, PR_CMD_NLST_ID) == 0 ||
           pr_cmd_cmp(cmd, PR_CMD_RMD_ID) == 0 ||
           pr_cmd_cmp(cmd, PR_CMD_XCWD_ID) == 0 ||
           pr_cmd_cmp(cmd, PR_CMD_XCUP_ID) == 0 ||
@@ -2686,7 +2786,20 @@ static char *resolve_short_tag(cmd_rec *cmd, char tag) {
           pr_cmd_cmp(cmd, PR_CMD_XRMD_ID) == 0) {
         char *tmp = strrchr(cmd->arg, '/');
 
-        sstrncpy(argp, tmp ? tmp : cmd->arg, sizeof(arg));
+        if (tmp != NULL) {
+          if (tmp != cmd->arg) {
+            sstrncpy(argp, tmp + 1, sizeof(arg));
+
+          } else if (*(tmp + 1) != '\0') {
+            sstrncpy(argp, tmp + 1, sizeof(arg));
+
+          } else {
+            sstrncpy(argp, cmd->arg, sizeof(arg));
+          }
+
+        } else {
+          sstrncpy(argp, cmd->arg, sizeof(arg));
+        }
 
       } else {
         sstrncpy(argp, pr_fs_getvwd(), sizeof(arg));
@@ -2697,7 +2810,10 @@ static char *resolve_short_tag(cmd_rec *cmd, char tag) {
       argp = arg;
 
       if (pr_cmd_cmp(cmd, PR_CMD_CDUP_ID) == 0 ||
+          pr_cmd_cmp(cmd, PR_CMD_LIST_ID) == 0 ||
+          pr_cmd_cmp(cmd, PR_CMD_MLSD_ID) == 0 ||
           pr_cmd_cmp(cmd, PR_CMD_MKD_ID) == 0 ||
+          pr_cmd_cmp(cmd, PR_CMD_NLST_ID) == 0 ||
           pr_cmd_cmp(cmd, PR_CMD_RMD_ID) == 0 ||
           pr_cmd_cmp(cmd, PR_CMD_XCUP_ID) == 0 ||
           pr_cmd_cmp(cmd, PR_CMD_XMKD_ID) == 0 ||
@@ -2774,6 +2890,48 @@ static char *resolve_short_tag(cmd_rec *cmd, char tag) {
         sstrncpy(argp, dir_abs_path(cmd->tmp_pool, session.xfer.path, TRUE),
           sizeof(arg));
 
+      } else if (pr_cmd_cmp(cmd, PR_CMD_CDUP_ID) == 0 ||
+                 pr_cmd_cmp(cmd, PR_CMD_PWD_ID) == 0 ||
+                 pr_cmd_cmp(cmd, PR_CMD_XCUP_ID) == 0 ||
+                 pr_cmd_cmp(cmd, PR_CMD_XPWD_ID) == 0) {
+        sstrncpy(argp, dir_abs_path(cmd->tmp_pool, pr_fs_getcwd(), TRUE),
+          sizeof(arg));
+
+      } else if (pr_cmd_cmp(cmd, PR_CMD_CWD_ID) == 0 ||
+                 pr_cmd_cmp(cmd, PR_CMD_XCWD_ID) == 0) {
+
+        /* Note: by this point in the dispatch cycle, the current working
+         * directory has already been changed.  For the CWD/XCWD commands,
+         * this means that dir_abs_path() may return an improper path,
+         * with the target directory being reported twice.  To deal with this,
+         * don't use dir_abs_path(), and use pr_fs_getvwd()/pr_fs_getcwd()
+         * instead.
+         */
+        if (session.chroot_path) {
+          /* Chrooted session. */
+          sstrncpy(arg, strcmp(pr_fs_getvwd(), "/") ?
+            pdircat(cmd->tmp_pool, session.chroot_path, pr_fs_getvwd(), NULL) :
+            session.chroot_path, sizeof(arg));
+
+        } else {
+          /* Non-chrooted session. */
+          sstrncpy(arg, pr_fs_getcwd(), sizeof(arg));
+        }
+
+      } else if (pr_cmd_cmp(cmd, PR_CMD_SITE_ID) == 0 &&
+                 (strncasecmp(cmd->argv[1], "CHGRP", 6) == 0 ||
+                  strncasecmp(cmd->argv[1], "CHMOD", 6) == 0 ||
+                  strncasecmp(cmd->argv[1], "UTIME", 6) == 0)) {
+        register unsigned int i;
+        char *tmp = "";
+
+        for (i = 3; i <= cmd->argc-1; i++) {
+          tmp = pstrcat(cmd->tmp_pool, tmp, *tmp ? " " : "", cmd->argv[i],
+            NULL);
+        }
+
+        sstrncpy(argp, dir_abs_path(cmd->tmp_pool, tmp, TRUE), sizeof(arg));
+
       } else {
 
         /* Some commands (i.e. DELE, MKD, RMD, XMKD, and XRMD) have associated
@@ -2781,11 +2939,21 @@ static char *resolve_short_tag(cmd_rec *cmd, char tag) {
          * should be expanded properly as well.
          */
         if (pr_cmd_cmp(cmd, PR_CMD_DELE_ID) == 0 ||
+            pr_cmd_cmp(cmd, PR_CMD_LIST_ID) == 0 ||
+            pr_cmd_cmp(cmd, PR_CMD_MDTM_ID) == 0 ||
             pr_cmd_cmp(cmd, PR_CMD_MKD_ID) == 0 ||
+            pr_cmd_cmp(cmd, PR_CMD_MLSD_ID) == 0 ||
+            pr_cmd_cmp(cmd, PR_CMD_MLST_ID) == 0 ||
+            pr_cmd_cmp(cmd, PR_CMD_NLST_ID) == 0 ||
             pr_cmd_cmp(cmd, PR_CMD_RMD_ID) == 0 ||
             pr_cmd_cmp(cmd, PR_CMD_XMKD_ID) == 0 ||
             pr_cmd_cmp(cmd, PR_CMD_XRMD_ID) == 0) {
           sstrncpy(arg, dir_abs_path(cmd->tmp_pool, cmd->arg, TRUE),
+            sizeof(arg));
+
+        } else if (pr_cmd_cmp(cmd, PR_CMD_MFMT_ID) == 0) {
+          /* MFMT has, as its filename, the second argument. */
+          sstrncpy(arg, dir_abs_path(cmd->tmp_pool, cmd->argv[2], TRUE),
             sizeof(arg));
 
         } else {
@@ -2917,7 +3085,7 @@ static char *resolve_short_tag(cmd_rec *cmd, char tag) {
         sstrncpy(argp, C_PASS " (hidden)", sizeof(arg));
 
       } else {
-        sstrncpy(argp, get_full_cmd(cmd), sizeof(arg));
+        sstrncpy(argp, pr_cmd_get_displayable_str(cmd, NULL), sizeof(arg));
       }
       break;
 
@@ -5273,14 +5441,17 @@ MODRET set_sqloptions(cmd_rec *cmd) {
   c = add_config_param(cmd->argv[0], 1, NULL);
 
   for (i = 1; i < cmd->argc; i++) {
-    if (strcmp(cmd->argv[i], "noDisconnectOnError") == 0) {
+    if (strcasecmp(cmd->argv[i], "NoDisconnectOnError") == 0) {
       opts |= SQL_OPT_NO_DISCONNECT_ON_ERROR;
 
-    } else if (strcmp(cmd->argv[i], "useNormalizedGroupSchema") == 0) {
+    } else if (strcasecmp(cmd->argv[i], "UseNormalizedGroupSchema") == 0) {
       opts |= SQL_OPT_USE_NORMALIZED_GROUP_SCHEMA;
 
-    } else if (strcmp(cmd->argv[i], "noReconnect") == 0) {
+    } else if (strcasecmp(cmd->argv[i], "NoReconnect") == 0) {
       opts |= SQL_OPT_NO_RECONNECT;
+
+    } else if (strcasecmp(cmd->argv[i], "IgnoreConfigFile") == 0) {
+      opts |= SQL_OPT_IGNORE_CONFIG_FILE;
 
     } else {
       CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "unknown SQLOption '",
@@ -5965,7 +6136,7 @@ int sql_log(int level, const char *fmt, ...) {
 }
 
 static int sql_openlog(void) {
-  int res = 0;
+  int res = 0, xerrno = 0;
 
   /* Sanity checks */
   sql_logfile = get_param_ptr(main_server->conf, "SQLLogFile", FALSE);
@@ -5980,9 +6151,11 @@ static int sql_openlog(void) {
   pr_signals_block();
   PRIVS_ROOT
   res = pr_log_openfile(sql_logfile, &sql_logfd, PR_LOG_SYSTEM_MODE);
+  xerrno = errno;
   PRIVS_RELINQUISH
   pr_signals_unblock();
 
+  errno = xerrno;
   return res;
 }
 
@@ -6388,11 +6561,11 @@ static int sql_sess_init(void) {
         strerror(errno));
 
     } else if (res == PR_LOG_WRITABLE_DIR) {
-      pr_log_pri(PR_LOG_NOTICE, "notice: unable to open SQLLogFile: "
+      pr_log_pri(PR_LOG_WARNING, "notice: unable to open SQLLogFile: "
           "parent directory is world-writable");
 
     } else if (res == PR_LOG_SYMLINK) {
-      pr_log_pri(PR_LOG_NOTICE, "notice: unable to open SQLLogFile: "
+      pr_log_pri(PR_LOG_WARNING, "notice: unable to open SQLLogFile: "
           "cannot log to a symbolic link");
     }
   }

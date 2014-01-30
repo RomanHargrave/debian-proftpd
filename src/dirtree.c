@@ -25,7 +25,7 @@
  */
 
 /* Read configuration file(s), and manage server/configuration structures.
- * $Id: dirtree.c,v 1.286 2013/05/03 16:32:24 castaglia Exp $
+ * $Id: dirtree.c,v 1.292 2013/10/13 18:06:57 castaglia Exp $
  */
 
 #include "conf.h"
@@ -1167,6 +1167,7 @@ static int check_filter_access(xaset_t *set, const char *name, cmd_rec *cmd) {
 
   c = find_config(set, CONF_PARAM, name, FALSE);
   while (c) {
+    int matched = 0;
     pr_regex_t *pre = (pr_regex_t *) c->argv[0];
 
     pr_signals_handle();
@@ -1174,8 +1175,12 @@ static int check_filter_access(xaset_t *set, const char *name, cmd_rec *cmd) {
     pr_trace_msg("filter", 8,
       "comparing %s argument '%s' against %s pattern '%s'", cmd->argv[0],
       cmd->arg, name, pr_regexp_get_pattern(pre));
-    res = pr_regexp_exec(pre, cmd->arg, 0, NULL, 0, 0, 0);
-    if (res == 0) {
+    matched = pr_regexp_exec(pre, cmd->arg, 0, NULL, 0, 0, 0);
+    pr_trace_msg("filter", 8,
+      "comparing %s argument '%s' against %s pattern '%s' returned %d",
+      cmd->argv[0], cmd->arg, name, pr_regexp_get_pattern(pre), matched);
+
+    if (matched == 0) {
       res = TRUE;
       break;
     }
@@ -1228,8 +1233,8 @@ static int check_ip_negative(const config_rec *c) {
         /* -1 signifies a NONE match, which isn't valid for negative
          * conditions.
          */
-        pr_log_pri(PR_LOG_ERR, "ooops, it looks like !NONE was used in an ACL "
-          "somehow.");
+        pr_log_pri(PR_LOG_NOTICE,
+          "ooops, it looks like !NONE was used in an ACL somehow");
         return FALSE;
 
       default:
@@ -2422,13 +2427,16 @@ void pr_config_dump(void (*dumpf)(const char *, ...), xaset_t *s,
     char *indent) {
   config_rec *c = NULL;
 
-  if (!s)
+  if (s == NULL) {
     return;
+  }
 
-  if (!indent)
+  if (indent == NULL) {
     indent = "";
+  }
 
   for (c = (config_rec *) s->xas_list; c; c = c->next) {
+    pr_signals_handle();
 
     /* Don't display directives whose name starts with an underscore. */
     if (c->name != NULL &&
@@ -2446,20 +2454,26 @@ void pr_config_dump(void (*dumpf)(const char *, ...), xaset_t *s,
 void pr_dirs_dump(void (*dumpf)(const char *, ...), xaset_t *s, char *indent) {
   config_rec *c;
 
-  if (!s)
+  if (s == NULL) {
     return;
+  }
 
-  if (!indent)
+  if (indent == NULL) {
     indent = " ";
+  }
 
   for (c = (config_rec *) s->xas_list; c; c = c->next) {
-    if (c->config_type != CONF_DIR)
+    pr_signals_handle();
+
+    if (c->config_type != CONF_DIR) {
       continue;
+    }
 
     dumpf("%s<Directory %s>", indent, c->name);
 
-    if (c->subset)
+    if (c->subset) {
       pr_dirs_dump(dumpf, c->subset, pstrcat(c->pool, indent, " ", NULL));
+    }
   }
 
   return;
@@ -2897,24 +2911,29 @@ void fixup_dirs(server_rec *s, int flags) {
   return;
 }
 
-config_rec *find_config_next(config_rec *prev, config_rec *c, int type,
-    const char *name, int recurse) {
+config_rec *find_config_next2(config_rec *prev, config_rec *c, int type,
+    const char *name, int recurse, unsigned long flags) {
   config_rec *top = c;
   unsigned int cid = 0;
+  size_t namelen = 0;
 
   /* We do two searches (if recursing) so that we find the "deepest"
    * level first.
    */
 
-  if (!c &&
-      !prev)
+  if (c == NULL &&
+      prev == NULL) {
     return NULL;
+  }
 
-  if (!prev)
+  if (prev == NULL) {
     prev = top;
+  }
 
-  if (name)
+  if (name != NULL) {
     cid = pr_config_get_id(name);
+    namelen = strlen(name);
+  }
 
   if (recurse) {
     do {
@@ -2930,7 +2949,33 @@ config_rec *find_config_next(config_rec *prev, config_rec *c, int type,
           for (subc = (config_rec *) c->subset->xas_list;
                subc;
                subc = subc->next) {
-            res = find_config_next(NULL, subc, type, name, recurse + 1);
+            pr_signals_handle();
+
+            if (subc->config_type == CONF_ANON &&
+                (flags & PR_CONFIG_FIND_FL_SKIP_ANON)) {
+              /* Skip <Anonymous> config_rec */
+              continue;
+            }
+
+            if (subc->config_type == CONF_DIR &&
+                (flags & PR_CONFIG_FIND_FL_SKIP_DIR)) {
+              /* Skip <Directory> config_rec */
+              continue;
+            }
+
+            if (subc->config_type == CONF_LIMIT &&
+                (flags & PR_CONFIG_FIND_FL_SKIP_LIMIT)) {
+              /* Skip <Limit> config_rec */
+              continue;
+            }
+
+            if (subc->config_type == CONF_DYNDIR &&
+                (flags & PR_CONFIG_FIND_FL_SKIP_DYNDIR)) {
+              /* Skip .ftpaccess config_rec */
+              continue;
+            }
+
+            res = find_config_next2(NULL, subc, type, name, recurse + 1, flags);
             if (res)
               return res;
           }
@@ -2949,16 +2994,18 @@ config_rec *find_config_next(config_rec *prev, config_rec *c, int type,
         if (type == -1 ||
             type == c->config_type) {
 
-          if (!name)
+          if (name == NULL) {
             return c;
+          }
 
           if (cid != 0 &&
               cid == c->config_id) {
             return c;
           }
 
-          if (strcmp(name, c->name) == 0)
+          if (strncmp(name, c->name, namelen + 1) == 0) {
             return c;
+          }
         }
       }
 
@@ -2980,21 +3027,27 @@ config_rec *find_config_next(config_rec *prev, config_rec *c, int type,
       if (type == -1 ||
           type == c->config_type) {
 
-        if (!name)
+        if (name == NULL) {
           return c;
+        }
 
         if (cid != 0 &&
             cid == c->config_id) {
           return c;
         }
 
-        if (strcmp(name, c->name) == 0)
+        if (strncmp(name, c->name, namelen + 1) == 0)
           return c;
       }
     }
   }
 
   return NULL;
+}
+
+config_rec *find_config_next(config_rec *prev, config_rec *c, int type,
+    const char *name, int recurse) {
+  return find_config_next2(prev, c, type, name, recurse, 0UL);
 }
 
 void find_config_set_top(config_rec *c) {
@@ -3007,15 +3060,22 @@ void find_config_set_top(config_rec *c) {
   }
 }
 
-config_rec *find_config(xaset_t *set, int type, const char *name, int recurse) {
-  if (!set ||
-      !set->xas_list)
+config_rec *find_config2(xaset_t *set, int type, const char *name,
+  int recurse, unsigned long flags) {
+
+  if (set == NULL ||
+      set->xas_list == NULL) {
     return NULL;
+  }
 
   find_config_set_top((config_rec *) set->xas_list);
 
-  return find_config_next(NULL, (config_rec *) set->xas_list, type, name,
-    recurse);
+  return find_config_next2(NULL, (config_rec *) set->xas_list, type, name,
+    recurse, flags);
+}
+
+config_rec *find_config(xaset_t *set, int type, const char *name, int recurse) {
+  return find_config2(set, type, name, recurse, 0UL);
 }
 
 void *get_param_ptr(xaset_t *set, const char *name, int recurse) {
@@ -3238,7 +3298,7 @@ int parse_config_path(pool *p, const char *path) {
       *tmp++ = '\0';
 
       if (pr_str_is_fnmatch(dup_path)) {
-        pr_log_pri(PR_LOG_ERR, "error: wildcard patterns not allowed in "
+        pr_log_pri(PR_LOG_WARNING, "error: wildcard patterns not allowed in "
           "configuration directory name '%s'", dup_path);
         errno = EINVAL;
         return -1;
@@ -3248,15 +3308,16 @@ int parse_config_path(pool *p, const char *path) {
       pr_fsio_lstat(dup_path, &st);
 
       if (S_ISLNK(st.st_mode) || !S_ISDIR(st.st_mode)) {
-        pr_log_pri(PR_LOG_ERR, "error: cannot read configuration path '%s'",
+        pr_log_pri(PR_LOG_WARNING,
+          "error: cannot read configuration path '%s': Not a directory",
           dup_path);
         errno = EINVAL;
         return -1;
       }
 
       if (!pr_str_is_fnmatch(tmp)) {
-        pr_log_pri(PR_LOG_ERR, "error: wildcard pattern required for file '%s'",
-          tmp);
+        pr_log_pri(PR_LOG_WARNING,
+          "error: wildcard pattern required for file '%s'", tmp);
         errno = EINVAL;
         return -1;
       }
@@ -3266,8 +3327,8 @@ int parse_config_path(pool *p, const char *path) {
       dup_path);
 
     dirh = pr_fsio_opendir(dup_path);
-    if (!dirh) {
-      pr_log_pri(PR_LOG_ERR,
+    if (dirh == NULL) {
+      pr_log_pri(PR_LOG_WARNING,
         "error: unable to open configuration directory '%s': %s", dup_path,
         strerror(errno));
       errno = EINVAL;
@@ -3310,7 +3371,7 @@ int parse_config_path(pool *p, const char *path) {
         PRIVS_RELINQUISH
 
         if (res < 0) {
-          pr_log_pri(PR_LOG_ERR,
+          pr_log_pri(PR_LOG_WARNING,
             "error: unable to open parse file '%s': %s", file,
             strerror(xerrno));
         }
@@ -3345,7 +3406,6 @@ int fixup_servers(xaset_t *list) {
       array_header *addrs = NULL;
 
       s->ServerAddress = pr_netaddr_get_localaddr_str(s->pool);
-
       s->addr = pr_netaddr_get_addr(s->pool, s->ServerAddress, &addrs);
      
       if (addrs) {
@@ -3448,7 +3508,7 @@ int fixup_servers(xaset_t *list) {
    * it's possible to have all vhosts (even the default) rejected.
    */
   if (list->xas_list == NULL) {
-    pr_log_pri(PR_LOG_NOTICE, "error: no valid servers configured");
+    pr_log_pri(PR_LOG_WARNING, "error: no valid servers configured");
     return -1;
   }
 
@@ -3714,26 +3774,7 @@ int get_boolean(cmd_rec *cmd, int av) {
 }
 
 char *get_full_cmd(cmd_rec *cmd) {
-  pool *p = cmd->tmp_pool;
-  char *res = "";
-
-  if (cmd->arg && *cmd->arg)
-    res = pstrcat(p, cmd->argv[0], " ", pr_fs_decode_path(p, cmd->arg), NULL);
-
-  else if (cmd->argc > 1) {
-    register unsigned int i = 0;
-    res = cmd->argv[0];
-
-    for (i = 1; i < cmd->argc; i++)
-      res = pstrcat(p, res, pr_fs_decode_path(p, cmd->argv[i]), " ", NULL);
-
-    while (res[strlen(res)-1] == ' ' && *res)
-      res[strlen(res)-1] = '\0';
-
-  } else
-    res = pstrdup(p, cmd->argv[0]);
-
-  return res;
+  return pr_cmd_get_displayable_str(cmd, NULL);
 }
 
 unsigned int pr_config_get_id(const char *name) {

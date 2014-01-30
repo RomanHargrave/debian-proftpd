@@ -2,7 +2,7 @@
  * ProFTPD: mod_auth_file - file-based authentication module that supports
  *                          restrictions on the file contents
  *
- * Copyright (c) 2002-2013 The ProFTPD Project team
+ * Copyright (c) 2002-2014 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,10 +23,11 @@
  * distribute the resulting executable, without including the source code for
  * OpenSSL in the source distribution.
  *
- * $Id: mod_auth_file.c,v 1.48 2013/02/24 16:42:41 castaglia Exp $
+ * $Id: mod_auth_file.c,v 1.58 2014/01/22 06:39:59 castaglia Exp $
  */
 
 #include "conf.h"
+#include "privs.h"
 
 /* AIX has some rather stupid function prototype inconsistencies between
  * their crypt.h and stdlib.h's setkey() declarations.
@@ -45,8 +46,6 @@
 #ifndef BUFSIZ
 # define BUFSIZ          PR_TUNABLE_BUFFER_SIZE
 #endif /* !BUFSIZ */
-
-extern unsigned char persistent_passwd;
 
 module auth_file_module;
 
@@ -96,6 +95,8 @@ static const char *trace_channel = "authfile";
 
 /* Support routines.  Move the passwd/group functions out of lib/ into here. */
 
+#define PR_AUTH_FILE_FL_ALLOW_WORLD_READABLE		0x001
+
 static int af_check_parent_dir(pool *p, const char *name, const char *path) {
   struct stat st;
   int res;
@@ -125,8 +126,8 @@ static int af_check_parent_dir(pool *p, const char *name, const char *path) {
     int xerrno = EPERM;
 
     pr_log_debug(DEBUG0, MOD_AUTH_FILE_VERSION
-      ": unable to use %s from world-writable directory '%s': %s",
-      name, dir_path, strerror(xerrno));
+      ": unable to use %s from world-writable directory '%s' (perms %04o): %s",
+      name, dir_path, st.st_mode & ~S_IFMT, strerror(xerrno));
 
     errno = xerrno;
     return -1;
@@ -135,7 +136,8 @@ static int af_check_parent_dir(pool *p, const char *name, const char *path) {
   return 0;
 }
 
-static int af_check_file(pool *p, const char *name, const char *path) {
+static int af_check_file(pool *p, const char *name, const char *path,
+    int flags) {
   struct stat st;
   int res;
   const char *orig_path;
@@ -195,26 +197,26 @@ static int af_check_file(pool *p, const char *name, const char *path) {
     return -1;
   }
 
-  /* World-readable/writable files are insecure, and are thus not
-   * usable/trusted.
-   */
-  if (st.st_mode & S_IROTH) {
+  /* World-readable files MAY be insecure, and are thus not usable/trusted. */
+  if ((st.st_mode & S_IROTH) &&
+       !(flags & PR_AUTH_FILE_FL_ALLOW_WORLD_READABLE)) {
     int xerrno = EPERM;
 
     pr_log_debug(DEBUG0, MOD_AUTH_FILE_VERSION
-      ": unable to use world-readable %s '%s': %s",
-      name, orig_path, strerror(xerrno));
+      ": unable to use world-readable %s '%s' (perms %04o): %s",
+      name, orig_path, st.st_mode & ~S_IFMT, strerror(xerrno));
 
     errno = xerrno;
     return -1;
   }
 
+  /* World-writable files are insecure, and are thus not usable/trusted. */
   if (st.st_mode & S_IWOTH) {
     int xerrno = EPERM;
 
     pr_log_debug(DEBUG0, MOD_AUTH_FILE_VERSION
-      ": unable to use world-writable %s '%s': %s",
-      name, orig_path, strerror(xerrno));
+      ": unable to use world-writable %s '%s' (perms %04o): %s",
+      name, orig_path, st.st_mode & ~S_IFMT, strerror(xerrno));
 
     errno = xerrno;
     return -1;
@@ -511,13 +513,15 @@ static struct group *af_getgrent(void) {
 
     buf = malloc(BUFSIZ);
     if (buf == NULL) {
-      pr_log_pri(PR_LOG_CRIT, "%s", "Out of memory!");
+      pr_log_pri(PR_LOG_ALERT, "Out of memory!");
       _exit(1);
     }
     grp = NULL;
 
     while (af_getgrentline(&buf, &buflen, af_group_file->af_file,
         &(af_group_file->af_lineno)) != NULL) {
+
+      pr_signals_handle();
 
       /* Ignore comment and empty lines */
       if (buf[0] == '\0' ||
@@ -598,12 +602,30 @@ static int af_setgrent(void) {
       return 0;
 
     } else {
-      af_group_file->af_file = fopen(af_group_file->af_path, "r");
-      if (af_group_file->af_file == NULL) {
-        int xerrno = errno;
+      int xerrno;
 
-        pr_log_pri(PR_LOG_ERR, "error: unable to open group file '%s': %s",
-          af_group_file->af_path, strerror(xerrno));
+      PRIVS_ROOT
+      af_group_file->af_file = fopen(af_group_file->af_path, "r");
+      xerrno = errno;
+      PRIVS_RELINQUISH
+
+      if (af_group_file->af_file == NULL) {
+        struct stat st;
+
+        if (pr_fsio_stat(af_group_file->af_path, &st) == 0) {
+          pr_log_pri(PR_LOG_WARNING,
+            "error: unable to open AuthGroupFile file '%s' (file owned by "
+            "UID %lu, GID %lu, perms %04o, accessed by UID %lu, GID %lu): %s",
+            af_group_file->af_path, (unsigned long) st.st_uid,
+            (unsigned long) st.st_gid, st.st_mode & ~S_IFMT,
+            (unsigned long) geteuid(), (unsigned long) getegid(),
+            strerror(xerrno));
+
+        } else {
+          pr_log_pri(PR_LOG_WARNING,
+            "error: unable to open AuthGroupFile file '%s': %s",
+            af_group_file->af_path, strerror(xerrno));
+        }
 
         errno = xerrno;
         return -1;
@@ -815,12 +837,31 @@ static int af_setpwent(void) {
       return 0;
 
     } else {
-      af_user_file->af_file = fopen(af_user_file->af_path, "r");
-      if (af_user_file->af_file == NULL) {
-        int xerrno = errno;
+      int xerrno;
 
-        pr_log_pri(PR_LOG_ERR, "error: unable to open passwd file '%s': %s",
-          af_user_file->af_path, strerror(xerrno));
+      PRIVS_ROOT
+      af_user_file->af_file = fopen(af_user_file->af_path, "r");
+      xerrno = errno;
+      PRIVS_RELINQUISH
+
+      if (af_user_file->af_file == NULL) {
+        struct stat st;
+
+        if (pr_fsio_stat(af_user_file->af_path, &st) == 0) {
+          pr_log_pri(PR_LOG_WARNING,
+            "error: unable to open AuthUserFile file '%s' (file owned by "
+            "UID %lu, GID %lu, perms %04o, accessed by UID %lu, GID %lu): %s",
+            af_user_file->af_path, (unsigned long) st.st_uid,
+            (unsigned long) st.st_gid, st.st_mode & ~S_IFMT,
+            (unsigned long) geteuid(), (unsigned long) getegid(),
+            strerror(xerrno));
+
+        } else {
+          pr_log_pri(PR_LOG_WARNING,
+            "error: unable to open AuthUserFile file '%s': %s",
+            af_user_file->af_path, strerror(xerrno));
+        }
+
         errno = xerrno;
         return -1;
       }
@@ -1167,6 +1208,7 @@ MODRET authfile_chkpass(cmd_rec *cmd) {
 MODRET set_authgroupfile(cmd_rec *cmd) {
   config_rec *c = NULL;
   authfile_file_t *file = NULL;
+  int flags = 0;
 
 #ifdef PR_USE_REGEX
   if (cmd->argc-1 < 1 ||
@@ -1186,8 +1228,12 @@ MODRET set_authgroupfile(cmd_rec *cmd) {
       cmd->argv[1], "'.", NULL));
   }
 
-  /* Make sure the configured file has the correct permissions. */
-  if (af_check_file(cmd->tmp_pool, cmd->argv[0], cmd->argv[1]) < 0) {
+  /* Make sure the configured file has the correct permissions.  Note that
+   * AuthGroupFiles, unlike AuthUserFiles, do not contain any sensitive
+   * information, and can thus be world-readable.
+   */
+  flags = PR_AUTH_FILE_FL_ALLOW_WORLD_READABLE;
+  if (af_check_file(cmd->tmp_pool, cmd->argv[0], cmd->argv[1], flags) < 0) {
     CONF_ERROR(cmd, pstrcat(cmd->tmp_pool,
       "unable to use ", cmd->argv[1], ": ", strerror(errno), NULL));
   }
@@ -1309,6 +1355,7 @@ MODRET authfile_post_host(cmd_rec *cmd) {
 MODRET set_authuserfile(cmd_rec *cmd) {
   config_rec *c = NULL;
   authfile_file_t *file = NULL;
+  int flags = 0;
 
 #ifdef PR_USE_REGEX
   if (cmd->argc-1 < 1 ||
@@ -1328,8 +1375,12 @@ MODRET set_authuserfile(cmd_rec *cmd) {
       cmd->argv[1], "'.", NULL));
   }
 
-  /* Make sure the configured file has the correct permissions. */
-  if (af_check_file(cmd->tmp_pool, cmd->argv[0], cmd->argv[1]) < 0) {
+  /* Make sure the configured file has the correct permissions.  Note that
+   * AuthUserFiles, unlike AuthGroupFiles, DO contain any sensitive
+   * information, and thus CANNOT be world-readable.
+   */
+  flags = 0;
+  if (af_check_file(cmd->tmp_pool, cmd->argv[0], cmd->argv[1], flags) < 0) {
     CONF_ERROR(cmd, pstrcat(cmd->tmp_pool,
       "unable to use ", cmd->argv[1], ": ", strerror(errno), NULL));
   }

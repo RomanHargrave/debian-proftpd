@@ -26,7 +26,7 @@
  * For more information contact TJ Saunders <tj@castaglia.org>.
  *
  * --- DO NOT DELETE BELOW THIS LINE ----
- * $Id: mod_geoip.c,v 1.4 2013/01/19 18:20:59 castaglia Exp $
+ * $Id: mod_geoip.c,v 1.10 2013/10/13 22:51:36 castaglia Exp $
  * $Libraries: -lGeoIP$
  */
 
@@ -135,7 +135,7 @@ static const char *get_geoip_filter_name(int);
 static const char *get_geoip_filter_value(int);
 
 static int check_geoip_filters(geoip_policy_e policy) {
-  int matched_allow_filter = FALSE, allow_conn = 0;
+  int matched_allow_filter = -1, allow_conn = 0;
 #if PR_USE_REGEX
   config_rec *c;
 
@@ -146,6 +146,10 @@ static int check_geoip_filters(geoip_policy_e policy) {
     const char *filter_name, *filter_pattern, *filter_value;
 
     pr_signals_handle();
+
+    if (matched_allow_filter == -1) {
+      matched_allow_filter = FALSE;
+    }
 
     filter_id = *((int *) c->argv[0]);
     filter_pattern = c->argv[1];
@@ -165,14 +169,15 @@ static int check_geoip_filters(geoip_policy_e policy) {
       filter_name, filter_value, res == 0 ? "matched" : "did not match",
       filter_pattern);
 
-    if (res != 0) {
-      (void) pr_log_writefile(geoip_logfd, MOD_GEOIP_VERSION,
-        "%s filter value '%s' did not match GeoIPAllowFilter pattern '%s'",
-        filter_name, filter_value, filter_pattern);
-      return -1;
+    if (res == 0) {
+      matched_allow_filter = TRUE;
+      break;
     }
 
-    matched_allow_filter = TRUE;
+    (void) pr_log_writefile(geoip_logfd, MOD_GEOIP_VERSION,
+      "%s filter value '%s' did not match GeoIPAllowFilter pattern '%s'",
+      filter_name, filter_value, filter_pattern);
+
     c = find_config_next(c, c->next, CONF_PARAM, "GeoIPAllowFilter", FALSE);
   }
 
@@ -198,7 +203,7 @@ static int check_geoip_filters(geoip_policy_e policy) {
 
     res = pr_regexp_exec(filter_re, filter_value, 0, NULL, 0, 0, 0);
     pr_trace_msg(trace_channel, 12,
-      "%s filter value %s %s GeoIPAllowFilter pattern '%s'",
+      "%s filter value %s %s GeoIPDenyFilter pattern '%s'",
       filter_name, filter_value, res == 0 ? "matched" : "did not match",
       filter_pattern);
 
@@ -379,6 +384,18 @@ static void get_geoip_tables(array_header *geoips, int filter_flags) {
 
     PRIVS_ROOT
     gi = GeoIP_open(path, flags);
+    if (gi == NULL &&
+        (flags & GEOIP_INDEX_CACHE)) {
+      /* Per Bug#3975, a common cause of this error is the fact that some
+       * of the Maxmind GeoIP Lite database files simply do not have indexes.
+       * So try to open them as standard databases as a fallback.
+       */
+      pr_log_debug(DEBUG8, MOD_GEOIP_VERSION
+        ": unable to open GeoIPTable '%s' using the IndexCache flag "
+        "(database lacks index?), retrying without IndexCache flag", path);
+      flags &= ~GEOIP_INDEX_CACHE;
+      gi = GeoIP_open(path, flags);
+    }
     PRIVS_RELINQUISH
 
     if (gi != NULL) {
@@ -396,8 +413,8 @@ static void get_geoip_tables(array_header *geoips, int filter_flags) {
        * than providing a strerror function.  Grr!
        */
 
-      (void) pr_log_writefile(geoip_logfd, MOD_GEOIP_VERSION,
-        "unable to open/use GeoIPTable '%s'", path);
+      pr_log_pri(PR_LOG_WARNING, MOD_GEOIP_VERSION
+        ": warning: unable to open/use GeoIPTable '%s'", path);
     }
 
     c = find_config_next(c, c->next, CONF_PARAM, "GeoIPTable", FALSE);
@@ -425,8 +442,8 @@ static void get_geoip_tables(array_header *geoips, int filter_flags) {
         GeoIP_database_info(gi), GeoIP_database_edition(gi));
 
     } else {
-      (void) pr_log_writefile(geoip_logfd, MOD_GEOIP_VERSION,
-        "unable to open/use default GeoIP library database file(s)");
+      pr_log_pri(PR_LOG_WARNING, MOD_GEOIP_VERSION
+        ": warning: unable to open/use default GeoIP library database file(s)");
     }
   }
 }
@@ -686,7 +703,8 @@ static void get_geoip_data(array_header *geoips, const char *ip_addr) {
         snprintf(lon_str, sizeof(lon_str)-1, "%f", geoip_record->longitude);
         geoip_longitude = pstrdup(session.pool, lon_str);
 
-        if (geoip_record->region[0]) {
+        if (geoip_record->region != NULL &&
+            geoip_record->region[0]) {
           geoip_region_code = pstrdup(session.pool, geoip_record->region);
         }
 
@@ -1114,7 +1132,7 @@ MODRET geoip_post_pass(cmd_rec *cmd) {
     (void) pr_log_writefile(geoip_logfd, MOD_GEOIP_VERSION,
       "connection from %s denied due to GeoIP filter/policy",
       pr_netaddr_get_ipstr(session.c->remote_addr));
-    pr_log_pri(PR_LOG_INFO, MOD_GEOIP_VERSION
+    pr_log_pri(PR_LOG_NOTICE, MOD_GEOIP_VERSION
       ": Connection denied to %s due to GeoIP filter/policy",
       pr_netaddr_get_ipstr(session.c->remote_addr));
 
@@ -1216,12 +1234,12 @@ static int geoip_sess_init(void) {
             strerror(xerrno));
 
         } else if (res == PR_LOG_WRITABLE_DIR) {
-          pr_log_pri(PR_LOG_NOTICE, MOD_GEOIP_VERSION
+          pr_log_pri(PR_LOG_WARNING, MOD_GEOIP_VERSION
             ": notice: unable to open GeoIPLog '%s': parent directory is "
             "world-writable", path);
 
         } else if (res == PR_LOG_SYMLINK) {
-          pr_log_pri(PR_LOG_NOTICE, MOD_GEOIP_VERSION
+          pr_log_pri(PR_LOG_WARNING, MOD_GEOIP_VERSION
             ": notice: unable to open GeoIPLog '%s': cannot log to a symlink",
             path);
         }
@@ -1273,7 +1291,7 @@ static int geoip_sess_init(void) {
     (void) pr_log_writefile(geoip_logfd, MOD_GEOIP_VERSION,
       "connection from %s denied due to GeoIP filter/policy",
       pr_netaddr_get_ipstr(session.c->remote_addr));
-    pr_log_pri(PR_LOG_INFO, MOD_GEOIP_VERSION
+    pr_log_pri(PR_LOG_NOTICE, MOD_GEOIP_VERSION
       ": Connection denied to %s due to GeoIP filter/policy",
       pr_netaddr_get_ipstr(session.c->remote_addr));
 

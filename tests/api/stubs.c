@@ -1,6 +1,6 @@
 /*
  * ProFTPD - FTP server API testsuite
- * Copyright (c) 2008-2013 The ProFTPD Project team
+ * Copyright (c) 2008-2014 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -31,6 +31,7 @@ session_t session;
 char ServerType = SERVER_STANDALONE;
 int ServerUseReverseDNS = 1;
 server_rec *main_server = NULL;
+pid_t mpid = 1;
 module *static_modules[] = { NULL };
 module *loaded_modules = NULL;
 
@@ -48,24 +49,56 @@ struct passwd *pr_auth_getpwnam(pool *p, const char *name) {
   return NULL;
 }
 
+int pr_config_get_server_xfer_bufsz(int direction) {
+  int bufsz = -1;
+
+  switch (direction) {
+    case PR_NETIO_IO_RD:
+      bufsz = PR_TUNABLE_DEFAULT_RCVBUFSZ;
+      break;
+
+    case PR_NETIO_IO_WR:
+      bufsz = PR_TUNABLE_DEFAULT_SNDBUFSZ;
+      break;
+
+    default:
+      errno = EINVAL;
+      return -1;
+  }
+
+  return bufsz;
+}
+
 int pr_ctrls_unregister(module *m, const char *action) {
   return 0;
 }
 
 void pr_log_debug(int level, const char *fmt, ...) {
+  if (getenv("TEST_VERBOSE") != NULL) {
+    va_list msg;
+
+    fprintf(stderr, "DEBUG%d: ", level);
+
+    va_start(msg, fmt);
+    vfprintf(stderr, fmt, msg);
+    va_end(msg);
+
+    fprintf(stderr, "\n");
+  }
 }
 
 void pr_log_pri(int prio, const char *fmt, ...) {
-}
+  if (getenv("TEST_VERBOSE") != NULL) {
+    va_list msg;
 
-int pr_netio_printf(pr_netio_stream_t *strm, const char *fmt, ...) {
-  errno = ENOSYS;
-  return -1;
-}
+    fprintf(stderr, "PRI%d: ", prio);
 
-int pr_netio_printf_async(pr_netio_stream_t *strm, char *fmt, ...) {
-  errno = ENOSYS;
-  return -1;
+    va_start(msg, fmt);
+    vfprintf(stderr, fmt, msg);
+    va_end(msg);
+
+    fprintf(stderr, "\n");
+  }
 }
 
 void pr_signals_handle(void) {
@@ -82,5 +115,21 @@ int pr_trace_get_level(const char *channel) {
 }
 
 int pr_trace_msg(const char *channel, int level, const char *fmt, ...) {
+
+  if (getenv("TEST_VERBOSE") != NULL) {
+    va_list msg;
+
+    fprintf(stderr, "TRACE: <%s:%d>: ", channel, level);
+
+    va_start(msg, fmt);
+    vfprintf(stderr, fmt, msg);
+    va_end(msg);
+
+    fprintf(stderr, "\n");
+  }
+
   return 0;
+}
+
+void run_schedule(void) {
 }

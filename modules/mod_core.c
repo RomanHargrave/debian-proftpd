@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2013 The ProFTPD Project team
+ * Copyright (c) 2001-2014 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* Core FTPD module
- * $Id: mod_core.c,v 1.452 2013/05/03 16:32:24 castaglia Exp $
+ * $Id: mod_core.c,v 1.460 2014/01/25 16:39:58 castaglia Exp $
  */
 
 #include "conf.h"
@@ -351,15 +351,17 @@ MODRET add_include(cmd_rec *cmd) {
   }
 
   if (parse_config_path(cmd->tmp_pool, cmd->argv[1]) == -1) {
-    if (errno != EINVAL) {
+    int xerrno = errno;
+
+    if (xerrno != EINVAL) {
       pr_log_pri(PR_LOG_WARNING, "warning: unable to include '%s': %s",
-        cmd->argv[1], strerror(errno));
+        cmd->argv[1], strerror(xerrno));
 
     } else {
       PRIVS_RELINQUISH
 
       CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "error including '", cmd->argv[1],
-        "': ", strerror(errno), NULL));
+        "': ", strerror(xerrno), NULL));
     }
   }
   PRIVS_RELINQUISH
@@ -973,16 +975,15 @@ MODRET set_maxconnrate(cmd_rec *cmd) {
 
 MODRET set_timeoutidle(cmd_rec *cmd) {
   int timeout = -1;
-  char *endp = NULL;
   config_rec *c = NULL;
 
   CHECK_ARGS(cmd, 1);
   CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL|CONF_ANON);
 
-  timeout = (int) strtol(cmd->argv[1], &endp, 10);
-
-  if ((endp && *endp) || timeout < 0 || timeout > 65535)
-    CONF_ERROR(cmd, "timeout values must be between 0 and 65535");
+  if (pr_str_get_duration(cmd->argv[1], &timeout) < 0) {
+    CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "error parsing timeout value '",
+      cmd->argv[1], "': ", strerror(errno), NULL));
+  }
 
   c = add_config_param(cmd->argv[0], 1, NULL);
   c->argv[0] = pcalloc(c->pool, sizeof(int));
@@ -993,21 +994,20 @@ MODRET set_timeoutidle(cmd_rec *cmd) {
 }
 
 MODRET set_timeoutlinger(cmd_rec *cmd) {
-  long timeout = -1;
-  char *endp = NULL;
+  int timeout = -1;
   config_rec *c = NULL;
 
   CHECK_ARGS(cmd, 1);
   CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
 
-  timeout = strtol(cmd->argv[1], &endp, 10);
-
-  if ((endp && *endp) || timeout < 0 || timeout > 65535)
-    CONF_ERROR(cmd, "timeout values must be between 0 and 65535");
+  if (pr_str_get_duration(cmd->argv[1], &timeout) < 0) {
+    CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "error parsing timeout value '",
+      cmd->argv[1], "': ", strerror(errno), NULL));
+  }
 
   c = add_config_param(cmd->argv[0], 1, NULL);
-  c->argv[0] = pcalloc(c->pool, sizeof(long));
-  *((long *) c->argv[0]) = timeout;
+  c->argv[0] = pcalloc(c->pool, sizeof(int));
+  *((int *) c->argv[0]) = timeout;
 
   return PR_HANDLED(cmd);
 }
@@ -1771,7 +1771,7 @@ MODRET set_syslogfacility(cmd_rec *cmd) {
         case PR_LOG_WRITABLE_DIR:
           pr_signals_unblock();
           CONF_ERROR(cmd,
-            "you are attempting to log to a world writeable directory");
+            "you are attempting to log to a world-writable directory");
           break;
 
         case PR_LOG_SYMLINK:
@@ -1995,18 +1995,43 @@ MODRET set_allowforeignaddress(cmd_rec *cmd) {
 }
 
 MODRET set_commandbuffersize(cmd_rec *cmd) {
-  int size = 0;
+  size_t size = 0;
+  off_t nbytes = 0;
   config_rec *c = NULL;
+  const char *units = NULL;
 
-  CHECK_ARGS(cmd, 1);
+  if (cmd->argc < 2 || cmd->argc > 3) {
+    CONF_ERROR(cmd, "wrong number of parameters")
+  }
+
   CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
 
-  /* NOTE: need to add checks for maximum possible sizes, negative sizes. */
-  size = atoi(cmd->argv[1]);
+  if (cmd->argc == 3) {
+    units = cmd->argv[2];
+  }
+
+  if (pr_str_get_nbytes(cmd->argv[1], units, &nbytes) < 0) {
+    CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "unable to parse: ",
+      cmd->argv[1], " ", units ? units : "", ": ", strerror(errno), NULL));
+  }
+
+  if (nbytes > PR_TUNABLE_CMD_BUFFER_SIZE) {
+    char max[1024];
+
+    snprintf(max, sizeof(max)-1, "%lu", (unsigned long)
+      PR_TUNABLE_CMD_BUFFER_SIZE);
+    max[sizeof(max)-1] = '\0';
+
+    CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "size ", cmd->argv[1],
+      units ? units : "", "exceeds max size ", max, NULL));
+  }
+
+  /* Possible truncation here, but only for an absurdly large size. */
+  size = (size_t) nbytes;
 
   c = add_config_param(cmd->argv[0], 1, NULL);
-  c->argv[0] = pcalloc(c->pool, sizeof(int));
-  *((int *) c->argv[0]) = size;
+  c->argv[0] = pcalloc(c->pool, sizeof(size_t));
+  *((size_t *) c->argv[0]) = size;
 
   return PR_HANDLED(cmd);
 }
@@ -2468,8 +2493,9 @@ MODRET end_class(cmd_rec *cmd) {
   CHECK_ARGS(cmd, 0);
   CHECK_CONF(cmd, CONF_CLASS);
 
-  if (pr_class_close() < 0)
+  if (pr_class_close() < 0) {
     pr_log_pri(PR_LOG_WARNING, "warning: empty <Class> definition");
+  }
 
   return PR_HANDLED(cmd);
 }
@@ -3693,7 +3719,7 @@ MODRET core_eprt(cmd_rec *cmd) {
   const char *proto;
 
   if (session.sf_flags & SF_EPSV_ALL) {
-    pr_response_add_err(R_500, _("Illegal PORT command, EPSV ALL in effect"));
+    pr_response_add_err(R_500, _("Illegal EPRT command, EPSV ALL in effect"));
     errno = EPERM;
     return PR_ERROR(cmd);
   }
@@ -5786,9 +5812,13 @@ static int core_sess_init(void) {
 
   /* Check for a server-specific TimeoutLinger */
   c = find_config(main_server->conf, CONF_PARAM, "TimeoutLinger", FALSE);
-  if (c != NULL)
-    pr_data_set_linger(*((long *) c->argv[0]));
-  
+  if (c != NULL) {
+    long timeout;
+
+    timeout = (long) *((int *) c->argv[0]);
+    pr_data_set_linger(timeout);
+  }
+ 
   /* Check for a configured DebugLevel. */
   debug_level = get_param_ptr(main_server->conf, "DebugLevel", FALSE);
   if (debug_level != NULL)
@@ -6136,7 +6166,7 @@ static cmdtable core_cmdtab[] = {
   { CMD, C_CDUP, G_DIRS,  core_cdup,	TRUE,	FALSE, CL_DIRS },
   { CMD, C_XCUP, G_DIRS,  core_cdup,	TRUE,	FALSE, CL_DIRS },
   { CMD, C_DELE, G_WRITE, core_dele,	TRUE,	FALSE, CL_WRITE },
-  { CMD, C_MDTM, G_DIRS,  core_mdtm,	TRUE,	FALSE, CL_INFO },
+  { CMD, C_MDTM, G_DIRS,  core_mdtm,	TRUE,	FALSE, CL_INFO|CL_DIRS },
   { CMD, C_RNFR, G_WRITE, core_rnfr,	TRUE,	FALSE, CL_MISC|CL_WRITE },
   { CMD, C_RNTO, G_WRITE, core_rnto,	TRUE,	FALSE, CL_MISC|CL_WRITE },
   { LOG_CMD,     C_RNTO, G_NONE, core_rnto_cleanup, TRUE, FALSE, CL_NONE },

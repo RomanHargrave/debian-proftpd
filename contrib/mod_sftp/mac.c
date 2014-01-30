@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: mac.c,v 1.16 2013/03/28 20:31:53 castaglia Exp $
+ * $Id: mac.c,v 1.20 2013/12/19 16:32:32 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -79,6 +79,9 @@ static HMAC_CTX hmac_write_ctxs[2];
 static struct umac_ctx *umac_write_ctxs[2];
 
 static size_t mac_blockszs[2] = { 0, 0 };
+
+/* Buffer size for reading/writing keys */
+#define SFTP_MAC_BUFSZ				1536
 
 static unsigned int read_mac_idx = 0;
 static unsigned int write_mac_idx = 0;
@@ -378,7 +381,7 @@ static int set_mac_key(struct sftp_mac *mac, const EVP_MD *hash,
 
   key = malloc(key_sz);
   if (key == NULL) {
-    pr_log_pri(PR_LOG_CRIT, MOD_SFTP_VERSION ": Out of memory!");
+    pr_log_pri(PR_LOG_ALERT, MOD_SFTP_VERSION ": Out of memory!");
     _exit(1);
   }
 
@@ -606,7 +609,7 @@ int sftp_mac_set_read_key(pool *p, const EVP_MD *hash, const BIGNUM *k,
   hmac_ctx = &(hmac_read_ctxs[read_mac_idx]);
   umac_ctx = umac_read_ctxs[read_mac_idx];
 
-  bufsz = buflen = 1024;
+  bufsz = buflen = SFTP_MAC_BUFSZ;
   ptr = buf = sftp_msg_getbuf(p, bufsz);
 
   /* Need to use SSH2-style format of K for the key. */
@@ -709,7 +712,7 @@ int sftp_mac_set_write_key(pool *p, const EVP_MD *hash, const BIGNUM *k,
   hmac_ctx = &(hmac_write_ctxs[write_mac_idx]);
   umac_ctx = umac_write_ctxs[write_mac_idx];
 
-  bufsz = buflen = 1024;
+  bufsz = buflen = SFTP_MAC_BUFSZ;
   ptr = buf = sftp_msg_getbuf(p, bufsz);
 
   /* Need to use SSH2-style format of K for the key. */

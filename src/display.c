@@ -23,7 +23,7 @@
  */
 
 /* Display of files
- * $Id: display.c,v 1.29 2013/02/14 19:22:29 castaglia Exp $
+ * $Id: display.c,v 1.32 2013/10/07 05:51:30 castaglia Exp $
  */
 
 #include "conf.h"
@@ -33,17 +33,21 @@ static const char *first_msg = NULL;
 static const char *prev_msg = NULL;
 
 static void format_size_str(char *buf, size_t buflen, off_t size) {
-  char units[] = {'K', 'M', 'G', 'T', 'P'};
+  char *units[] = {"", "K", "M", "G", "T", "P"};
+  unsigned int nunits = 6;
   register unsigned int i = 0;
 
   /* Determine the appropriate units label to use. */
-  while (size > 1024) {
+  while (size > 1024 &&
+         i < nunits) {
+    pr_signals_handle();
+
     size /= 1024;
     i++;
   }
 
   /* Now, prepare the buffer. */
-  snprintf(buf, buflen, "%.3" PR_LU "%cB", (pr_off_t) size, units[i]);
+  snprintf(buf, buflen, "%.3" PR_LU "%sB", (pr_off_t) size, units[i]);
 }
 
 static int display_add_line(pool *p, const char *resp_code,
@@ -346,7 +350,8 @@ static int display_fh(pr_fh_t *fh, const char *fs, const char *code,
         val = pr_var_get(key);
         if (val == NULL) {
           pr_trace_msg("var", 4,
-            "no value set for name '%s', using \"(none)\"", key);
+            "no value set for name '%s' [%s], using \"(none)\"", key,
+            strerror(errno));
           val = "(none)";
         }
       }

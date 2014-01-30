@@ -25,7 +25,7 @@
  * This is mod_dso, contrib software for proftpd 1.3.x.
  * For more information contact TJ Saunders <tj@castaglia.org>.
  *
- * $Id: mod_dso.c,v 1.29 2013/06/05 16:02:42 castaglia Exp $
+ * $Id: mod_dso.c,v 1.33 2013/10/13 23:46:43 castaglia Exp $
  */
 
 #include "conf.h"
@@ -70,16 +70,6 @@ static int dso_load_file(char *path) {
   return 0;
 }
 
-static int name_ends_with(const char *name, size_t name_len, const char *suffix,
-  size_t suffix_len) {
-
-  if (strncmp(name + (name_len - suffix_len), suffix, suffix_len) == 0) {
-    return TRUE;
-  }
-
-  return FALSE;
-}
-
 static int dso_load_module(char *name) {
   int module_load_errno = 0, res;
   char *symbol_name, *path, *ptr;
@@ -103,8 +93,8 @@ static int dso_load_module(char *name) {
   }
 
   /* Handle ".c" and ".cpp" extensions. */
-  if (!name_ends_with(name, namelen, ".c", 2) &&
-      !name_ends_with(name, namelen, ".cpp", 4)) {
+  if (pr_strnrstr(name, namelen, ".c", 2, 0) != TRUE &&
+      pr_strnrstr(name, namelen, ".cpp", 4, 0) != TRUE) {
     errno = EINVAL;
     return -1;
   }
@@ -163,7 +153,7 @@ static int dso_load_module(char *name) {
 
     if (xerrno == ENOENT) {
       pr_log_pri(PR_LOG_NOTICE, MOD_DSO_VERSION
-        ": Unable to load '%s'; check to see if '%s.la' exists", name, path);
+        ": unable to load '%s'; check to see if '%s.la' exists", name, path);
     }
 
     pr_log_debug(DEBUG3, MOD_DSO_VERSION
@@ -642,7 +632,7 @@ MODRET set_modulepath(cmd_rec *cmd) {
     CONF_ERROR(cmd, "must be an absolute path");
   }
 
-  /* Make sure that the configured path is not world-writeable. */
+  /* Make sure that the configured path is not world-writable. */
   res = pr_fsio_stat(cmd->argv[1], &st);
   if (res < 0) {
     CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "error checking '",
@@ -714,7 +704,7 @@ static void dso_restart_ev(const void *event_data, void *user_data) {
     if (!is_static) {
       pr_log_debug(DEBUG7, MOD_DSO_VERSION ": unloading 'mod_%s.c'", mi->name);
       if (dso_unload_module(mi) < 0) {
-        pr_log_pri(PR_LOG_INFO, MOD_DSO_VERSION
+        pr_log_pri(PR_LOG_NOTICE, MOD_DSO_VERSION
           ": error unloading 'mod_%s.c': %s", mi->name, strerror(errno));
       }
     }
@@ -773,10 +763,11 @@ static int dso_init(void) {
     pr_ctrls_init_acl(dso_acttab[i].act_acl);
 
     if (pr_ctrls_register(&dso_module, dso_acttab[i].act_action,
-        dso_acttab[i].act_desc, dso_acttab[i].act_cb) < 0)
-      pr_log_pri(PR_LOG_INFO, MOD_DSO_VERSION
+        dso_acttab[i].act_desc, dso_acttab[i].act_cb) < 0) {
+      pr_log_pri(PR_LOG_NOTICE, MOD_DSO_VERSION
         ": error registering '%s' control: %s", dso_acttab[i].act_action,
         strerror(errno));
+    }
   }
 #endif /* PR_USE_CTRLS */
 

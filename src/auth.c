@@ -25,7 +25,7 @@
  */
 
 /* Authentication front-end for ProFTPD
- * $Id: auth.c,v 1.96 2013/05/14 16:41:00 castaglia Exp $
+ * $Id: auth.c,v 1.102 2013/11/10 01:56:49 castaglia Exp $
  */
 
 #include "conf.h"
@@ -423,12 +423,12 @@ struct passwd *pr_auth_getpwent(pool *p) {
 
   /* Make sure the UID and GID are not -1 */
   if (res->pw_uid == (uid_t) -1) {
-    pr_log_pri(PR_LOG_ERR, "error: UID of -1 not allowed");
+    pr_log_pri(PR_LOG_WARNING, "error: UID of -1 not allowed");
     return NULL;
   }
 
   if (res->pw_gid == (gid_t) -1) {
-    pr_log_pri(PR_LOG_ERR, "error: GID of -1 not allowed");
+    pr_log_pri(PR_LOG_WARNING, "error: GID of -1 not allowed");
     return NULL;
   }
 
@@ -459,7 +459,7 @@ struct group *pr_auth_getgrent(pool *p) {
 
   /* Make sure the GID is not -1 */
   if (res->gr_gid == (gid_t) -1) {
-    pr_log_pri(PR_LOG_ERR, "error: GID of -1 not allowed");
+    pr_log_pri(PR_LOG_WARNING, "error: GID of -1 not allowed");
     return NULL;
   }
 
@@ -493,12 +493,12 @@ struct passwd *pr_auth_getpwnam(pool *p, const char *name) {
 
   /* Make sure the UID and GID are not -1 */
   if (res->pw_uid == (uid_t) -1) {
-    pr_log_pri(PR_LOG_ERR, "error: UID of -1 not allowed");
+    pr_log_pri(PR_LOG_WARNING, "error: UID of -1 not allowed");
     return NULL;
   }
 
   if (res->pw_gid == (gid_t) -1) {
-    pr_log_pri(PR_LOG_ERR, "error: GID of -1 not allowed");
+    pr_log_pri(PR_LOG_WARNING, "error: GID of -1 not allowed");
     return NULL;
   }
 
@@ -581,12 +581,12 @@ struct passwd *pr_auth_getpwuid(pool *p, uid_t uid) {
 
   /* Make sure the UID and GID are not -1 */
   if (res->pw_uid == (uid_t) -1) {
-    pr_log_pri(PR_LOG_ERR, "error: UID of -1 not allowed");
+    pr_log_pri(PR_LOG_WARNING, "error: UID of -1 not allowed");
     return NULL;
   }
 
   if (res->pw_gid == (gid_t) -1) {
-    pr_log_pri(PR_LOG_ERR, "error: GID of -1 not allowed");
+    pr_log_pri(PR_LOG_WARNING, "error: GID of -1 not allowed");
     return NULL;
   }
 
@@ -621,7 +621,7 @@ struct group *pr_auth_getgrnam(pool *p, const char *name) {
 
   /* Make sure the GID is not -1 */
   if (res->gr_gid == (gid_t) -1) {
-    pr_log_pri(PR_LOG_ERR, "error: GID of -1 not allowed");
+    pr_log_pri(PR_LOG_WARNING, "error: GID of -1 not allowed");
     return NULL;
   }
 
@@ -658,7 +658,7 @@ struct group *pr_auth_getgrgid(pool *p, gid_t gid) {
 
   /* Make sure the GID is not -1 */
   if (res->gr_gid == (gid_t) -1) {
-    pr_log_pri(PR_LOG_ERR, "error: GID of -1 not allowed");
+    pr_log_pri(PR_LOG_WARNING, "error: GID of -1 not allowed");
     return NULL;
   }
 
@@ -1100,11 +1100,13 @@ int pr_auth_getgroups(pool *p, const char *name, array_header **group_ids,
         snprintf(buf, sizeof(buf)-1, "%lu", (unsigned long) gids[i]);
         buf[sizeof(buf)-1] = '\0';
 
+        pr_signals_handle();
         strgids = pstrcat(p, strgids, i != 0 ? ", " : "", buf, NULL);
       }
 
       pr_log_debug(DEBUG10, "retrieved group %s: %s",
-        (*group_ids)->nelts == 1 ? "ID" : "IDs", strgids);
+        (*group_ids)->nelts == 1 ? "ID" : "IDs",
+        *strgids ? strgids : "(None; corrupted group file?)");
     }
 
     if (group_names) {
@@ -1112,11 +1114,14 @@ int pr_auth_getgroups(pool *p, const char *name, array_header **group_ids,
       char *strgroups = ""; 
       char **groups = (*group_names)->elts;
 
-      for (i = 0; i < (*group_names)->nelts; i++)
+      for (i = 0; i < (*group_names)->nelts; i++) {
+        pr_signals_handle();
         strgroups = pstrcat(p, strgroups, i != 0 ? ", " : "", groups[i], NULL);
-    
+      }
+ 
       pr_log_debug(DEBUG10, "retrieved group %s: %s",
-        (*group_names)->nelts == 1 ? "name" : "names", strgroups);
+        (*group_names)->nelts == 1 ? "name" : "names",
+        *strgroups ? strgroups : "(None; corrupted group file?)");
     }
   }
 
@@ -1134,6 +1139,7 @@ config_rec *pr_auth_get_anon_config(pool *p, char **login_name,
   config_rec *c = NULL, *topc = NULL;
   char *config_user_name, *config_anon_name = NULL;
   unsigned char is_alias = FALSE, *auth_alias_only = NULL;
+  unsigned long config_flags = (PR_CONFIG_FIND_FL_SKIP_DIR|PR_CONFIG_FIND_FL_SKIP_LIMIT|PR_CONFIG_FIND_FL_SKIP_DYNDIR);
 
   /* Precendence rules:
    *   1. Search for UserAlias directive.
@@ -1159,8 +1165,9 @@ config_rec *pr_auth_get_anon_config(pool *p, char **login_name,
    * config contexts it might be.
    */
 
-  c = find_config(main_server->conf, CONF_PARAM, "UserAlias", TRUE);
-  if (c) {
+  c = find_config2(main_server->conf, CONF_PARAM, "UserAlias", TRUE,
+    config_flags);
+  if (c != NULL) {
     do {
       pr_signals_handle();
 
@@ -1170,8 +1177,8 @@ config_rec *pr_auth_get_anon_config(pool *p, char **login_name,
         break;
       }
 
-    } while ((c = find_config_next(c, c->next, CONF_PARAM, "UserAlias",
-      TRUE)) != NULL);
+    } while ((c = find_config_next2(c, c->next, CONF_PARAM, "UserAlias",
+      TRUE, config_flags)) != NULL);
   }
 
   /* This is where things get messy, rapidly. */
@@ -1186,7 +1193,8 @@ config_rec *pr_auth_get_anon_config(pool *p, char **login_name,
     if (auth_alias_only) {
       /* If AuthAliasOnly is on, ignore this one and continue. */
       if (*auth_alias_only == TRUE) {
-        c = find_config_next(c, c->next, CONF_PARAM, "UserAlias", TRUE);
+        c = find_config_next2(c, c->next, CONF_PARAM, "UserAlias", TRUE,
+          config_flags);
         continue;
       }
     }
@@ -1198,7 +1206,8 @@ config_rec *pr_auth_get_anon_config(pool *p, char **login_name,
     is_alias = FALSE;
 
     find_config_set_top(topc);
-    c = find_config_next(c, c->next, CONF_PARAM, "UserAlias", TRUE);
+    c = find_config_next2(c, c->next, CONF_PARAM, "UserAlias", TRUE,
+      config_flags);
 
     if (c &&
         (strncmp(c->argv[0], "*", 2) == 0 ||
@@ -1381,7 +1390,7 @@ int pr_auth_is_valid_shell(xaset_t *ctx, const char *shell) {
 }
 
 int pr_auth_chroot(const char *path) {
-  int res;
+  int res, xerrno = 0;
   time_t now;
 
 #if defined(HAVE_SETENV) && defined(__GLIBC__) && defined(__GLIBC_MINOR__) && \
@@ -1401,7 +1410,7 @@ int pr_auth_chroot(const char *path) {
   }
 #endif
 
-  pr_log_pri(PR_LOG_INFO, "Preparing to chroot to directory '%s'", path);
+  pr_log_debug(DEBUG1, "Preparing to chroot to directory '%s'", path);
 
   /* Prepare for chroots and the ensuing timezone chicanery by calling
    * our pr_localtime() routine now, which will cause libc (via localtime(2))
@@ -1414,11 +1423,14 @@ int pr_auth_chroot(const char *path) {
 
   PRIVS_ROOT
   res = pr_fsio_chroot(path);
+  xerrno = errno;
   PRIVS_RELINQUISH
 
   if (res < 0) {
     pr_log_pri(PR_LOG_ERR, "chroot to '%s' failed for user '%s': %s", path,
-      session.user, strerror(errno));
+      session.user, strerror(xerrno));
+
+    errno = xerrno;
     return -1;
   }
 

@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: cipher.c,v 1.13 2013/01/29 07:29:22 castaglia Exp $
+ * $Id: cipher.c,v 1.17 2013/12/19 16:32:32 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -69,6 +69,9 @@ static size_t cipher_blockszs[2] = {
   SFTP_CIPHER_DEFAULT_BLOCK_SZ,
   SFTP_CIPHER_DEFAULT_BLOCK_SZ,
 };
+
+/* Buffer size for reading/writing keys */
+#define SFTP_CIPHER_BUFSZ			1536
 
 static unsigned int read_cipher_idx = 0;
 static unsigned int write_cipher_idx = 0;
@@ -177,7 +180,7 @@ static int set_cipher_iv(struct sftp_cipher *cipher, const EVP_MD *hash,
 
   iv = malloc(iv_sz);
   if (iv == NULL) {
-    pr_log_pri(PR_LOG_CRIT, MOD_SFTP_VERSION ": Out of memory!");
+    pr_log_pri(PR_LOG_ALERT, MOD_SFTP_VERSION ": Out of memory!");
     _exit(1);
   }
 
@@ -237,7 +240,7 @@ static int set_cipher_key(struct sftp_cipher *cipher, const EVP_MD *hash,
 
   key = malloc(key_sz);
   if (key == NULL) {
-    pr_log_pri(PR_LOG_CRIT, MOD_SFTP_VERSION ": Out of memory!");
+    pr_log_pri(PR_LOG_ALERT, MOD_SFTP_VERSION ": Out of memory!");
     _exit(1);
   }
 
@@ -284,13 +287,13 @@ static int set_cipher_discarded(struct sftp_cipher *cipher,
 
   garbage_in = malloc(cipher->discard_len);
   if (garbage_in == NULL) {
-    pr_log_pri(PR_LOG_CRIT, MOD_SFTP_VERSION ": Out of memory!");
+    pr_log_pri(PR_LOG_ALERT, MOD_SFTP_VERSION ": Out of memory!");
     _exit(1);
   }
 
   garbage_out = malloc(cipher->discard_len);
   if (garbage_out == NULL) {
-    pr_log_pri(PR_LOG_CRIT, MOD_SFTP_VERSION ": Out of memory!");
+    pr_log_pri(PR_LOG_ALERT, MOD_SFTP_VERSION ": Out of memory!");
     free(garbage_in);
     _exit(1);
   }
@@ -370,7 +373,7 @@ int sftp_cipher_set_read_key(pool *p, const EVP_MD *hash, const BIGNUM *k,
    */
   EVP_CIPHER_CTX_init(cipher_ctx);
 
-  bufsz = buflen = 1024;
+  bufsz = buflen = SFTP_CIPHER_BUFSZ;
   ptr = buf = sftp_msg_getbuf(p, bufsz);
 
   /* Need to use SSH2-style format of K for the IV and key. */
@@ -532,7 +535,7 @@ int sftp_cipher_set_write_key(pool *p, const EVP_MD *hash, const BIGNUM *k,
    */
   EVP_CIPHER_CTX_init(cipher_ctx);
 
-  bufsz = buflen = 1024;
+  bufsz = buflen = SFTP_CIPHER_BUFSZ;
   ptr = buf = sftp_msg_getbuf(p, bufsz);
 
   /* Need to use SSH2-style format of K for the IV and key. */

@@ -24,7 +24,7 @@
  * This is mod_exec, contrib software for proftpd 1.3.x and above.
  * For more information contact TJ Saunders <tj@castaglia.org>.
  *
- * $Id: mod_exec.c,v 1.29 2013/02/15 22:46:42 castaglia Exp $
+ * $Id: mod_exec.c,v 1.39 2013/12/12 06:11:27 castaglia Exp $
  */
 
 #include "conf.h"
@@ -34,7 +34,7 @@
 # include <sys/resource.h>
 #endif
 
-#define MOD_EXEC_VERSION	"mod_exec/0.9.11"
+#define MOD_EXEC_VERSION	"mod_exec/0.9.12"
 
 /* Make sure the version of proftpd is as necessary. */
 #if PROFTPD_VERSION_NUMBER < 0x0001030402
@@ -60,7 +60,7 @@ static unsigned int exec_opts = 0U;
 #define EXEC_OPT_SEND_STDOUT	0x0004
 #define EXEC_OPT_USE_STDIN	0x0008
 
-static time_t exec_timeout = 0;
+static int exec_timeout = 0;
 
 /* Flags for exec_ssystem() */
 #define EXEC_FL_CLEAR_GROUPS	0x0010	/* Clear supplemental groups */
@@ -70,6 +70,10 @@ static time_t exec_timeout = 0;
 					 */
 #define EXEC_FL_RUN_AS_ROOT	0x0080  /* Use root privs when executing
                                          * the command.  USE CAREFULLY!
+                                         */
+#define EXEC_FL_RUN_AS_USER	0x0100  /* Use user privs when executing
+                                         * the command.  Useful for pre-login
+                                         * events.
                                          */
 
 struct exec_event_data {
@@ -441,13 +445,22 @@ static int exec_ssystem(cmd_rec *cmd, config_rec *c, int flags) {
 
   pid = fork();
   if (pid < 0) {
-    exec_log("error: unable to fork: %s", strerror(errno));
+    int xerrno = errno;
+
+    pr_log_pri(PR_LOG_ALERT,
+      MOD_EXEC_VERSION ": error: unable to fork: %s", strerror(xerrno));
+    exec_log("error: unable to fork: %s", strerror(xerrno));
+
+    errno = xerrno;
     status = -1;
 
   } else if (pid == 0) {
     /* Child process */
     char **env = NULL, *path = NULL, *ptr = NULL;
     register unsigned int i = 0;
+ 
+    /* Don't forget to update the PID. */
+    session.pid = getpid();
 
     if (!(exec_opts & EXEC_OPT_USE_STDIN)) {
 
@@ -483,8 +496,19 @@ static int exec_ssystem(cmd_rec *cmd, config_rec *c, int flags) {
       PRIVS_RELINQUISH
     }
 
-    if (!(flags & EXEC_FL_RUN_AS_ROOT)) {
+    if (flags & EXEC_FL_RUN_AS_ROOT) {
+      /* We were asked to run using root privs.  Yuck. */
+      PRIVS_ROOT
 
+    } else if (flags & EXEC_FL_RUN_AS_USER) {
+      /* We were asked to run using user privs.  Sigh. */
+      if (geteuid() != session.login_uid) {
+        PRIVS_SETUP(session.login_uid, session.login_gid)
+      }
+
+      PRIVS_REVOKE
+
+    } else {
       /* Drop all special privileges before exec()'ing the command.  This
        * allows for the user to specify arbitrary input via the given
        * filename without the admin worrying that some arbitrary command
@@ -492,11 +516,6 @@ static int exec_ssystem(cmd_rec *cmd, config_rec *c, int flags) {
        * of root real user ID.
        */
       PRIVS_REVOKE
-
-    } else {
-
-      /* We were asked to run using root privs.  Yuck. */
-      PRIVS_ROOT
     }
 
     exec_log("preparing to execute '%s' with uid %lu (euid %lu), "
@@ -587,7 +606,9 @@ static int exec_ssystem(cmd_rec *cmd, config_rec *c, int flags) {
       }
 
       /* Perform any required substitution on the command arguments. */
-      for (i = 3; i < c->argc; i++) {
+      for (i = 3; i < c->argc && c->argv[i] != NULL; i++) {
+        pr_signals_handle();
+
         c->argv[i] = exec_subst_var(tmp_pool, c->argv[i], cmd);
 
         /* Write the argument to stdin, terminated by a newline. */
@@ -613,8 +634,9 @@ static int exec_ssystem(cmd_rec *cmd, config_rec *c, int flags) {
           strerror(errno));
       }
 
-      if (!cmd)
+      if (cmd == NULL) {
         destroy_pool(tmp_pool);
+      }
     }
 
     if (exec_opts & EXEC_OPT_USE_STDIN) {
@@ -1036,7 +1058,8 @@ static char *exec_subst_var(pool *tmp_pool, char *varstr, cmd_rec *cmd) {
         varstr = sreplace(tmp_pool, varstr, "%r", "PASS (hidden)", NULL);
 
       } else {
-        varstr = sreplace(tmp_pool, varstr, "%r", get_full_cmd(cmd), NULL);
+        varstr = sreplace(tmp_pool, varstr, "%r",
+          pr_cmd_get_displayable_str(cmd, NULL), NULL);
       }
     }
   }
@@ -1517,18 +1540,24 @@ MODRET set_execonevent(cmd_rec *cmd) {
   if (cmd->argc-1 < 2)
     CONF_ERROR(cmd, "wrong number of parameters");
 
-  CHECK_CONF(cmd, CONF_ROOT);
+  CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
 
   if (cmd->argv[1][strlen(cmd->argv[1])-1] == '*') {
     flags |= EXEC_FL_RUN_AS_ROOT;
     cmd->argv[1][strlen(cmd->argv[1])-1] = '\0';
   }
 
-  if (*cmd->argv[2] != '/')
-    CONF_ERROR(cmd, "path to program must be a full path");
+  if (cmd->argv[1][strlen(cmd->argv[1])-1] == '~') {
+    flags |= EXEC_FL_RUN_AS_USER;
+    cmd->argv[1][strlen(cmd->argv[1])-1] = '\0';
+  }
 
-  c = pcalloc(exec_pool, sizeof(config_rec));
-  c->pool = make_sub_pool(exec_pool);
+  if (*cmd->argv[2] != '/') {
+    CONF_ERROR(cmd, "path to program must be a full path");
+  }
+
+  c = pcalloc(cmd->server->pool, sizeof(config_rec));
+  c->pool = make_sub_pool(cmd->server->pool);
   pr_pool_tag(c->pool, cmd->argv[0]);
   c->argc = cmd->argc + 1;
   c->argv = pcalloc(c->pool, sizeof(char *) * (c->argc + 1));
@@ -1537,8 +1566,9 @@ MODRET set_execonevent(cmd_rec *cmd) {
   c->argv[0] = pcalloc(c->pool, sizeof(unsigned int));
   c->argv[1] = NULL;
 
-  for (i = 2; i < cmd->argc; i++)
+  for (i = 2; i < cmd->argc; i++) {
     c->argv[i] = pstrdup(c->pool, cmd->argv[i]);
+  }
 
   eed = pcalloc(c->pool, sizeof(struct exec_event_data));
   eed->flags = flags;
@@ -1552,9 +1582,10 @@ MODRET set_execonevent(cmd_rec *cmd) {
   } else if (strncasecmp(eed->event, "MaxInstances", 13) == 0) {
      pr_event_register(&exec_module, "core.max-instances", exec_any_ev, eed);
 
-  } else
+  } else {
     /* Assume that the sysadmin knows the name of the event to use. */
     pr_event_register(&exec_module, eed->event, exec_any_ev, eed);
+  }
 
   return PR_HANDLED(cmd);
 }
@@ -1655,21 +1686,20 @@ MODRET set_execoptions(cmd_rec *cmd) {
 
 /* usage: ExecTimeout <seconds> */
 MODRET set_exectimeout(cmd_rec *cmd) {
-  long timeout = 0;
-  char *endp = NULL;
+  int timeout = -1;
   config_rec *c = NULL;
 
   CHECK_ARGS(cmd, 1);
   CHECK_CONF(cmd, CONF_ROOT|CONF_VIRTUAL|CONF_GLOBAL);
 
-  timeout = strtol(cmd->argv[1], &endp, 10);
-
-  if ((endp && *endp) || timeout < 0 || timeout > 65535)
-    CONF_ERROR(cmd, "timeout values must be between 0 and 65535");
+  if (pr_str_get_duration(cmd->argv[1], &timeout) < 0) {
+    CONF_ERROR(cmd, pstrcat(cmd->tmp_pool, "error parsing timeout value '",
+      cmd->argv[1], "': ", strerror(errno), NULL));
+  }
 
   c = add_config_param(cmd->argv[0], 1, NULL);
-  c->argv[0] = pcalloc(c->pool, sizeof(time_t));
-  *((time_t *) c->argv[0]) = (time_t) timeout;
+  c->argv[0] = pcalloc(c->pool, sizeof(int));
+  *((int *) c->argv[0]) = timeout;
 
   return PR_HANDLED(cmd);
 }
@@ -1843,7 +1873,7 @@ static int exec_sess_init(void) {
 
   c = find_config(main_server->conf, CONF_PARAM, "ExecTimeout", FALSE);
   if (c) {
-    exec_timeout = *((time_t *) c->argv[0]);
+    exec_timeout = *((int *) c->argv[0]);
   }
 
   exec_closelog();

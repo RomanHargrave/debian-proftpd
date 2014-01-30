@@ -1,6 +1,6 @@
 /*
  * ProFTPD - mod_sftp SCP
- * Copyright (c) 2008-2013 TJ Saunders
+ * Copyright (c) 2008-2014 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,7 +21,7 @@
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
  *
- * $Id: scp.c,v 1.82 2013/05/06 16:22:21 castaglia Exp $
+ * $Id: scp.c,v 1.87 2014/01/20 20:49:04 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -977,7 +977,7 @@ static int recv_finfo(pool *p, uint32_t channel_id, struct scp_path *sp,
    */
 
   sp->fh = pr_fsio_open(hiddenstore_path ? hiddenstore_path : sp->best_path,
-    O_WRONLY|O_CREAT|O_NONBLOCK);
+    O_WRONLY|O_CREAT|O_NONBLOCK|O_TRUNC);
   if (sp->fh == NULL) {
     int xerrno = errno;
 
@@ -1041,7 +1041,7 @@ static int recv_data(pool *p, uint32_t channel_id, struct scp_path *sp,
         int xerno = EIO;
 #endif
 
-        pr_log_pri(PR_LOG_INFO, "MaxStoreFileSize (%" PR_LU " %s) reached: "
+        pr_log_pri(PR_LOG_NOTICE, "MaxStoreFileSize (%" PR_LU " %s) reached: "
           "aborting transfer of '%s'", (pr_off_t) nbytes_max_store,
           nbytes_max_store != 1 ? "bytes" : "byte", sp->fh->fh_path);
 
@@ -1151,37 +1151,55 @@ static int recv_eod(pool *p, uint32_t channel_id, struct scp_path *sp,
 
   parent_sp = sp->parent_dir;
 
-  pr_trace_msg(trace_channel, 9, "setting perms %04o on directory '%s'",
-    (unsigned int) parent_sp->perms, parent_sp->path);
-  if (pr_fsio_chmod(parent_sp->path, parent_sp->perms) < 0) {
-    int xerrno = errno;
+  /* If the SFTPOption for ignoring perms for SCP uploads is set, then
+   * skip the chmod on the upload file.
+   */
+  if (!(sftp_opts & SFTP_OPT_IGNORE_SCP_UPLOAD_PERMS)) {
+    pr_trace_msg(trace_channel, 9, "setting perms %04o on directory '%s'",
+      (unsigned int) parent_sp->perms, parent_sp->path);
+    if (pr_fsio_chmod(parent_sp->path, parent_sp->perms) < 0) {
+      int xerrno = errno;
 
-    pr_trace_msg(trace_channel, 2, "error setting mode %04o on '%s': %s",
-      (unsigned int) parent_sp->perms, parent_sp->path, strerror(xerrno));
-    write_confirm(p, channel_id, 1,
-      pstrcat(p, parent_sp->path, ": error setting mode: ", strerror(xerrno),
-      NULL));
-    ok = FALSE;
+      pr_trace_msg(trace_channel, 2, "error setting mode %04o on '%s': %s",
+        (unsigned int) parent_sp->perms, parent_sp->path, strerror(xerrno));
+      write_confirm(p, channel_id, 1,
+        pstrcat(p, parent_sp->path, ": error setting mode: ", strerror(xerrno),
+        NULL));
+      ok = FALSE;
+    }
+
+  } else {
+    pr_trace_msg(trace_channel, 7, "SFTPOption 'IgnoreSCPUploadPerms' "
+      "configured, ignoring perms sent by client");
   }
 
   if (parent_sp->recvd_timeinfo) {
     pr_trace_msg(trace_channel, 9, "setting times on directory '%s'",
       parent_sp->filename);
 
-    if (pr_fsio_utimes(parent_sp->filename, parent_sp->times) < 0) {
-      int xerrno = errno;
+    /* If the SFTPOption for ignoring times for SCP uploads is set, then
+     * skip the utimes on the upload file.
+     */
+    if (!(sftp_opts & SFTP_OPT_IGNORE_SCP_UPLOAD_TIMES)) {
+      if (pr_fsio_utimes(parent_sp->filename, parent_sp->times) < 0) {
+        int xerrno = errno;
 
-      pr_trace_msg(trace_channel, 2,
-        "error setting atime %lu, mtime %lu on '%s': %s",
-        (unsigned long) sp->times[0].tv_sec,
-        (unsigned long) sp->times[1].tv_sec, parent_sp->filename,
-        strerror(xerrno));
+        pr_trace_msg(trace_channel, 2,
+          "error setting atime %lu, mtime %lu on '%s': %s",
+          (unsigned long) sp->times[0].tv_sec,
+          (unsigned long) sp->times[1].tv_sec, parent_sp->filename,
+          strerror(xerrno));
 
-      write_confirm(p, channel_id, 1,
-        pstrcat(p, parent_sp->filename, ": error setting times: ",
-        strerror(xerrno), NULL));
-      parent_sp->wrote_errors = TRUE;
-      ok = FALSE;
+        write_confirm(p, channel_id, 1,
+          pstrcat(p, parent_sp->filename, ": error setting times: ",
+          strerror(xerrno), NULL));
+        parent_sp->wrote_errors = TRUE;
+        ok = FALSE;
+      }
+
+    } else {
+      pr_trace_msg(trace_channel, 7, "SFTPOption 'IgnoreSCPUploadTimes' "
+        "configured, ignoring times sent by client");
     }
   }
 
@@ -1446,18 +1464,27 @@ static int recv_path(pool *p, uint32_t channel_id, struct scp_path *sp,
   if (sp->recvd_timeinfo) {
     pr_trace_msg(trace_channel, 9, "setting times on file '%s'", sp->filename);
 
-    if (pr_fsio_utimes(sp->filename, sp->times) < 0) {
-      int xerrno = errno;
+    /* If the SFTPOption for ignoring times for SCP uploads is set, then
+     * skip the utimes on the upload file.
+     */
+    if (!(sftp_opts & SFTP_OPT_IGNORE_SCP_UPLOAD_TIMES)) {
+      if (pr_fsio_utimes(sp->filename, sp->times) < 0) {
+        int xerrno = errno;
 
-      pr_trace_msg(trace_channel, 2,
-        "error setting atime %lu, mtime %lu on '%s': %s",
-        (unsigned long) sp->times[0].tv_sec,
-        (unsigned long) sp->times[1].tv_sec, sp->best_path, strerror(xerrno));
-      write_confirm(p, channel_id, 1,
-        pstrcat(p, sp->filename, ": error setting times: ", strerror(xerrno),
-        NULL));
+        pr_trace_msg(trace_channel, 2,
+          "error setting atime %lu, mtime %lu on '%s': %s",
+          (unsigned long) sp->times[0].tv_sec,
+          (unsigned long) sp->times[1].tv_sec, sp->best_path, strerror(xerrno));
+        write_confirm(p, channel_id, 1,
+          pstrcat(p, sp->filename, ": error setting times: ", strerror(xerrno),
+          NULL));
 
-      sp->wrote_errors = TRUE;
+        sp->wrote_errors = TRUE;
+      }
+
+    } else {
+      pr_trace_msg(trace_channel, 7, "SFTPOption 'IgnoreSCPUploadTimes' "
+        "configured, ignoring times sent by client");
     }
   }
 
@@ -2156,8 +2183,10 @@ int sftp_scp_handle_packet(pool *p, void *ssh2, uint32_t channel_id,
      * want to return 1 here, since it will be us, not the client, which needs
      * to close the connection.
      */
-    if (paths[scp_session->path_idx-1]->wrote_errors == TRUE) {
-      return 1;
+    if (res == 1) {
+      if (paths[scp_session->path_idx-1]->wrote_errors == TRUE) {
+        return 1;
+      }
     }
 
     return 0;

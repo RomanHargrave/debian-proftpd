@@ -24,7 +24,7 @@
  * This is mod_rewrite, contrib software for proftpd 1.2 and above.
  * For more information contact TJ Saunders <tj@castaglia.org>.
  *
- * $Id: mod_rewrite.c,v 1.72 2013/02/15 22:46:42 castaglia Exp $
+ * $Id: mod_rewrite.c,v 1.75 2013/10/13 23:43:44 castaglia Exp $
  */
 
 #include "conf.h"
@@ -1986,7 +1986,7 @@ static char *rewrite_map_int_utf8trans(pool *map_pool, char *key) {
 /* Rewrite logging functions */
 
 static void rewrite_openlog(void) {
-  int res = 0;
+  int res = 0, xerrno = 0;
 
   /* Sanity checks */
   if (rewrite_logfd >= 0)
@@ -2007,6 +2007,7 @@ static void rewrite_openlog(void) {
   pr_signals_block();
   PRIVS_ROOT
   res = pr_log_openfile(rewrite_logfile, &rewrite_logfd, REWRITE_LOG_MODE);
+  xerrno = errno;
   PRIVS_RELINQUISH
   pr_signals_unblock();
 
@@ -2015,17 +2016,17 @@ static void rewrite_openlog(void) {
       case -1:
         pr_log_pri(PR_LOG_NOTICE, MOD_REWRITE_VERSION
           ": error: unable to open RewriteLog '%s': %s", rewrite_logfile,
-          strerror(errno));
+          strerror(xerrno));
         break;
 
       case PR_LOG_WRITABLE_DIR:
-        pr_log_pri(PR_LOG_NOTICE, MOD_REWRITE_VERSION
+        pr_log_pri(PR_LOG_WARNING, MOD_REWRITE_VERSION
           ": error: unable to open RewriteLog '%s': %s", rewrite_logfile,
-          "world-writable parent directory");
+          "parent directory is world-writable");
         break;
 
       case PR_LOG_SYMLINK:
-        pr_log_pri(PR_LOG_NOTICE, MOD_REWRITE_VERSION
+        pr_log_pri(PR_LOG_WARNING, MOD_REWRITE_VERSION
           ": error: unable to open RewriteLog '%s': %s", rewrite_logfile,
           "cannot log to a symbolic link");
         break;
@@ -2041,7 +2042,7 @@ static void rewrite_closelog(void) {
     return;
 
   if (close(rewrite_logfd) < 0) {
-    pr_log_pri(PR_LOG_ERR, MOD_REWRITE_VERSION
+    pr_log_pri(PR_LOG_ALERT, MOD_REWRITE_VERSION
       ": error closing RewriteLog '%s': %s", rewrite_logfile, strerror(errno));
     return;
   }

@@ -25,7 +25,7 @@
  */
 
 /* ProFTPD logging support.
- * $Id: log.c,v 1.116 2013/02/25 20:27:29 castaglia Exp $
+ * $Id: log.c,v 1.121 2013/10/13 23:46:43 castaglia Exp $
  */
 
 #include "conf.h"
@@ -107,9 +107,9 @@ int pr_log_openfile(const char *log_file, int *log_fd, mode_t log_mode) {
     return -1;
   }
 
-  /* Do not log to world-writeable directories */
+  /* Do not log to world-writable directories */
   if (st.st_mode & S_IWOTH) {
-    pr_log_pri(PR_LOG_NOTICE, "error: %s is a world writeable directory", lf);
+    pr_log_pri(PR_LOG_NOTICE, "error: %s is a world-writable directory", lf);
     destroy_pool(tmp_pool);
     return PR_LOG_WRITABLE_DIR;
   }

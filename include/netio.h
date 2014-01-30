@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2012 The ProFTPD Project
+ * Copyright (c) 2001-2014 The ProFTPD Project
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* Network IO stream layer
- * $Id: netio.h,v 1.14 2012/10/11 06:12:21 castaglia Exp $
+ * $Id: netio.h,v 1.18 2014/01/06 06:57:16 castaglia Exp $
  */
 
 #ifndef PR_NETIO_H
@@ -117,13 +117,15 @@ typedef struct {
   /* errno, if applicable. */
   int strm_errno;
 
+  /* Private data for passing/retaining among modules. */
+  pr_table_t *notes;
+
 } pr_netio_stream_t;
 
 #define PR_NETIO_ERRNO(s)	((s)->strm_errno)
 #define PR_NETIO_FD(s)		((s)->strm_fd)
 
 typedef struct {
-
   /* Memory pool for this object. */
   struct pool_rec *pool;
 
@@ -138,9 +140,14 @@ typedef struct {
   int (*shutdown)(pr_netio_stream_t *, int);
   int (*write)(pr_netio_stream_t *, char *, size_t);
 
+  /* Registering/owning module */
+  module *owner;
+  const char *owner_name;
+
 } pr_netio_t;
 
 /* Network IO function prototypes */
+pr_buffer_t *pr_netio_buffer_alloc(pr_netio_stream_t *nstrm);
 
 void pr_netio_abort(pr_netio_stream_t *);
 int pr_netio_lingering_abort(pr_netio_stream_t *, long);
@@ -212,6 +219,7 @@ void pr_netio_set_poll_interval(pr_netio_stream_t *, unsigned int);
  * default handlers.
  */
 pr_netio_t *pr_alloc_netio(pool *);
+pr_netio_t *pr_alloc_netio2(pool *, module *);
 
 /* Register the given NetIO object and all its callbacks for the network
  * I/O layer's use.  If given a NULL argument, it will automatically
@@ -222,6 +230,9 @@ int pr_register_netio(pr_netio_t *, int);
 /* Unregister the NetIO objects indicated by strm_types.
  */
 int pr_unregister_netio(int);
+
+/* Peek at the NetIO registered for the given stream type. */
+pr_netio_t *pr_get_netio(int);
 
 /* Initialize the network I/O layer.
  */

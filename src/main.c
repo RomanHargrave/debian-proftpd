@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2013 The ProFTPD Project team
+ * Copyright (c) 2001-2014 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,7 +25,7 @@
  */
 
 /* House initialization and main program loop
- * $Id: main.c,v 1.454 2013/02/15 22:39:00 castaglia Exp $
+ * $Id: main.c,v 1.462 2014/01/25 16:34:09 castaglia Exp $
  */
 
 #include "conf.h"
@@ -54,12 +54,6 @@
 
 int (*cmd_auth_chk)(cmd_rec *);
 void (*cmd_handler)(server_rec *, conn_t *);
-
-#ifdef NEED_PERSISTENT_PASSWD
-unsigned char persistent_passwd = TRUE;
-#else
-unsigned char persistent_passwd = FALSE;
-#endif /* NEED_PERSISTENT_PASSWD */
 
 /* From modules/module_glue.c */
 extern module *static_modules[];
@@ -90,9 +84,6 @@ static unsigned char have_dead_child = FALSE;
  * whitespace separating command from path, and 2 for the terminating CRLF.
  */
 #define PR_DEFAULT_CMD_BUFSZ	(PR_TUNABLE_PATH_MAX + 7)
-
-/* From mod_auth_unix.c */
-extern unsigned char persistent_passwd;
 
 /* From response.c */
 extern pr_response_t *resp_list, *resp_err_list;
@@ -467,42 +458,21 @@ static int _dispatch(cmd_rec *cmd, int cmd_type, int validate, char *match) {
   return success;
 }
 
-/* Returns the appropriate maximum buffer length to use for FTP commands
- * from the client, taking the CommandBufferSize directive into account.
+/* Returns the appropriate maximum buffer size to use for FTP commands
+ * from the client.
  */
-static long get_max_cmd_len(size_t buflen) {
-  long res;
-  int *bufsz = NULL;
-  size_t default_cmd_bufsz;
+static size_t get_max_cmd_sz(void) {
+  size_t res;
+  size_t *bufsz = NULL;
 
-  /* It's possible for the admin to select a PR_TUNABLE_BUFFER_SIZE which
-   * is smaller than PR_DEFAULT_CMD_BUFSZ.  We need to handle such cases
-   * properly.
-   */
-  default_cmd_bufsz = PR_DEFAULT_CMD_BUFSZ;
-  if (default_cmd_bufsz > buflen) {
-    default_cmd_bufsz = buflen;
-  }
- 
   bufsz = get_param_ptr(main_server->conf, "CommandBufferSize", FALSE);
   if (bufsz == NULL) {
-    res = default_cmd_bufsz;
-
-  } else if (*bufsz <= 0) {
-    pr_log_pri(PR_LOG_WARNING, "invalid CommandBufferSize size (%d) given, "
-      "using default buffer size (%lu) instead", *bufsz,
-      (unsigned long) default_cmd_bufsz);
-    res = default_cmd_bufsz;
-
-  } else if (*bufsz + 1 > buflen) {
-    pr_log_pri(PR_LOG_WARNING, "invalid CommandBufferSize size (%d) given, "
-      "using default buffer size (%lu) instead", *bufsz,
-      (unsigned long) default_cmd_bufsz);
-    res = default_cmd_bufsz;
+    res = PR_DEFAULT_CMD_BUFSZ;
 
   } else {
-    pr_log_debug(DEBUG1, "setting CommandBufferSize to %d", *bufsz);
-    res = (long) *bufsz;
+    pr_log_debug(DEBUG1, "setting CommandBufferSize to %lu",
+      (unsigned long) *bufsz);
+    res = *bufsz;
   }
 
   return res;
@@ -510,21 +480,29 @@ static long get_max_cmd_len(size_t buflen) {
 
 int pr_cmd_read(cmd_rec **res) {
   static long cmd_bufsz = -1;
-  char buf[PR_DEFAULT_CMD_BUFSZ+1] = {'\0'};
+  static char *cmd_buf = NULL;
   char *cp;
-  size_t buflen;
+  size_t cmd_buflen;
 
   if (res == NULL) {
     errno = EINVAL;
     return -1;
   }
 
+  if (cmd_bufsz == -1) {
+    cmd_bufsz = get_max_cmd_sz();
+  }
+
+  if (cmd_buf == NULL) {
+    cmd_buf = pcalloc(session.pool, cmd_bufsz + 1);
+  }
+
   while (TRUE) {
     pr_signals_handle();
 
-    memset(buf, '\0', sizeof(buf));
+    memset(cmd_buf, '\0', cmd_bufsz);
 
-    if (pr_netio_telnet_gets(buf, sizeof(buf)-1, session.c->instrm,
+    if (pr_netio_telnet_gets(cmd_buf, cmd_bufsz, session.c->instrm,
         session.c->outstrm) == NULL) {
 
       if (errno == E2BIG) {
@@ -545,9 +523,6 @@ int pr_cmd_read(cmd_rec **res) {
     break;
   }
 
-  if (cmd_bufsz == -1)
-    cmd_bufsz = get_max_cmd_len(sizeof(buf));
-
   /* This strlen(3) is guaranteed to terminate; the last byte of buf is
    * always NUL, since pr_netio_telnet_gets() is told that the buf size is
    * one byte less than it really is.
@@ -555,26 +530,28 @@ int pr_cmd_read(cmd_rec **res) {
    * If the strlen(3) says that the length is less than the cmd_bufsz, then
    * there is no need to truncate the buffer by inserting a NUL.
    */
-  buflen = strlen(buf);
-  if (buflen > (cmd_bufsz - 1)) {
+  cmd_buflen = strlen(cmd_buf);
+  if (cmd_buflen > cmd_bufsz) {
     pr_log_debug(DEBUG0, "truncating incoming command length (%lu bytes) to "
       "CommandBufferSize %lu; use the CommandBufferSize directive to increase "
-      "the allowed command length", (unsigned long) buflen,
+      "the allowed command length", (unsigned long) cmd_buflen,
       (unsigned long) cmd_bufsz);
-    buf[cmd_bufsz - 1] = '\0';
+    cmd_buf[cmd_bufsz-1] = '\0';
   }
 
-  if (buflen &&
-      (buf[buflen-1] == '\n' || buf[buflen-1] == '\r')) {
-    buf[buflen-1] = '\0';
-    buflen--;
+  if (cmd_buflen &&
+      (cmd_buf[cmd_buflen-1] == '\n' || cmd_buf[cmd_buflen-1] == '\r')) {
+    cmd_buf[cmd_buflen-1] = '\0';
+    cmd_buflen--;
 
-    if (buflen &&
-        (buf[buflen-1] == '\n' || buf[buflen-1] =='\r'))
-      buf[buflen-1] = '\0';
+    if (cmd_buflen &&
+        (cmd_buf[cmd_buflen-1] == '\n' || cmd_buf[cmd_buflen-1] =='\r')) {
+      cmd_buf[cmd_buflen-1] = '\0';
+      cmd_buflen--;
+    }
   }
 
-  cp = buf;
+  cp = cmd_buf;
   if (*cp == '\r')
     cp++;
 
@@ -588,11 +565,11 @@ int pr_cmd_read(cmd_rec **res) {
      * command handlers themselves, via cmd->arg.  This small hack
      * reduces the burden on SITE module developers, however.
      */
-    if (strncasecmp(cp, C_SITE, 4) == 0)
+    if (strncasecmp(cp, C_SITE, 4) == 0) {
       flags |= PR_STR_FL_PRESERVE_WHITESPACE;
+    }
 
     cmd = make_ftp_cmd(session.pool, cp, flags);
-
     if (cmd) {
       *res = cmd;
     } 
@@ -929,17 +906,20 @@ static void core_restart_cb(void *d1, void *d2, void *d3, void *d4) {
 
     PRIVS_ROOT
     if (pr_parser_parse_file(NULL, config_filename, NULL, 0) == -1) {
+      int xerrno = errno;
+
       PRIVS_RELINQUISH
-      pr_log_pri(PR_LOG_ERR,
-        "Fatal: unable to read configuration file '%s': %s",
-        config_filename, strerror(errno));
+      pr_log_pri(PR_LOG_WARNING,
+        "fatal: unable to read configuration file '%s': %s", config_filename,
+        strerror(xerrno));
       pr_session_end(0);
     }
     PRIVS_RELINQUISH
 
     if (pr_parser_cleanup() < 0) {
-      pr_log_pri(PR_LOG_ERR, "Fatal: error processing configuration file '%s': "
-       "unclosed configuration section", config_filename);
+      pr_log_pri(PR_LOG_WARNING,
+        "fatal: error processing configuration file '%s': "
+        "unclosed configuration section", config_filename);
       pr_session_end(0);
     }
 
@@ -954,8 +934,8 @@ static void core_restart_cb(void *d1, void *d2, void *d3, void *d4) {
     endgrent();
 
     if (fixup_servers(server_list) < 0) {
-      pr_log_pri(PR_LOG_ERR, "Fatal: error processing configuration file '%s'",
-        config_filename);
+      pr_log_pri(PR_LOG_WARNING,
+        "fatal: error processing configuration file '%s'", config_filename);
       pr_session_end(0);
     }
 
@@ -1054,8 +1034,8 @@ static void fork_server(int fd, conn_t *l, unsigned char nofork) {
      */
 
     if (pipe(semfds) == -1) {
-      pr_log_pri(PR_LOG_ERR, "pipe(): %s", strerror(errno));
-      close(fd);
+      pr_log_pri(PR_LOG_ALERT, "pipe(2) failed: %s", strerror(errno));
+      (void) close(fd);
       return;
     }
 
@@ -1069,7 +1049,7 @@ static void fork_server(int fd, conn_t *l, unsigned char nofork) {
     /* Make sure we set the close-on-exec flag for the parent's read side
      * of the pipe.
      */
-    fcntl(semfds[0], F_SETFD, FD_CLOEXEC);
+    (void) fcntl(semfds[0], F_SETFD, FD_CLOEXEC);
 
     /* We block SIGCHLD to prevent a race condition if the child
      * dies before we can record it's pid.  Also block SIGTERM to
@@ -1087,10 +1067,12 @@ static void fork_server(int fd, conn_t *l, unsigned char nofork) {
         "unable to block signal set: %s", strerror(errno));
     }
 
-    switch ((pid = fork())) {
+    pid = fork();
+    xerrno = errno;
+
+    switch (pid) {
 
     case 0: /* child */
-
       /* No longer the master process. */
       is_master = FALSE;
       if (sigprocmask(SIG_UNBLOCK, &sig_set, NULL) < 0) {
@@ -1108,7 +1090,7 @@ static void fork_server(int fd, conn_t *l, unsigned char nofork) {
           "unable to unblock signal set: %s", strerror(errno));
       }
 
-      pr_log_pri(PR_LOG_ERR, "fork(): %s", strerror(errno));
+      pr_log_pri(PR_LOG_ALERT, "unable to fork(): %s", strerror(xerrno));
 
       /* The parent doesn't need the socket open. */
       (void) close(fd);
@@ -1119,10 +1101,10 @@ static void fork_server(int fd, conn_t *l, unsigned char nofork) {
 
     default: /* parent */
       /* The parent doesn't need the socket open */
-      close(fd);
+      (void) close(fd);
 
       child_add(pid, semfds[0]);
-      close(semfds[1]);
+      (void) close(semfds[1]);
 
       /* Unblock the signals now as sig_child() will catch
        * an "immediate" death and remove the pid from the children list
@@ -1209,8 +1191,9 @@ static void fork_server(int fd, conn_t *l, unsigned char nofork) {
     STDIN_FILENO, STDOUT_FILENO, FALSE);
 
   /* Capture errno here, if necessary. */
-  if (!conn)
+  if (conn == NULL) {
     xerrno = errno;
+  }
 
   /* Now do the permanent syslog open
    */
@@ -1222,8 +1205,8 @@ static void fork_server(int fd, conn_t *l, unsigned char nofork) {
   PRIVS_RELINQUISH
   pr_signals_unblock();
 
-  if (!conn) {
-    pr_log_pri(PR_LOG_ERR, "Fatal: unable to open incoming connection: %s",
+  if (conn == NULL) {
+    pr_log_pri(PR_LOG_ERR, "fatal: unable to open incoming connection: %s",
       strerror(xerrno));
     exit(1);
   }
@@ -1352,7 +1335,7 @@ static void fork_server(int fd, conn_t *l, unsigned char nofork) {
    * within the <Limit> section.
    */
   if (!login_check_limits(main_server->conf, TRUE, FALSE, &i)) {
-    pr_log_pri(PR_LOG_NOTICE, "Connection from %s [%s] denied.",
+    pr_log_pri(PR_LOG_NOTICE, "Connection from %s [%s] denied",
       session.c->remote_name,
       pr_netaddr_get_ipstr(session.c->remote_addr));
     exit(0);
@@ -1492,11 +1475,12 @@ static void daemon_loop(void) {
       time_t now = time(NULL);
 
       if (difftime(deny, now) < 0.0) {
-        pr_log_pri(PR_LOG_ERR, PR_SHUTMSG_PATH
-          " present: all incoming connections will be refused.");
+        pr_log_pri(PR_LOG_WARNING, PR_SHUTMSG_PATH
+          " present: all incoming connections will be refused");
 
       } else {
-        pr_log_pri(PR_LOG_ERR, PR_SHUTMSG_PATH " present: incoming connections "
+        pr_log_pri(PR_LOG_NOTICE,
+          PR_SHUTMSG_PATH " present: incoming connections "
           "will be denied starting %s", CHOP(ctime(&deny)));
       }
     }
@@ -1542,8 +1526,8 @@ static void daemon_loop(void) {
       time(&this_error);
 
       if ((this_error - last_error) <= 5 && err_count++ > 10) {
-        pr_log_pri(PR_LOG_ERR, "Fatal: select() failing repeatedly, shutting "
-          "down.");
+        pr_log_pri(PR_LOG_ERR, "fatal: select(2) failing repeatedly, shutting "
+          "down");
         exit(1);
 
       } else if ((this_error - last_error) > 5) {
@@ -1551,7 +1535,7 @@ static void daemon_loop(void) {
         err_count = 0;
       }
 
-      pr_log_pri(PR_LOG_NOTICE, "select() failed in daemon_loop(): %s",
+      pr_log_pri(PR_LOG_WARNING, "select(2) failed in daemon_loop(): %s",
         strerror(xerrno));
     }
 
@@ -1829,7 +1813,8 @@ static char *prepare_core(void) {
     (unsigned long) getpid());
 
   if (mkdir(dir, 0700) < 0) {
-    pr_log_pri(PR_LOG_ERR, "unable to create '%s': %s", dir, strerror(errno));
+    pr_log_pri(PR_LOG_WARNING, "unable to create directory '%s' for "
+      "coredump: %s", dir, strerror(errno));
 
   } else {
     chdir(dir);
@@ -1995,7 +1980,7 @@ static void handle_xcpu(void) {
 }
 
 static void handle_terminate_other(void) {
-  pr_log_pri(PR_LOG_ERR, "ProFTPD terminating (signal %d)", term_signo);
+  pr_log_pri(PR_LOG_WARNING, "ProFTPD terminating (signal %d)", term_signo);
   finish_terminate();
 }
 
@@ -2247,7 +2232,7 @@ static void daemonize(void) {
    */
   switch (fork()) {
     case -1:
-      perror("fork");
+      perror("fork(2) error");
       exit(1);
 
     case 0:
@@ -2755,7 +2740,7 @@ int main(int argc, char *argv[], char **envp) {
 
     case 'D':
       if (!optarg) {
-        pr_log_pri(PR_LOG_ERR, "Fatal: -D requires definition argument");
+        pr_log_pri(PR_LOG_WARNING, "fatal: -D requires definition parameter");
         exit(1);
       }
 
@@ -2784,7 +2769,7 @@ int main(int argc, char *argv[], char **envp) {
 
     case 'd':
       if (!optarg) {
-        pr_log_pri(PR_LOG_ERR, "Fatal: -d requires debugging level argument.");
+        pr_log_pri(PR_LOG_WARNING, "fatal: -d requires debug level parameter");
         exit(1);
       }
       pr_log_setdebuglevel(atoi(optarg));
@@ -2792,8 +2777,8 @@ int main(int argc, char *argv[], char **envp) {
 
     case 'c':
       if (!optarg) {
-        pr_log_pri(PR_LOG_ERR,
-          "Fatal: -c requires configuration path argument.");
+        pr_log_pri(PR_LOG_WARNING,
+          "fatal: -c requires configuration path parameter");
         exit(1);
       }
 
@@ -2810,14 +2795,13 @@ int main(int argc, char *argv[], char **envp) {
 
     case 'S':
       if (!optarg) {
-        pr_log_pri(PR_LOG_ERR,
-          "Fatal: -S requires IP address parameter.");
+        pr_log_pri(PR_LOG_WARNING, "fatal: -S requires IP address parameter");
         exit(1);
       }
 
       if (pr_netaddr_set_localaddr_str(optarg) < 0) {
-        pr_log_pri(PR_LOG_ERR,
-          "Fatal: unable to use '%s' as server address: %s", optarg,
+        pr_log_pri(PR_LOG_WARNING,
+          "fatal: unable to use '%s' as server address: %s", optarg,
           strerror(errno));
         exit(1);
       }
@@ -2829,10 +2813,14 @@ int main(int argc, char *argv[], char **envp) {
       fflush(stdout);
       break;
 
+    /* Note: This is now unused, and should be deprecated in the next release.
+     * See Bug#3952 for details.
+     */
     case 'p': {
       if (!optarg ||
-          ((persistent_passwd = atoi(optarg)) != 1 && persistent_passwd != 0)) {
-        pr_log_pri(PR_LOG_ERR, "Fatal: -p requires boolean (0|1) argument.");
+          (atoi(optarg) != 1 && atoi(optarg) != 0)) {
+        pr_log_pri(PR_LOG_WARNING,
+          "fatal: -p requires Boolean (0|1) parameter");
         exit(1);
       }
 
@@ -2860,7 +2848,7 @@ int main(int argc, char *argv[], char **envp) {
       break;
 
     case '?':
-      pr_log_pri(PR_LOG_ERR, "unknown option: %c", (char)optopt);
+      pr_log_pri(PR_LOG_WARNING, "unknown option: %c", (char) optopt);
       show_usage(1);
       break;
     }
@@ -2868,7 +2856,7 @@ int main(int argc, char *argv[], char **envp) {
 
   /* If we have any leftover parameters, it's an error. */
   if (argv[optind]) {
-    pr_log_pri(PR_LOG_ERR, "unknown parameter: '%s'", argv[optind]);
+    pr_log_pri(PR_LOG_WARNING, "fatal: unknown parameter: '%s'", argv[optind]);
     exit(1);
   }
 
@@ -2933,7 +2921,7 @@ int main(int argc, char *argv[], char **envp) {
    * that the given configuration path is valid.
    */
   if (pr_fs_valid_path(config_filename) < 0) {
-    pr_log_pri(PR_LOG_ERR, "Fatal: -c requires an absolute path");
+    pr_log_pri(PR_LOG_WARNING, "fatal: -c requires an absolute path");
     exit(1);
   }
 
@@ -2942,20 +2930,22 @@ int main(int argc, char *argv[], char **envp) {
   pr_event_generate("core.preparse", NULL);
 
   if (pr_parser_parse_file(NULL, config_filename, NULL, 0) == -1) {
-    pr_log_pri(PR_LOG_ERR, "Fatal: unable to read configuration file '%s': %s",
-      config_filename, strerror(errno));
+    pr_log_pri(PR_LOG_WARNING,
+      "fatal: unable to read configuration file '%s': %s", config_filename,
+      strerror(errno));
     exit(1);
   }
 
   if (pr_parser_cleanup() < 0) {
-    pr_log_pri(PR_LOG_ERR, "Fatal: error processing configuration file '%s': "
-       "unclosed configuration section", config_filename);
+    pr_log_pri(PR_LOG_WARNING,
+      "fatal: error processing configuration file '%s': "
+      "unclosed configuration section", config_filename);
     exit(1);
   }
 
   if (fixup_servers(server_list) < 0) {
-    pr_log_pri(PR_LOG_ERR, "Fatal: error processing configuration file '%s'",
-      config_filename);
+    pr_log_pri(PR_LOG_WARNING,
+      "fatal: error processing configuration file '%s'", config_filename);
     exit(1);
   }
 
@@ -3003,7 +2993,7 @@ int main(int argc, char *argv[], char **envp) {
     }
 
     if (set_groups(permanent_pool, daemon_gid, daemon_gids) < 0) {
-      pr_log_pri(PR_LOG_ERR, "unable to set daemon groups: %s",
+      pr_log_pri(PR_LOG_WARNING, "unable to set daemon groups: %s",
         strerror(errno));
     }
   }
@@ -3029,13 +3019,13 @@ int main(int argc, char *argv[], char **envp) {
    */
 
   if (geteuid() != daemon_uid) {
-    pr_log_pri(PR_LOG_ERR, "unable to set uid to %lu, current uid: %lu",
+    pr_log_pri(PR_LOG_ERR, "unable to set UID to %lu, current UID: %lu",
       (unsigned long) daemon_uid, (unsigned long) geteuid());
     exit(1);
   }
 
   if (getegid() != daemon_gid) {
-    pr_log_pri(PR_LOG_ERR, "unable to set gid to %lu, current gid: %lu",
+    pr_log_pri(PR_LOG_ERR, "unable to set GID to %lu, current GID: %lu",
       (unsigned long) daemon_gid, (unsigned long) getegid());
     exit(1);
   }
