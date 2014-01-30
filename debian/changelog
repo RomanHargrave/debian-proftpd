@@ -1,6 +1,6 @@
 proftpd-dfsg (1.3.5~rc4-1) unstable; urgency=low
 
-  * New upstream pre-release, with fix for CVE-2013-4359.
+  * New upstream pre-release, with fix for CVE-2013-4359 aka proftpd#3973.
     (closes: #723179)
   * Included fix by Andreas Beckmann:
     - Cleanup Breaks+Replaces.
