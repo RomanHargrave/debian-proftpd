@@ -39,7 +39,9 @@ add_sysuser()
 {
 	if ! grep -q "^proftpd:" /etc/passwd
 	then
-		adduser --system --disabled-login --no-create-home --home /var/run/proftpd proftpd || true
+		adduser --system --disabled-login --no-create-home --home /run/proftpd proftpd || true
+	else
+		usermod --home=/run/proftpd || true
 	fi
 }
 
@@ -61,7 +63,7 @@ tcpwin_options()
 scoreboard()
 {
     if [ -f $CONF_NEW ] ; then
-        sed -i -e "s/\(scoreboardpath.*\)/#\n#ScoreboardPath is deprecated in 1.2.9, use ScoreboardFile instead\n#\1\n#\n#ScoreboardFile\t\/var\/run\/proftpd\/proftpd.scoreboard\n#/i" \
+        sed -i -e "s/\(scoreboardpath.*\)/#\n#ScoreboardPath is deprecated in 1.2.9, use ScoreboardFile instead\n#\1\n#\n#ScoreboardFile\t\/run\/proftpd\/proftpd.scoreboard\n#/i" \
                                                 $CONF_NEW 
     fi
 }
@@ -195,7 +197,7 @@ if [ "$1" = "configure" ]; then
     db_stop
 
     # clean run files (pidfile and scoreboard)
-    rm -f /var/run/proftpd/proftpd* /var/run/proftpd.pid 
+    rm -f /run/proftpd/proftpd* /run/proftpd.pid 
 
 fi
 

@@ -24,7 +24,7 @@ if [ "$1" = "upgrade" ]; then
                         pkill proftpd
                         sleep 2
                 fi
-                rm -f /var/run/proftpd/proftpd.scoreboard
+                rm -f /run/proftpd/proftpd.scoreboard
          fi
 fi
 

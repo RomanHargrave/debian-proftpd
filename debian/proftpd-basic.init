@@ -27,7 +27,7 @@ CONFIG_FILE=/etc/proftpd/proftpd.conf
 PIDFILE=`grep -i 'pidfile' $CONFIG_FILE|sed -e 's/pidfile[\t ]\+//i'`
 if [ "x$PIDFILE" = "x" ];
 then
-	PIDFILE=/var/run/proftpd.pid
+	PIDFILE=/run/proftpd.pid
 fi
 
 # Read config (will override defaults)
@@ -67,7 +67,7 @@ fi
 
 # /var/run could be on a tmpfs
 
-[ ! -d /var/run/proftpd ] && mkdir /var/run/proftpd
+[ ! -d /run/proftpd ] && mkdir /run/proftpd
 
 inetd_check()
 {

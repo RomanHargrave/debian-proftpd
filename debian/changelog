@@ -1,3 +1,10 @@
+proftpd-dfsg (1.3.5~rc4-2) UNRELEASED; urgency=medium
+
+  * Now using /run instead of /var/runi for state directory.
+    (closes: #699798)
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Thu, 06 Feb 2014 16:41:26 +0100
+
 proftpd-dfsg (1.3.5~rc4-1) unstable; urgency=low
 
   * New upstream pre-release, with fix for CVE-2013-4359 aka proftpd#3973.
