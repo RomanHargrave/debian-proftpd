@@ -11,7 +11,8 @@ proftpd-dfsg (1.3.4~rc2-2) unstable; urgency=low
 
     Starting from this version the core package does not provide the
     still experimental non-core mod_vroot package. You need to install the separate
-    proftpd-mod-vroot package explicitly instead.
+    proftpd-mod-vroot package explicitly instead, or to comment the mod_vroot.c 
+    loading in /etc/proftpd/modules.conf.
 
  -- Francesco Paolo Lovergine <frankie@debian.org>  Wed, 20 Apr 2011 17:46:30 +0200
 
