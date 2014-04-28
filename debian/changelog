@@ -1,7 +1,12 @@
 proftpd-dfsg (1.3.5~rc4-2) UNRELEASED; urgency=medium
 
-  * Now using /run instead of /var/runi for state directory.
+  * Now using /run instead of /var/run for state directory.
     (closes: #699798)
+  * Revised debconf config to explicitly set default.
+    (closes: #707689)
+  * Revised (again) --retry flag for start-stop-daemon in order to fix long
+    delays in stopping the daemon.
+    (closes: #675081, #721201)
 
  -- Francesco Paolo Lovergine <frankie@debian.org>  Thu, 06 Feb 2014 16:41:26 +0100
 

@@ -97,21 +97,20 @@ signal()
 		SIGNAL="TERM"
     	log_daemon_msg "Stopping ftp server" "$NAME"
     else
-	if [ "$1" = "reload" ]; then
-	    SIGNAL="HUP"
-    	log_daemon_msg "Reloading ftp server" "$NAME"
-	else
-	    echo "ERR: wrong parameter given to signal()"
-	    exit 1
-	fi
+	    if [ "$1" = "reload" ]; then
+	       SIGNAL="HUP"
+    	   log_daemon_msg "Reloading ftp server" "$NAME"
+	    else
+	       echo "ERR: wrong parameter given to signal()"
+	       exit 1
+	    fi
     fi
     if [ -f "$PIDFILE" ]; then
-    	start-stop-daemon --stop --signal $SIGNAL --quiet --pidfile "$PIDFILE"
-   	 if [ $? = 0 ]; then
+    	start-stop-daemon --stop --signal $SIGNAL --quiet --pidfile "$PIDFILE" --retry forever
+   	    if [ $? = 0 ]; then
         	log_end_msg 0
     	else
-		SIGNAL="KILL"
-		start-stop-daemon --stop --signal $SIGNAL --quiet --pidfile "$PIDFILE" --retry=TERM/10/KILL/5
+		    start-stop-daemon --stop --signal $SIGNAL --quiet --pidfile "$PIDFILE" --retry forever
     		if [ $? != 0 ]; then
         		log_end_msg 1
         		[ $2 != 0 ] || exit 0
@@ -119,8 +118,8 @@ signal()
         		log_end_msg 0
     		fi
     	fi
-   	if [ "$SIGNAL" = "KILL" ]; then
-		rm -f "$PIDFILE"
+   	    if [ "$SIGNAL" = "KILL" ]; then
+		    rm -f "$PIDFILE"
     	fi
     else
         log_end_msg 0
