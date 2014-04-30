@@ -41,7 +41,7 @@ add_sysuser()
 	then
 		adduser --system --disabled-login --no-create-home --home /run/proftpd proftpd || true
 	else
-		usermod --home=/run/proftpd || true
+		usermod --home=/run/proftpd proftpd || true
 	fi
 }
 
