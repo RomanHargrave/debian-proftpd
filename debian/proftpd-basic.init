@@ -106,11 +106,11 @@ signal()
 	    fi
     fi
     if [ -f "$PIDFILE" ]; then
-    	start-stop-daemon --stop --signal $SIGNAL --quiet --pidfile "$PIDFILE" --retry forever
+    	start-stop-daemon --stop --signal $SIGNAL --quiet --pidfile "$PIDFILE" --retry $SIGNAL/30/KILL/5
    	    if [ $? = 0 ]; then
         	log_end_msg 0
     	else
-		    start-stop-daemon --stop --signal $SIGNAL --quiet --pidfile "$PIDFILE" --retry forever
+		    start-stop-daemon --stop --signal $SIGNAL --quiet --pidfile "$PIDFILE" --retry $SIGNAL/30/KILL/5
     		if [ $? != 0 ]; then
         		log_end_msg 1
         		[ $2 != 0 ] || exit 0
