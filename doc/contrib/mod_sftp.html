@@ -1,4 +1,4 @@
-<!-- $Id: mod_sftp.html,v 1.78 2014/01/13 18:40:20 castaglia Exp $ -->
+<!-- $Id: mod_sftp.html,v 1.82 2014/03/03 05:40:13 castaglia Exp $ -->
 <!-- $Source: /cvsroot/proftp/proftpd/doc/contrib/mod_sftp.html,v $ -->
 
 <html>
@@ -302,7 +302,7 @@ of supported cipher algorithms is, in the default order of preference:
   <li>aes192-ctr
   <li>aes128-ctr
   <li>aes256-cbc
-  <li>aes196-cbc
+  <li>aes192-cbc
   <li>aes128-cbc
   <li>blowfish-ctr
   <li>blowfish-cbc
@@ -843,6 +843,21 @@ For example:
 <p>
 The currently implemented options are:
 <ul>
+  <li><code>AllowInsecureLogin</code><br>
+    <p>
+    By default, <code>mod_sftp</code> will <b>not</b> allow password or
+    keyboard-interactive authentication <b>if</b> either the 'none' cipher
+    <b>or</b> MAC/digest is selected.  (These must be explicitly allowed via
+    <code>SFTPCiphers</code> and <code>SFTPDigests</code> as well.)  However,
+    some sites may deliberately wish to allow such logins, as for <i>e.g.</i>
+    performance testing.  To allow such logins/sessions, then, use this option.
+
+    <p>
+    <b>Note</b> that this option first appeared in
+    <code>proftpd-1.3.5</code>.
+  </li>
+
+  <p>
   <li><code>IgnoreSCPUploadPerms</code><br>
     <p>
     When an SCP client uploads a file, the desired permissions on the file
@@ -851,6 +866,7 @@ The currently implemented options are:
     If you need more FTP-like functionality for any reason and wish to
     have <code>mod_sftp</code> silently ignore any permissions sent by the
     SCP client, use this option.
+  </li>
 
   <p>
   <li><code>IgnoreSCPUploadTimes</code><br>
@@ -1446,6 +1462,23 @@ For these clients, use this configuration to disable the optimization:
   <font color=green># Disable the KEXINIT optimization at the cost of latency</font>
   SFTPOptions PessimisticKexinit
 </pre>
+
+<p>
+<i>Cipher Implementations</i><br>
+Some SFTP clients (most notably the SecureBlackBox libraries) do not implement
+the <code>blowfish-ctr</code> cipher correctly.  If your site needs to
+support such clients, then you will need to use the
+<a href="#SFTPCiphers"><code>SFTPCiphers</code></a> directive to configure
+a list of ciphers which does <b>not</b> include <code>blowfish-ctr</code>.
+Clients with this bug will show up in the <code>SFTPLog</code> with this
+log message:
+<pre>
+  client sent buggy/malicious packet payload length, ignoring
+</pre>
+<b>However</b>, this log message can also be caused by other factors.  It
+is the combination of this error message, <b>and</b> the negotation of
+the <code>blowfish-ctr</code> cipher, that indicates the use of these
+buggy clients.
 
 <p>
 <b>FIPS Compliance</b><br>
@@ -2074,6 +2107,22 @@ virtual host/port).  So either <i>a)</i> the SFTP client is connecting to
 the wrong port on your server, or <i>b)</i> perhaps "SFTPEngine on" is not
 set in the virtual host for that port.
 
+<p><a name="SFTPPTYAllocationFailed">
+<font color=red>Question</font>: I try to connect to <code>proftpd</code>
+with <code>mod_sftp</code> and the connection fails with an error messages
+like "PTY allocation request failed on channel 0" or "Server refused to
+allocate pty".  What is going wrong?<br>
+<font color=blue>Answer</font>: This error message happens when you
+try to connect to <code>mod_sftp</code> using an SSH client which wants
+a <em>shell</em> session, rather than an SFTP session or an SCP transfer.
+The <code>mod_sftp</code> module does <b>not</b> support shell sessions
+(unlike OpenSSH).  In the <code>SFTPLog</code>, you would see such
+connection attempts logged like so:
+<pre>
+  mod_sftp/0.9.9[6304]: unsupported 'pty-req' channel requested, ignoring
+  mod_sftp/0.9.9[6304]: unsupported 'shell' channel requested, ignoring
+</pre>
+
 <p><a name="SFTPDirectorySGID">
 <font color=red>Question</font>: When I create a directory via SFTP, in
 a directory with the SGID bit set, the created directory does <b>not</b>
@@ -2090,13 +2139,13 @@ In addition, if your <code>proftpd</code> is running on Linux, you may
 need to disable the <a href="../modules/mod_cap.html"><code>mod_cap</code></a>
 module, or configure it to preserve the SGID bit (<i>e.g.</i> via the
 <a href="../modules/mod_cap.html#CapabilitiesSet"><code>CAP_FSETID</code></a>
-capability.
+capability).
 
 <p>
 <hr><br>
 
 Author: <i>$Author: castaglia $</i><br>
-Last Updated: <i>$Date: 2014/01/13 18:40:20 $</i><br>
+Last Updated: <i>$Date: 2014/03/03 05:40:13 $</i><br>
 
 <br><hr>
 

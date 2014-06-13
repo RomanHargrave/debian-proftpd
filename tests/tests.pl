@@ -149,11 +149,13 @@ if (scalar(@ARGV) > 0) {
     t/config/maxstorefilesize.t
     t/config/multilinerfc2228.t
     t/config/order.t
+    t/config/passiveports.t
     t/config/pathallowfilter.t
     t/config/pathdenyfilter.t
     t/config/protocols.t
     t/config/requirevalidshell.t
     t/config/rewritehome.t
+    t/config/rlimitchroot.t
     t/config/rlimitcpu.t
     t/config/rlimitmemory.t
     t/config/rlimitopenfiles.t
