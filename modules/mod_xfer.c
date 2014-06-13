@@ -2,7 +2,7 @@
  * ProFTPD - FTP server daemon
  * Copyright (c) 1997, 1998 Public Flood Software
  * Copyright (c) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
- * Copyright (c) 2001-2013 The ProFTPD Project team
+ * Copyright (c) 2001-2014 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -26,7 +26,7 @@
 
 /* Data transfer module for ProFTPD
  *
- * $Id: mod_xfer.c,v 1.331 2013/12/12 05:40:42 castaglia Exp $
+ * $Id: mod_xfer.c,v 1.334 2014/04/28 17:11:18 castaglia Exp $
  */
 
 #include "conf.h"
@@ -2397,12 +2397,12 @@ MODRET xfer_allo(cmd_rec *cmd) {
 
   if (xfer_opts & PR_XFER_OPT_HANDLE_ALLO) {
     const char *path;
-    off_t avail_sz;
+    off_t avail_kb;
     int res;
 
     path = pr_fs_getcwd();
 
-    res = pr_fs_getsize2((char *) path, &avail_sz);
+    res = pr_fs_getsize2((char *) path, &avail_kb);
     if (res < 0) {
       /* If we can't check the filesystem stats for any reason, let the request
        * proceed anyway.
@@ -2413,10 +2413,17 @@ MODRET xfer_allo(cmd_rec *cmd) {
       pr_response_add(R_202, _("No storage allocation necessary"));
 
     } else {
-      if (requested_sz > avail_sz) {
-        pr_log_debug(DEBUG5, "%s requested %" PR_LU " bytes, only %" PR_LU
-          " bytes available on '%s'", cmd->argv[0], (pr_off_t) requested_sz,
-          (pr_off_t) avail_sz, path);
+      off_t requested_kb;
+
+      /* The requested size is in bytes; the size returned from
+       * pr_fs_getsize2() is in KB.
+       */
+      requested_kb = requested_sz / 1024;
+
+      if (requested_kb > avail_kb) {
+        pr_log_debug(DEBUG5, "%s requested %" PR_LU " KB, only %" PR_LU
+          " KB available on '%s'", cmd->argv[0], (pr_off_t) requested_kb,
+          (pr_off_t) avail_kb, path);
         pr_response_add_err(R_552, "%s: %s", cmd->arg, strerror(ENOSPC));
         return PR_ERROR(cmd);
       }
@@ -3302,30 +3309,21 @@ static void xfer_exit_ev(const void *event_data, void *user_data) {
 
   if (session.sf_flags & SF_XFER) {
     cmd_rec *cmd;
-    char *path = NULL;
 
     if (session.xfer.direction == PR_NETIO_IO_RD) {
        /* An upload is occurring... */
-      if (stor_fh != NULL) {
-        path = stor_fh->fh_path;
-      }
-
       pr_trace_msg(trace_channel, 6, "session exiting, aborting upload");
       stor_abort();
 
     } else {
       /* A download is occurring... */
-      if (retr_fh != NULL) {
-        path = retr_fh->fh_path;
-      }
-
       pr_trace_msg(trace_channel, 6, "session exiting, aborting download");
       retr_abort();
     }
 
     pr_data_abort(0, FALSE);
 
-    cmd = pr_cmd_alloc(session.pool, 2, session.curr_cmd, path);
+    cmd = pr_cmd_alloc(session.pool, 2, session.curr_cmd, session.xfer.path);
     (void) pr_cmd_dispatch_phase(cmd, POST_CMD_ERR, 0);
     (void) pr_cmd_dispatch_phase(cmd, LOG_CMD_ERR, 0);
   }
