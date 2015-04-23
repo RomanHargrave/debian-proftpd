@@ -72,6 +72,7 @@ Depends: libacl1-dev,
          libpcre3-dev,
          libssl-dev,
          libtool,
+         libtool-bin,
          proftpd-basic (=${binary:Version}),
          ${misc:Depends},
          ${shlibs:Depends}
