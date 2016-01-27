@@ -4,9 +4,9 @@ Forwarded: not needed
 
 Index: proftpd-dfsg/Makefile.in
 ===================================================================
---- proftpd-dfsg.orig/Makefile.in	2013-01-08 15:56:17.000000000 +0100
-+++ proftpd-dfsg/Makefile.in	2013-01-08 15:56:21.000000000 +0100
-@@ -230,10 +230,10 @@
+--- proftpd-dfsg.orig/Makefile.in
++++ proftpd-dfsg/Makefile.in
+@@ -233,10 +233,10 @@ dist: depend distclean spec
  	chmod a+x configure config.sub install-sh modules/glue.sh
  
  # autoheader might not change config.h.in, so touch a stamp file.
