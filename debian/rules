@@ -54,6 +54,8 @@ debian/control: debian/control.in
 debian/proftpd-substvars: debian/proftpd-substvars.in
 	sed -e 's/@VERSION@/$(VERSION)/' $< >$@
 
+build-arch: build
+build-indep: build
 build: debian/proftpd-substvars configure-stamp build-stamp
 build-stamp: 
 	dh_testdir
@@ -174,3 +176,4 @@ checkroot:
 
 .PHONY: binary binary-arch binary-indep clean checkroot myclean install configure debian/proftpd-substvars debian/control
 
+.PHONY: build build-arch build-indep
