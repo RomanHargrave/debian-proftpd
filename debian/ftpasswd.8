@@ -22,24 +22,34 @@ ftpasswd \- manipulates ProFTPD authentication files
 .TP 8
 \fBftpasswd\fR \fB\-\-help\fR|\fB-h\fR|\fB\-\-version\fR
 .TP 8
-\fBftpasswd\fR \fB\-\-hash\fR  [ \fB\-\-des\fR|\fB\-\-md5\fR ] [ \fB\-\-stdin\fR ] [ \fB\-\-use\-cracklib\fR[=path] ]
+\fBftpasswd\fR \fB\-\-hash\fR  [ \fB\-\-des\fR|\fB\-\-md5\fR|\fB\-\-sha256\fR|\fB\-\-sha512\fR ] [ \fB\-\-stdin\fR ]
+.br
+[ \fB\-\-use\-cracklib\fR[=path] ]
 .TP 8
 \fBftpasswd\fR \fB\-\-passwd\fR [ \fB-F\fR|\fB\-\-force\fR ] [ \fB\-\-file=\fRfilename ] [\fB\-\-gecos=\fRstring ]
 .br
-[ \fB\-\-gid=\fRgid ] [ \fB\-\-des\fR | \fB\-\-md5\fR ] [ \fB\-\-not\-system\-password\fR ]
+[ \fB\-\-gid=\fRgid ] [ \fB\-\-des\fR|\fB\-\-md5\fR|\fB\-\-sha256\fR|\fB\-\-sha512\fR ] [ \fB\-\-not\-system\-password\fR ]
 .br
-[ \fB\-\-stdin\fR ] [ \fB\-\-use\-cracklib\fR[=path] ] \fB\-\-home=\fRpath
-.br \fB\-\-name=\fRusername \fB\-\-shell=\fRshellpath \fB\-\-uid=\fRuid
+[ \fB\-\-not\-previous\-password\fR ] [ \fB\-\-delete\-user\fR [ \fB\-\-stdin\fR ]
+.br
+[ \fB\-\-use\-cracklib\fR[=path] ] \fB\-\-home=\fRpath \fB\-\-name=\fRusername
+.br
+\fB\-\-shell=\fRshellpath \fB\-\-uid=\fRuid
 .TP 8
-\fBftpasswd\fR \fB\-\-group\fR [ \fB-F\fR|\fB\-\-force\fR ] [ \fB\-\-enable\-group\-passwd\fR ]
+\fBftpasswd\fR \fB\-\-group\fR [ \fB-F\fR|\fB\-\-force\fR ] [ \fB\-\-enable\-group\-passwd\fR ] [ \fB\-\-delete\-group\fR ]
 .br
-[ \fB\-\-file=\fRfilename ] [ \fB\-m\fR|\fB\-\-member\fR ] [ \fB\-\-des\fR|\fB\-\-md5\fR ]
+[ \fB\-\-file=\fRfilename ] [ \fB\-m\fR|\fB\-\-member\fR ] [ \fB\-\-des\fR|\fB\-\-md5\fR|\fB\-\-sha256\fR|\fB\-\-sha512\fR ]
 .br
-[ \fB\-\-stdin\fR ] [ \fB\-\-use\-cracklib\fR[=path] ] \fB\-\-gid=\fRgid
-.br \fB\-\-name=\fRgroupname
+[ \fB\-\-stdin\fR ] [ \fB\-\-use\-cracklib\fR[=path] ] \fB\-\-gid=\fRgid \fB\-\-name=\fRgroupname
 .TP 8
 \fBftpasswd\fR \fB\-\-passwd\fR \fB\-\-change\-password\fR \fB\-\-name\fR=username
 .br
+.TP 8
+\fBftpasswd\fR \fB--passwd\fR \fB\-l|\-\-lock\fR \fB\-\-name\fR=username
+.br
+.TP 8
+\fBftpasswd\fR \fB--passwd\fR \fB\-u|\-\-unlock\fR \fB\-\-name\fR=username
+.br 
 .PP
 .SH DESCRIPTION
 .P
@@ -72,6 +82,7 @@ By default, using \-\-group will write output to "./ftpd.group".
 .TP
 .B \-F, \-\-force
 If the password or group file be used already exists, delete it and write a new one.
+By default, new entries will be appended to the file.
 .TP
 .BR \-\-file= filename
 Write output to specified file (password or group files),
@@ -90,7 +101,7 @@ value if absent) when
 is specified.
 .TP
 .BR \-\-uid= uid
-numerical group ID.
+numerical user ID.
 .TP
 .B \-h,\ \-\-help,\ \-\-version
 Show usage and version of the program.
@@ -98,9 +109,9 @@ Show usage and version of the program.
 .BR \-\-home= path
 Set the home directory for the user (required).
 .TP
-.B \-\-des,\ \-\-md5
-Use the DES or MD5 algorithm for encrypting passwords. 
-The latter is the default.
+.BR \-\-des,\ \-\-md5,\ \-\-sha256,\ \-\-sha512
+Use the DES, MD5, SHA-256 or SHA-512 algorithm for encrypting passwords. 
+The default is the MD5 algorithm.
 .TP
 .BR \-\-name= username ,\ \-\-name= groupname
 Name of the user account or group (required).
@@ -115,11 +126,18 @@ Shell for the user (required).  Recommended:
 Update only the password field for a user.  This option
 requires that the
 .BR \-\-name
-option be used, but no others.
+and
+.BR \-\-passwd
+options be used, but no others.
 This also double-checks the given password against the
 user's current password in the existing passwd file, and
 requests that a new password be given if the entered password
 is the same as the current password.
+.TP
+.BR \-\-not\-previous\-password
+Double-checks the given password against the previous password
+for the user, and requests that a new password be given if the
+entered password is the same as the previous password.
 .TP
 .BR \-\-not\-system\-password
 Double-checks the given password against the system password
@@ -133,6 +151,19 @@ Read the password directly from standard in rather than
 prompting for it.  This is useful for writing scripts that
 automate use of ftpasswd.
 .TP
+.B \-l, \-\-lock
+Lock the password of the named account. This option disables
+a password by changing it to a value which matches no possible
+encrypted value (it adds a '!' at the beginning of the password).
+.TP
+.B \-u, \-\-unlock
+Unlock the password of the named account. This option
+re-enables a password by changing the password back to its
+previous value (to the value before using the
+.BR \-l
+option).
+.TP
+.TP
 .BR \-\-use\-cracklib\fR[ =path \fR]
 Causes ftpasswd to use Alec Muffet's cracklib routines in
 order to determine and prevent the use of bad or weak
@@ -141,6 +172,12 @@ the path to the dictionary files to use \-\- default path
 is
 .IR /usr/lib/cracklib_dict .
 This requires the Perl Crypt::Cracklib module to be installed on your system.
+.TP
+.BR \-\-delete\-user
+Remove the entry for the given user name from the file.
+.TP
+.BR \-\-delete\-group
+Remove the entry for the given group name from the file.
 .TP
 .BR \-\-enable\-group\-passwd
 Prompt for a group password.  This is disabled by default,

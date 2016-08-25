@@ -4,6 +4,9 @@ proftpd-dfsg (1.3.5a-2) UNRELEASED; urgency=medium
   * Fix FTBFS for missing build-indep, Thanks Santiago vila (Closes: #831961).
   * Fix FTBFS in hurd-i386,thanks Svante Signell (Closes: #745493).
 
+  [hilmar-guest]
+  * Apply patch for ftpasswd.8 (Closes: #774390)
+
  -- Mahyuddin Susanto <udienz@gmail.com>  Wed, 24 Aug 2016 15:23:38 -0700
 
 proftpd-dfsg (1.3.5a-1) unstable; urgency=medium
