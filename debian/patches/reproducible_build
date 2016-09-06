@@ -1,0 +1,26 @@
+Author: Chris Lamb <lamby@debian.org>
+Last-Update: 2016-07-15
+Forwarded: not done, could be done
+Bug-Debian: http://bugs.debian.org/831381
+
+--- proftpd-dfsg-1.3.5a.orig/Makefile.in
++++ proftpd-dfsg-1.3.5a/Makefile.in
+@@ -21,11 +21,17 @@ BUILD_PROFTPD_OBJS=$(BUILD_OBJS) $(BUILD
+ BUILD_PROFTPD_ARCHIVES=$(BUILD_STATIC_MODULE_ARCHIVES)
+ BUILD_BIN=proftpd$(EXEEXT) ftpcount$(EXEEXT) ftpdctl$(EXEEXT) ftpscrub$(EXEEXT) ftpshut$(EXEEXT) ftptop$(EXEEXT) ftpwho$(EXEEXT)
+ 
++DATE_FMT = %a %b %e %Y %H:%M:%S %Z
++ifdef SOURCE_DATE_EPOCH
++	BUILD_STAMP ?= $(shell LC_ALL=C date --utc --date="@$(SOURCE_DATE_EPOCH)" "+$(DATE_FMT)")
++else
++	BUILD_STAMP ?= $(shell date "+$(DATE_FMT)")
++endif
+ 
+ all: $(BUILD_BIN)
+ 
+ include/buildstamp.h:
+-	echo \#define BUILD_STAMP \"`date +"%a %b %e %Y %H:%M:%S %Z"`\" > include/buildstamp.h
++	echo \#define BUILD_STAMP \"$(BUILD_STAMP)\" > include/buildstamp.h
+ 
+ dummy:
+ 

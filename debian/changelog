@@ -8,6 +8,7 @@ proftpd-dfsg (1.3.5a-2) UNRELEASED; urgency=medium
   * Apply patch for ftpasswd.8 (Closes: #774390)
   * Apply patch to allow transfer large files (more than 1 GB)
     with SFTP module (Closes: #809068), large_files_SFTP.diff
+  * Apply patch reproducible build. Thanks to Chris Lamb (Closes: #831381).
 
  -- Mahyuddin Susanto <udienz@gmail.com>  Wed, 24 Aug 2016 15:23:38 -0700
 
