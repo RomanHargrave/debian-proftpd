@@ -11,6 +11,7 @@ proftpd-dfsg (1.3.5a-2) UNRELEASED; urgency=medium
     with SFTP module (Closes: #809068), large_files_SFTP.diff
   * Apply patch for reproducible build. Thanks to Chris Lamb
     (Closes: #831381).
+  * Some files created during build were not removed during clean.
 
  -- Mahyuddin Susanto <udienz@gmail.com>  Wed, 24 Aug 2016 15:23:38 -0700
 

@@ -110,9 +110,17 @@ myclean:
 	rm -f contrib/mod_wrap2/mod_wrap2.h \
 	      contrib/mod_wrap2/Makefile \
 	      contrib/mod_load/mod_load.h \
-	      contrib/mod_load/Makefile 
+	      contrib/mod_load/Makefile \
+	      contrib/mod_sftp/mod_sftp.h \
+	      contrib/mod_sftp/Makefile
 	# clean up libtool files still around
 	find contrib -name "*.la" -exec rm -f {} \;
+	# some manual page are generated during build:
+	rm -f src/ftpdctl.8 src/proftpd.8 src/proftpd.conf.5 src/xferlog.5
+	rm -f utils/ftpcount.1 utils/ftpscrub.8 utils/ftpshut.8 utils/ftptop.1
+	rm -f utils/ftpwho.1
+	# prxs is created from prxs.in
+	rm -f src/prxs
 
 binary-indep: checkroot build
 	dh_installdirs -i
