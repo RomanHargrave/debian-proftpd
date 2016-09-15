@@ -11,5 +11,6 @@ odbc
 silent
 use_hypen_in_manpage
 contrib_hardening_flags
+FTBS_on_Hurd
 large_files_SFTP.diff
 reproducible_build

@@ -742,20 +742,14 @@ static int exec_ssystem(cmd_rec *cmd, config_rec *c, int flags) {
 
         if (fds >= 0) {
           int buflen;
-
-          size_t len = fpathconf(exec_stdout_pipe[0], _PC_PIPE_BUF);
-          char *buf = malloc(len);
-          if (buf == NULL) {
-            exec_log("malloc failed: %s", strerror(errno));
-            return errno;
-          }
+          char buf[PIPE_BUF];
 
           /* The child sent us something.  How thoughtful. */
 
           if (FD_ISSET(exec_stdout_pipe[0], &readfds)) {
-            memset(buf, '\0', len);
+            memset(buf, '\0', sizeof(buf));
 
-            buflen = read(exec_stdout_pipe[0], buf, len - 1);
+            buflen = read(exec_stdout_pipe[0], buf, sizeof(buf)-1);
             if (buflen > 0) {
               if (exec_opts & EXEC_OPT_SEND_STDOUT) {
 
@@ -802,9 +796,9 @@ static int exec_ssystem(cmd_rec *cmd, config_rec *c, int flags) {
           }
 
           if (FD_ISSET(exec_stderr_pipe[0], &readfds)) {
-            memset(buf, '\0', len);
+            memset(buf, '\0', sizeof(buf));
 
-            buflen = read(exec_stdout_pipe[0], buf, len - 1);
+            buflen = read(exec_stderr_pipe[0], buf, sizeof(buf)-1);
             if (buflen > 0) {
 
               /* Trim trailing CRs and LFs. */
@@ -834,7 +828,6 @@ static int exec_ssystem(cmd_rec *cmd, config_rec *c, int flags) {
               }
             }
           }
-          free(buf);
         }
 
         res = waitpid(pid, &status, WNOHANG);

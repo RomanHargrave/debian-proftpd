@@ -413,15 +413,10 @@ static int exec_passphrase_provider(server_rec *s, char *buf, int buflen,
 
         if (FD_ISSET(stderr_pipe[0], &readfds)) {
           int stderrlen;
+          char stderrbuf[PIPE_BUF];
 
-          size_t len = fpathconf(stderr_pipe[0], _PC_PIPE_BUF);
-          char *stderrbuf = malloc(len);
-          if (stderrbuf == NULL) {
-            pr_log_pri(PR_LOG_ALERT, MOD_SFTP_VERSION ": Out of memory!");
-            return -1;
-	  }
-          memset(stderrbuf, '\0', len);
-          stderrlen = read(stderr_pipe[0], stderrbuf, len - 1);
+          memset(stderrbuf, '\0', sizeof(stderrbuf));
+          stderrlen = read(stderr_pipe[0], stderrbuf, sizeof(stderrbuf)-1);
           if (stderrlen > 0) {
             while (stderrlen &&
                    (stderrbuf[stderrlen-1] == '\r' ||
@@ -438,7 +433,6 @@ static int exec_passphrase_provider(server_rec *s, char *buf, int buflen,
               ": error reading stderr from '%s': %s",
               passphrase_provider, strerror(errno));
           }
-          free(stderrbuf);
         }
       }
 
