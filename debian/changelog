@@ -13,6 +13,9 @@ proftpd-dfsg (1.3.5a-2) UNRELEASED; urgency=medium
     (Closes: #831381).
   * Remove hardening check in debian/rules, remove BD on
     hardening-includes (Closes: #836759).
+  * Use common-session-noninteractive PAM configuration fragment,
+    (instead of common-session) in pam config of proftpd-basic
+    (Closes: #804322).
   * Some files created during build were not removed during clean.
 
  -- Mahyuddin Susanto <udienz@gmail.com>  Wed, 24 Aug 2016 15:23:38 -0700

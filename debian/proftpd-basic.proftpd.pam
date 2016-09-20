@@ -8,4 +8,4 @@ auth       required	pam_listfile.so item=user sense=deny file=/etc/ftpusers oner
 #auth       required	pam_shells.so
 
 @include common-account
-@include common-session
+@include common-session-noninteractive
