@@ -14,3 +14,4 @@ contrib_hardening_flags
 FTBS_on_Hurd
 large_files_SFTP.diff
 reproducible_build
+not_read_whole_passwd_db.diff

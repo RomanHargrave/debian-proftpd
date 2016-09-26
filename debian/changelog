@@ -16,6 +16,13 @@ proftpd-dfsg (1.3.5a-2) UNRELEASED; urgency=medium
   * Use common-session-noninteractive PAM configuration fragment,
     (instead of common-session) in pam config of proftpd-basic
     (Closes: #804322).
+  * Apply patch to not request the whole passwd DB at each login. Thanks
+    to Arthur de Jong <adejong@debian.org>. (Closes: #717235).
+    <quote src=AdJ>
+    I still question the usefulness of setpwent()/getpwent() in the first
+    place as there is no guarantee that any resources opened for setpwent()
+    are used for other getpw{nam,uid}() calls.
+    </quote>
   * Some files created during build were not removed during clean.
 
  -- Mahyuddin Susanto <udienz@gmail.com>  Wed, 24 Aug 2016 15:23:38 -0700
