@@ -68,7 +68,7 @@ License: Academic
 Files: contrib/mod_tls.c
 Copyright: 2000-2002, Peter 'Luna' Runestig <peter@runestig.com>
 	2002-2010 TJ Saunders <tj@castaglia.org>
-License: BSD
+License: BSD-3-clause
  Redistribution and use in source and binary forms, with or without modifi-
  cation, are permitted provided that the following conditions are met:
  .
