@@ -76,12 +76,7 @@ configure-stamp:
 	dh_testdir
 	
 	# Use current autotools helpers
-	-test -r /usr/share/misc/config.sub && \
-		mv ./config.sub ./config.sub.original && \
-		cp -f /usr/share/misc/config.sub ./config.sub
-	-test -r /usr/share/misc/config.guess && \
-		mv ./config.guess ./config.guess.original && \
-		cp -f /usr/share/misc/config.guess ./config.guess
+	dh_update_autotools_config
 	
 	./configure $(shell dpkg-buildflags --export=configure) $(CONF_ARGS) --with-shared=$(DSOMODS1)$(DSOMODS2)$(DSOMODS3)$(DSOMODS4)
 	
@@ -93,10 +88,6 @@ myclean:
 	dh_clean
 	
 	[ ! -f $(CURDIR)/Makefile ] || $(MAKE) distclean 
-	
-	# Reset upstream autotools helpers
-	[ ! -f config.sub.original ] || mv -f ./config.sub.original ./config.sub 
-	[ ! -f config.guess.original ] || mv -f ./config.guess.original ./config.guess
 	
 	rm -f debian/files.saved debian/files
 	rm -f $$(find . -type l) $$(find . -name "*~" -o -name "*.o")
