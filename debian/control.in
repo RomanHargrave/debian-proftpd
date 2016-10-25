@@ -35,6 +35,7 @@ Depends: adduser,
          netbase (>= 4.13),
          sed (>= 4.1.5),
          ucf (>= 0.30),
+         lsb-base (>= 3.0-6),
          ${misc:Depends},
          ${shlibs:Depends}
 Conflicts: ftp-server

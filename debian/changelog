@@ -24,6 +24,7 @@ proftpd-dfsg (1.3.5a-2) UNRELEASED; urgency=medium
     are used for other getpw{nam,uid}() calls.
     </quote>
   * lintian "W: invalid-short-name-in-dep5-copyright bsd" (BSD-3-clause).
+  * lintian: proftpd-basic: init.d-script-needs-depends-on-lsb-base (...)
   * Same URL for Vcs-Git & Vcs-Browser in control file.
   * Some suggestions by Mattia Rizzolo <mattia@debian.org> for debian/rules
     - Update of config.{sub,guess} is done by dh_update_autotools_config
