@@ -60,7 +60,8 @@ build: debian/proftpd-substvars configure-stamp build-stamp
 build-stamp: 
 	dh_testdir
 	
-	$(MAKE) CC="$(CC)" all
+	#$(MAKE) CC="$(CC)" all
+	dh_auto_build
 	
 	touch $@
 
