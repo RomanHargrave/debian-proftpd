@@ -23,7 +23,7 @@ Build-Depends: autotools-dev,
                libgeoip-dev,
                libmemcached-dev (>= 0.41)
 Homepage: http://www.proftpd.org/
-Vcs-Git: git://anonscm.debian.org/git/pkg-proftpd/proftpd-dfsg.git
+Vcs-Git: https://anonscm.debian.org/git/pkg-proftpd/proftpd-dfsg.git
 Vcs-Browser: https://anonscm.debian.org/git/pkg-proftpd/proftpd-dfsg.git
 
 Package: proftpd-basic
