@@ -86,9 +86,9 @@ configure-stamp:
 clean: debian/control debian/proftpd-substvars myclean 
 myclean:
 	dh_testdir
+	#[ ! -f $(CURDIR)/Makefile ] || $(MAKE) distclean 
+	dh_auto_clean
 	dh_clean
-	
-	[ ! -f $(CURDIR)/Makefile ] || $(MAKE) distclean 
 	
 	rm -f debian/files.saved debian/files
 	rm -f $$(find . -type l) $$(find . -name "*~" -o -name "*.o")
