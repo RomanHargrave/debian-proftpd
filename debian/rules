@@ -80,7 +80,8 @@ configure-stamp:
 	dh_update_autotools_config
 	
 	./configure $(shell dpkg-buildflags --export=configure) $(CONF_ARGS) --with-shared=$(DSOMODS1)$(DSOMODS2)$(DSOMODS3)$(DSOMODS4)
-	
+	#dh_auto_configure -- $(CONF_ARGS) --with-shared=$(DSOMODS1)$(DSOMODS2)$(DSOMODS3)$(DSOMODS4)
+
 	touch $@
 
 clean: debian/control debian/proftpd-substvars myclean 
