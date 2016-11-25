@@ -24,7 +24,7 @@ usr/lib/proftpd/mod_sftp.so
 usr/lib/proftpd/mod_sftp_sql.so
 usr/lib/proftpd/mod_sftp_pam.so
 usr/lib/proftpd/mod_sql.so
-usr/lib/proftpd/mod_sql_passwd.so                                                                                                                           
+usr/lib/proftpd/mod_sql_passwd.so
 usr/lib/proftpd/mod_tls.so
 usr/lib/proftpd/mod_wrap2.so
 usr/lib/proftpd/mod_wrap2_file.so
@@ -36,3 +36,9 @@ usr/lib/proftpd/mod_deflate.so
 usr/lib/proftpd/mod_ifversion.so
 usr/lib/proftpd/mod_tls_memcache.so
 usr/share/locale/*
+debian/proftpd-gencert usr/sbin/
+contrib/ftpasswd usr/sbin/
+contrib/ftpquota usr/sbin/
+debian/templates/ftpusers etc/
+debian/templates/*.conf usr/share/proftpd/templates/
+debian/templates/welcome.msg usr/share/proftpd/templates/

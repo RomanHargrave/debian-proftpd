@@ -144,17 +144,14 @@ binary-arch: checkroot build install
 	rm -f debian/$(PACKAGE)/usr/share/man/man1/ftpasswd.1*
 	# removes proftpd.conf installed by upstream
 	rm -f debian/$(PACKAGE)/etc/$(NAME)/$(NAME).conf
-	
-	install -m 644 debian/templates/*.conf debian/$(PACKAGE)/usr/share/$(NAME)/templates
-	install -m 644 debian/templates/welcome.msg debian/$(PACKAGE)/usr/share/$(NAME)/templates/welcome.msg 
-	install -m 644 debian/templates/ftpusers debian/$(PACKAGE)/etc 
-	install -m 755 debian/$(PACKAGE).init debian/$(PACKAGE)/etc/init.d/$(NAME) 
-	install -m 644 debian/templates/default debian/$(PACKAGE)/etc/default/$(NAME) 
+
+	# The following two lines could be replaced by "dh_installinit -a"
+	# This needs overhaul/cleanup of {pre|post}{install|rm} scripts
+	# as dh_installinit installs own shell snippets.
+	install -m 755 debian/$(PACKAGE).init debian/$(PACKAGE)/etc/init.d/$(NAME)
+	install -m 644 debian/templates/default debian/$(PACKAGE)/etc/default/$(NAME)
+	# Not sure how to put this into a .files entry.
 	install contrib/xferstats.holger-preiss debian/$(PACKAGE)/usr/sbin/ftpstats
-	install -m 755 contrib/ftpasswd debian/$(PACKAGE)/usr/sbin/ftpasswd
-	install -m 755 contrib/ftpquota debian/$(PACKAGE)/usr/sbin/ftpquota
-	install -m 755 debian/proftpd-gencert debian/$(PACKAGE)/usr/sbin/proftpd-gencert
-	install -m 644 debian/proftpd-substvars debian/$(PACKAGE_DEV)/usr/share/$(NAME)/proftpd-substvars
 	
 	dh_installdebconf -a
 	dh_compress -a
