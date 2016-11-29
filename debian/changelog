@@ -31,13 +31,13 @@ proftpd-dfsg (1.3.5a-2) UNRELEASED; urgency=medium
   * lintian "E: proftpd-basic: init.d-script-needs-depends-on-lsb-base (...)"
   * lintian "E: proftpd-dfsg source: build-depends-on-obsolete-package
     build-depends: libmysqlclient-dev => default-libmysqlclient-dev"
-    (Closes: #845898)
   * Same URL for Vcs-Git & Vcs-Browser in control file.
   * Some suggestions by Mattia Rizzolo <mattia@debian.org> for d/rules
     - Update of config.{sub,guess} is done by dh_update_autotools_config
     - build done by dh_auto_build, instead of manual "make all"
     - call dh_auto_clean instead of manual "make distclean"
     - replace some install calls by entries in $package.install files
+    - remove "-l option" from dh_shlibdeps call
 
   [1] https://lists.debian.org/debian-devel-announce/2016/11/msg00001.html
 
