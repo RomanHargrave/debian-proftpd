@@ -145,14 +145,12 @@ binary-arch: checkroot build install
 	# removes proftpd.conf installed by upstream
 	rm -f debian/$(PACKAGE)/etc/$(NAME)/$(NAME).conf
 
-	# The following two lines could be replaced by "dh_installinit -a"
-	# This needs overhaul/cleanup of {pre|post}{install|rm} scripts
-	# as dh_installinit installs own shell snippets.
-	install -m 755 debian/$(PACKAGE).init debian/$(PACKAGE)/etc/init.d/$(NAME)
-	install -m 644 debian/templates/default debian/$(PACKAGE)/etc/default/$(NAME)
 	# Not sure how to put this into a .files entry.
 	install contrib/xferstats.holger-preiss debian/$(PACKAGE)/usr/sbin/ftpstats
 	
+	# TODO: cleanup {pre|post}{install|rm} scripts; remove
+	# --no-scripts statement.
+	dh_installinit -a --name=proftpd --no-scripts
 	dh_installdebconf -a
 	dh_compress -a
 	dh_fixperms -a
