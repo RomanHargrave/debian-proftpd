@@ -39,6 +39,7 @@ proftpd-dfsg (1.3.5a-2) UNRELEASED; urgency=medium
     - replace some install calls by entries in $package.install files
     - remove "-l option" from dh_shlibdeps call
     - install init script and defaults file using dh_installinit
+    - Some files in clean target are removed using debian/clean
 
   [1] https://lists.debian.org/debian-devel-announce/2016/11/msg00001.html
 
