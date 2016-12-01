@@ -6,7 +6,7 @@ NAME=proftpd
 VERSION=$(shell grep PROFTPD_VERSION_TEXT $(CURDIR)/include/version.h|cut -d\" -f2)
 
 #
-# HAVE_OPENSSL is required by mod_sql.c. 
+# HAVE_OPENSSL is required by mod_sql.c.
 # See #233031 for details. 
 # 
 PROFTPD_FLAGS := -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64 -DHAVE_OPENSSL -DUSE_LDAP_TLS
@@ -27,7 +27,7 @@ endif
 
 #
 # dpkg-arch rules
-# 
+#
 ifeq (,$(DEB_BUILD_GNU_TYPE))
   include debian/scripts/dpkg-arch.mk
 endif
@@ -57,23 +57,21 @@ debian/proftpd-substvars: debian/proftpd-substvars.in
 build-arch: build
 build-indep: build
 build: debian/proftpd-substvars configure-stamp build-stamp
-build-stamp: 
+build-stamp:
 	dh_testdir
-	
-	#$(MAKE) CC="$(CC)" all
 	dh_auto_build
-	
 	touch $@
 
 install: build
 	dh_testdir
 	dh_prep
 	
-	$(MAKE) DESTDIR=$(CURDIR)/debian/tmp INSTALL_STRIP="$(INSTALL_STRIP)" install
+	dh_auto_install
+	#$(MAKE) DESTDIR=$(CURDIR)/debian/tmp INSTALL_STRIP="$(INSTALL_STRIP)" install
 	#find $(CURDIR)/debian/tmp -type f \( -executable -o -name \*.so\* \) -exec hardening-check {} + || true
 
 configure: configure-stamp
-configure-stamp: 
+configure-stamp:
 	dh_testdir
 	
 	# Use current autotools helpers
@@ -106,7 +104,7 @@ myclean:
 binary-indep: checkroot build
 	dh_installdirs -i
 	dh_install -i
-	dh_installdocs -i 
+	dh_installdocs -i
 	dh_installchangelogs -i ChangeLog
 	dh_installexamples -i
 	dh_lintian -i
@@ -114,14 +112,14 @@ binary-indep: checkroot build
 	dh_compress -i
 	dh_fixperms -i
 	dh_installdeb -i
-	dh_gencontrol -i 
+	dh_gencontrol -i
 	dh_md5sums -i
 	dh_fixperms -i
 	dh_builddeb -i
 
 binary-arch: checkroot build install
 	dh_installdirs -a
-	dh_install -a 
+	dh_install -a
 	dh_installdocs -a
 	dh_installchangelogs -a ChangeLog
 	dh_installman -a
