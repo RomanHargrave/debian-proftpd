@@ -7,10 +7,10 @@ VERSION=$(shell grep PROFTPD_VERSION_TEXT $(CURDIR)/include/version.h|cut -d\" -
 
 #
 # HAVE_OPENSSL is required by mod_sql.c.
-# See #233031 for details. 
-# 
+# See #233031 for details.
+#
 PROFTPD_FLAGS := -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64 -DHAVE_OPENSSL -DUSE_LDAP_TLS
-CFLAGS := $(PROFTPD_FLAGS) 
+CFLAGS := $(PROFTPD_FLAGS)
 CC := gcc
 
 # Some special build options
@@ -82,10 +82,10 @@ configure-stamp:
 
 	touch $@
 
-clean: debian/control debian/proftpd-substvars myclean 
+clean: debian/control debian/proftpd-substvars myclean
 myclean:
 	dh_testdir
-	#[ ! -f $(CURDIR)/Makefile ] || $(MAKE) distclean 
+	#[ ! -f $(CURDIR)/Makefile ] || $(MAKE) distclean
 	dh_auto_clean
 	dh_clean
 	
