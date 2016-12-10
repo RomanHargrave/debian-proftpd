@@ -2,11 +2,11 @@ Description: Use mysql/mysql.h instead of mysql.h
 Author: Francesco Paolo Lovergine <frankie@debian.org>
 Forwarded: not needed
 
-Index: proftpd-dfsg/contrib/mod_sql_mysql.c
+Index: git/contrib/mod_sql_mysql.c
 ===================================================================
---- proftpd-dfsg.orig/contrib/mod_sql_mysql.c	2013-06-24 17:58:16.000000000 +0200
-+++ proftpd-dfsg/contrib/mod_sql_mysql.c	2013-06-24 17:58:16.000000000 +0200
-@@ -135,7 +135,7 @@
+--- git.orig/contrib/mod_sql_mysql.c	2016-12-10 20:51:54.996366780 +0100
++++ git/contrib/mod_sql_mysql.c	2016-12-10 20:51:54.988366803 +0100
+@@ -132,7 +132,7 @@
  #include "conf.h"
  #include "../contrib/mod_sql.h"
  

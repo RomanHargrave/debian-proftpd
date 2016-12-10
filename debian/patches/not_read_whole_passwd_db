@@ -4,11 +4,11 @@ Forwarded: <unknown>. Fixed in 1.3.6rc1
 Bug-Debian: http://bugs.debian.org/717235
 Description: not request the whole passwd DB at each login.
 
-Index: proftpd-dfsg-1.3.5a/modules/mod_auth.c
+Index: git/modules/mod_auth.c
 ===================================================================
---- proftpd-dfsg-1.3.5a.orig/modules/mod_auth.c	2015-05-28 02:25:54.000000000 +0200
-+++ proftpd-dfsg-1.3.5a/modules/mod_auth.c	2016-09-19 09:58:15.000000000 +0200
-@@ -838,16 +838,23 @@
+--- git.orig/modules/mod_auth.c	2016-12-10 20:55:51.120194113 +0100
++++ git/modules/mod_auth.c	2016-12-10 20:55:51.116194128 +0100
+@@ -836,16 +836,23 @@
  }
  
  static void ensure_open_passwd(pool *p) {

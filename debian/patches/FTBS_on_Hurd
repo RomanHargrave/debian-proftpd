@@ -3,10 +3,10 @@ Last-Update: 2014-07-09
 Forwarded: http://bugs.proftpd.org/show_bug.cgi?id=4050
 Bug-Debian: http://bugs.debian.org/745493
 
-Index: proftpd-dfsg_cp/contrib/mod_exec.c
+Index: git/contrib/mod_exec.c
 ===================================================================
---- proftpd-dfsg_cp.orig/contrib/mod_exec.c	2015-05-28 02:25:54.000000000 +0200
-+++ proftpd-dfsg_cp/contrib/mod_exec.c	2016-09-15 13:42:30.000000000 +0200
+--- git.orig/contrib/mod_exec.c	2016-12-10 20:53:38.884273950 +0100
++++ git/contrib/mod_exec.c	2016-12-10 20:53:38.876273944 +0100
 @@ -742,14 +742,20 @@
  
          if (fds >= 0) {
@@ -51,11 +51,11 @@ Index: proftpd-dfsg_cp/contrib/mod_exec.c
          }
  
          res = waitpid(pid, &status, WNOHANG);
-Index: proftpd-dfsg_cp/contrib/mod_sftp/keys.c
+Index: git/contrib/mod_sftp/keys.c
 ===================================================================
---- proftpd-dfsg_cp.orig/contrib/mod_sftp/keys.c	2016-09-15 13:40:43.000000000 +0200
-+++ proftpd-dfsg_cp/contrib/mod_sftp/keys.c	2016-09-15 13:42:30.000000000 +0200
-@@ -413,10 +413,15 @@
+--- git.orig/contrib/mod_sftp/keys.c	2016-12-10 20:53:38.884273950 +0100
++++ git/contrib/mod_sftp/keys.c	2016-12-10 20:53:38.876273944 +0100
+@@ -412,10 +412,15 @@
  
          if (FD_ISSET(stderr_pipe[0], &readfds)) {
            int stderrlen;
@@ -74,7 +74,7 @@ Index: proftpd-dfsg_cp/contrib/mod_sftp/keys.c
            if (stderrlen > 0) {
              while (stderrlen &&
                     (stderrbuf[stderrlen-1] == '\r' ||
-@@ -433,6 +438,7 @@
+@@ -432,6 +437,7 @@
                ": error reading stderr from '%s': %s",
                passphrase_provider, strerror(errno));
            }
@@ -82,11 +82,11 @@ Index: proftpd-dfsg_cp/contrib/mod_sftp/keys.c
          }
        }
  
-Index: proftpd-dfsg_cp/contrib/mod_tls.c
+Index: git/contrib/mod_tls.c
 ===================================================================
---- proftpd-dfsg_cp.orig/contrib/mod_tls.c	2015-05-28 02:25:54.000000000 +0200
-+++ proftpd-dfsg_cp/contrib/mod_tls.c	2016-09-15 13:42:30.000000000 +0200
-@@ -1792,10 +1792,15 @@
+--- git.orig/contrib/mod_tls.c	2016-12-10 20:53:38.884273950 +0100
++++ git/contrib/mod_tls.c	2016-12-10 20:53:38.880273947 +0100
+@@ -1800,10 +1800,15 @@
  
          if (FD_ISSET(stderr_pipe[0], &readfds)) {
            int stderrlen;
@@ -105,7 +105,7 @@ Index: proftpd-dfsg_cp/contrib/mod_tls.c
            if (stderrlen > 0) {
              while (stderrlen &&
                     (stderrbuf[stderrlen-1] == '\r' ||
-@@ -1812,6 +1817,7 @@
+@@ -1820,6 +1825,7 @@
                ": error reading stderr from '%s': %s",
                tls_passphrase_provider, strerror(errno));
            }

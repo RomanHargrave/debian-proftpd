@@ -1,5 +1,6 @@
-proftpd-dfsg (1.3.5a-2) UNRELEASED; urgency=medium
+proftpd-dfsg (1.3.5b-1) UNRELEASED; urgency=medium
 
+  [ Mahyuddin Susanto ]
   * Team upload.
   * Fix FTBFS for missing build-indep, Thanks Santiago Vila
     (Closes: #831961).
@@ -44,7 +45,12 @@ proftpd-dfsg (1.3.5a-2) UNRELEASED; urgency=medium
 
   [1] https://lists.debian.org/debian-devel-announce/2016/11/msg00001.html
 
- -- Mahyuddin Susanto <udienz@gmail.com>  Wed, 24 Aug 2016 15:23:38 -0700
+  [ Francesco Paolo Lovergine ]
+  * New upstream release. Merged patch for #809068.
+  * Patchset updated and uniformed for name.
+  * ABI version updated.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Sat, 10 Dec 2016 20:49:59 +0100
 
 proftpd-dfsg (1.3.5a-1) unstable; urgency=medium
 
