@@ -47,6 +47,7 @@ proftpd-dfsg (1.3.5b-1) UNRELEASED; urgency=medium
 
   [ Francesco Paolo Lovergine ]
   * New upstream release. Merged patch for #809068.
+    Contains fix for CVE-2016-3125 (Closes: #818492)
   * Patchset updated and uniformed for name.
   * ABI version updated.
 
