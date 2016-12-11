@@ -136,7 +136,7 @@ DONTSTART=0
 
 # update-ined is used if found, else you are on your own
 if [ -x /usr/sbin/update-inetd ]; then
-    UPDATE_INETD=/usr/sbin/update-inetd
+    UPDATE_INETD=update-inetd
 else
     UPDATE_INETD=/bin/true
 fi
