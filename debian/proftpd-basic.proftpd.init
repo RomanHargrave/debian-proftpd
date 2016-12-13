@@ -24,7 +24,7 @@ RUN="no"
 OPTIONS=""
 CONFIG_FILE=/etc/proftpd/proftpd.conf
 
-PIDFILE=`grep -i 'pidfile' $CONFIG_FILE|sed -e 's/pidfile[\t ]\+//i'`
+PIDFILE=`grep -i 'pidfile' $CONFIG_FILE|sed -e 's/[\t ]*pidfile[\t ]\+//i'`
 if [ "x$PIDFILE" = "x" ];
 then
 	PIDFILE=/run/proftpd.pid
