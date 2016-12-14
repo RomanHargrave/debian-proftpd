@@ -70,7 +70,7 @@ Package: proftpd-dev
 Architecture: any
 Depends: libacl1-dev,
          libpcre3-dev,
-         libssl-dev,
+         libssl1.0-dev,
          libtool,
          libtool-bin,
          proftpd-basic (=${binary:Version}),
