@@ -7,6 +7,8 @@ proftpd-dfsg (1.3.5b-2) unstable; urgency=medium
   * Remove shlib-calls-exit from lintian overrides (warning is gone)
   * Reformat debian/*NEWS files (kills syntax-error-in-debian-news-file,
     removed lintian override).
+  * Tighten B-D version of debhelper (dh_update_autotools_config was
+    introduced).
 
   [ Francesco Paolo Lovergine ]
   * Makes piuparts happy by removing /srv/ftp on purge 
