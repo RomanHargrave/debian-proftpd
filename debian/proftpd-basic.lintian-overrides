@@ -1,3 +1,2 @@
-proftpd-basic: syntax-error-in-debian-news-file
 proftpd-basic: binary-without-manpage
 proftpd-basic: embedded-library usr/sbin/proftpd: ltdl
