@@ -1,5 +1,3 @@
 proftpd-basic: syntax-error-in-debian-news-file
 proftpd-basic: binary-without-manpage
-proftpd-basic: shlib-calls-exit usr/lib/proftpd/mod_sftp_pam.so
-proftpd-basic: shlib-calls-exit usr/lib/proftpd/mod_rewrite.so
 proftpd-basic: embedded-library usr/sbin/proftpd: ltdl

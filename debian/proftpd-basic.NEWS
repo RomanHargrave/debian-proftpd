@@ -3,14 +3,14 @@ proftpd-dfsg (1.3.2e-1) unstable; urgency=low
     A new contributed module mod_vroot has been added to the provided modules pool.
     Note that it is *still* experimental, so use it at your own risk.
 
- -- Francesco Paolo Lovergine <frankie@debian.org>  Mon Apr 19 13:13:45 CEST 2010
-    
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Mon, 19 Apr 2010 13:13:45 +0200
+
 proftpd-dfsg (1.3.2a-1) unstable; urgency=low
 
     The traditional monthly cron job to collect statistics has been removed
-    and ftpstats is now run at logrotate execution as a post rotation job. 
+    and ftpstats is now run at logrotate execution as a post rotation job.
     You can safely remove the /etc/cron.monthly/proftpd{-basic}.disabled
-    script(s) after upgrading and customize the /etc/logrotate.d/proftpd-basic 
+    script(s) after upgrading and customize the /etc/logrotate.d/proftpd-basic
     instead as you prefer. Note that until release 1.3.2-1 the log rotation was
     also performed without using logrotate, and it has been introduced to be
     more homogeneous with other services.
@@ -21,9 +21,9 @@ proftpd-dfsg (1.3.2-1) unstable; urgency=low
 
     Starting from 1.3.2 ProFTPD supports external DSO modules development.
     External modules can be built using proftpd-dev package and its utilities
-    and files, prxs and pkg-config specifically. If you'd like some contributed 
-    modules were distributed, but they are not distributed with the main 
-    package, feel free to ask with a RFP and I will evaluate if the module is 
+    and files, prxs and pkg-config specifically. If you'd like some contributed
+    modules were distributed, but they are not distributed with the main
+    package, feel free to ask with a RFP and I will evaluate if the module is
     in shape and potentially useful for that.
 
  -- Francesco Paolo Lovergine <frankie@debian.org>  Sun, 17 Feb 2009 11:19:44 +0100
@@ -31,7 +31,7 @@ proftpd-dfsg (1.3.2-1) unstable; urgency=low
 proftpd-dfsg (1.3.1-12) unstable; urgency=low
 
     Starting from this version, exotic authentication modules have been
-    splitted into different binary packages to reduce the number of 
+    splitted into different binary packages to reduce the number of
     dependencies. For compatibility they are all installed in upgrading,
     but you can remove both all unused proftpd-mod-* modules and the
     pseudo-package proftpd, now used only for migration.
@@ -40,7 +40,7 @@ proftpd-dfsg (1.3.1-12) unstable; urgency=low
 
 proftpd-dfsg (1.3.1-10) unstable; urgency=low
 
-     A new tiny `proftpd-gencert` script is now provided to create SSL/TLS 
+     A new tiny `proftpd-gencert` script is now provided to create SSL/TLS
      self-signed certificate. The resulting key and certificate can be
      used along with the tls.conf template to provide ftps connections.
 
@@ -48,10 +48,10 @@ proftpd-dfsg (1.3.1-10) unstable; urgency=low
 
 proftpd-dfsg (1.3.1-4) unstable; urgency=low
 
-     Starting from this version a few example set of directives used 
-     for exotic authentications are splitted out in a few separate 
+     Starting from this version a few example set of directives used
+     for exotic authentications are splitted out in a few separate
      .conf files (currently LDAP, SQL and TLS related) which need
-     to be included by the main proftpd.conf file. 
+     to be included by the main proftpd.conf file.
      Their use is optional but strongly suggested. All directives
      are commented out by default.
 
@@ -78,6 +78,4 @@ proftpd-dfsg (1.3.0-1) unstable; urgency=low
      will fall back to checking the old format.  Note that this only affects
      sites which have "SQLAuthTypes Backend" in their proftpd.conf.
 
-     
  -- Francesco Paolo Lovergine <frankie@debian.org>  Mon, 6 Jun 2005 14:39:04 +0200
-

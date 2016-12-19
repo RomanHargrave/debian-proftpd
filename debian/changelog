@@ -4,6 +4,8 @@ proftpd-dfsg (1.3.5b-2) unstable; urgency=medium
   * Init script (rarely) fails in detecting pid file (Closes: #756637)
   * Fix dep of proftpd-dev (libssl-dev -> libssl1.0-dev)
     (Closes: #848124)
+  * Remove shlib-calls-exit from lintian overrides (warning is gone)
+  * Reformat debian/*NEWS files
 
   [ Francesco Paolo Lovergine ]
   * Makes piuparts happy by removing /srv/ftp on purge 
