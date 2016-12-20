@@ -9,6 +9,10 @@ proftpd-dfsg (1.3.5b-2) unstable; urgency=medium
     removed lintian override).
   * Tighten B-D version of debhelper (dh_update_autotools_config was
     introduced).
+  * Patch github_305_handling_unclosed_files
+    When handling unclosed files for an aborted SFTP session, we will need a
+    valid response pool.  So provide one.  The lack of this may have been causing
+    some segfaults. (LP: #1647094)
 
   [ Francesco Paolo Lovergine ]
   * Makes piuparts happy by removing /srv/ftp on purge 

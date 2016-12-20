@@ -14,3 +14,4 @@ contrib_hardening_flags
 FTBS_on_Hurd
 reproducible_build
 not_read_whole_passwd_db
+github_305_handling_unclosed_files
