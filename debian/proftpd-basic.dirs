@@ -1,5 +1,3 @@
-etc/proftpd
+etc/cron.monthly
 etc/proftpd/conf.d
-usr/share/proftpd
 var/log/proftpd
-usr/share/locale
