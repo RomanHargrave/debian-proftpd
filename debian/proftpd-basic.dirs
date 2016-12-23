@@ -1,13 +1,5 @@
-etc/init.d
-etc/cron.monthly
-etc/default
-etc/pam.d
-usr/bin
-usr/sbin
-usr/lib/proftpd
 etc/proftpd
 etc/proftpd/conf.d
 usr/share/proftpd
-usr/share/proftpd/templates
 var/log/proftpd
 usr/share/locale
