@@ -15,3 +15,4 @@ FTBS_on_Hurd
 reproducible_build
 not_read_whole_passwd_db
 github_305_handling_unclosed_files
+bug_4277_deb_823409

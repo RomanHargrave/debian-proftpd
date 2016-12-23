@@ -13,6 +13,9 @@ proftpd-dfsg (1.3.5b-2) unstable; urgency=medium
     When handling unclosed files for an aborted SFTP session, we will
     need a valid response pool.  So provide one.  The lack of this may have
     been causing some segfaults. (LP: #1647094)
+  * Patch bug_4277_deb_823409
+    Upstream identified another Memleak, occuring when /uploading/ large
+    files; affects only 1.3.5 line. Patch hopefully (Closes: #823409).
 
   [ Francesco Paolo Lovergine ]
   * Makes piuparts happy by removing /srv/ftp on purge 
