@@ -169,9 +169,6 @@ if [ "$1" = "configure" ]; then
     do_update /etc/proftpd/ldap.conf
     do_update /etc/proftpd/virtuals.conf
 
-    # Proftpd could not close all of its fd nicely
-    db_stop
-
     # clean run files (pidfile and scoreboard)
     rm -f /run/proftpd/proftpd* /run/proftpd.pid 
 
