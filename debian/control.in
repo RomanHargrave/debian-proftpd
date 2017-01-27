@@ -29,7 +29,6 @@ Vcs-Browser: https://anonscm.debian.org/git/pkg-proftpd/proftpd-dfsg.git
 Package: proftpd-basic
 Architecture: any
 Depends: adduser,
-         debconf (>= 0.5.00),
          debianutils (>= 1.21.0),
          libpam-runtime (>= 0.76-13.1),
          netbase (>= 4.13),

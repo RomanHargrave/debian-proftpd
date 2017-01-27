@@ -68,21 +68,6 @@ scoreboard()
     fi
 }
 
-
-switch_on()
-{
-    if [ -f $CONF_NEW ] ; then
-	sed -i -e 's/^\(ServerType.*\)inetd/\1standalone/' $CONF_NEW 
-    fi
-}
-
-switch_off()
-{
-    if [ -f $CONF_NEW ] ; then
-	sed -i -e 's/^\(ServerType.*\)standalone/\1inetd/' $CONF_NEW
-    fi
-}
-
 include_modules()
 {
     if [ -f $CONF_NEW ] ; then
@@ -160,16 +145,7 @@ if [ "$1" = "configure" ]; then
     
     # update-inetd does not manage hostlist prefix to service, at least avoid to add a duplicated line
     if [ -f /etc/inetd.conf -a $(grep -qs '^([[:alnum:],.]+)?:?ftp[[:space:]]+' /etc/inetd.conf|wc -l) -eq 0 ]; then
-    	$UPDATE_INETD --group STANDARD --add 'ftp	stream	tcp	nowait	root /usr/sbin/tcpd /usr/sbin/proftpd' 
-    fi
-
-    db_get shared/proftpd/inetd_or_standalone
-    if [ "$RET" = "from inetd" ] ; then
-	    $UPDATE_INETD --enable ftp 
-        switch_off
-    else
-	    $UPDATE_INETD --disable ftp 
-        switch_on
+    	$UPDATE_INETD --group STANDARD --add '#<off># ftp	stream	tcp	nowait	root /usr/sbin/tcpd /usr/sbin/proftpd' 
     fi
 
     add_sysuser

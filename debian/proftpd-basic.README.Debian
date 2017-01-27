@@ -96,6 +96,34 @@ case is
 	Allow ::ffff:A.B.C.D/120
 	Deny all
 
+** Running proftpd in non standalone configuration
+
+It is strongly preferred using proftpd as a daemon for any serious
+use. In some cases, the admin could be interested in using one of the
+superservers (inetd/xinetd) to run proftpd instances. That could be done
+by changing from 'standalone' to 'inetd' the ServerType entry in
+/etc/proftpd/proftpd.conf and enabling the service in /etc/inetd.conf
+by running
+
+	update-inetd --enable proftpd 
+
+or adding the proper xinetd snippet under /etc/xinet.d. For example:
+
+/etc/xinet.d/proftpd:
+
+	service ftp
+	{
+	disable = no
+	type = INTERNAL
+	socket_type = stream
+	protocol = tcp
+	user = root
+	wait = no
+	server = /usr/sbin/proftpd
+	}
+
+It is also possible using systemd support for socket, but this is still discouraged
+and buggy in 1.3.5 branch.
 
 ** Other information
 

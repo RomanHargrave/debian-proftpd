@@ -20,10 +20,10 @@ proftpd-dfsg (1.3.5b-2) unstable; urgency=medium
 
   [ Francesco Paolo Lovergine ]
   * Makes piuparts happy by removing /srv/ftp on purge 
-  * Removed explicit db_get which should be superfluous due to defaults.
+  * Removed debconf support and added NEWS entry to warn about that.
     (Closes: #820984)
 
- -- Francesco Paolo Lovergine <frankie@debian.org>  Sun, 18 Dec 2016 21:00:19 +0100
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Thu, 26 Jan 2017 13:23:53 +0100
 
 proftpd-dfsg (1.3.5b-1) unstable; urgency=medium
 
