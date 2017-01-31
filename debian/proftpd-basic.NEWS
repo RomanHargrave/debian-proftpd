@@ -1,3 +1,21 @@
+proftpd-dfsg (1.3.5b-3) unstable; urgency=medium
+
+    Starting from this version, proftpd works by default in standalone mode at
+    its first install. It is still possible to use inetd/xinetd mode, but the
+    admin has to manage that manually by update-inetd or configuring xinetd.
+    Some information about that are provided in the accompanying doc
+    /usr/share/doc/proftpd-basic/README.Debian.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Fri, 27 Jan 2017 14:44:31 +0100
+
+proftpd-dfsg (1.3.2e-3) unstable; urgency=low
+
+    This version adds the useful contributed module mod_vroot, which is still not
+    part of the standard modules. It can be used for providing shared
+    directories under chrooted environments, among other useful features.
+    A new template 'virtuals.conf' is provided also to keep things
+    ordered about vhosts/vroots and show some examples.
+
 proftpd-dfsg (1.3.2e-1) unstable; urgency=low
 
     A new contributed module mod_vroot has been added to the provided modules pool.
