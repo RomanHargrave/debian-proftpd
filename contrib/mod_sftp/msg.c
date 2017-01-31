@@ -1,6 +1,6 @@
 /*
  * ProFTPD - mod_sftp message format
- * Copyright (c) 2008-2013 TJ Saunders
+ * Copyright (c) 2008-2016 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,8 +20,6 @@
  * give permission to link this program with OpenSSL, and distribute the
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
- *
- * $Id: msg.c,v 1.16 2013-10-07 01:29:05 castaglia Exp $
  */
 
 #include "mod_sftp.h"
@@ -33,7 +31,6 @@
 #ifdef HAVE_EXECINFO_H
 # include <execinfo.h>
 #endif
-
 
 #ifdef PR_USE_OPENSSL_ECC
 /* Max GFp field length = 528 bits.  SEC1 uncompressed encoding uses 2
@@ -198,41 +195,51 @@ uint64_t sftp_msg_read_long(pool *p, unsigned char **buf, uint32_t *buflen) {
 
 BIGNUM *sftp_msg_read_mpint(pool *p, unsigned char **buf, uint32_t *buflen) {
   BIGNUM *mpint = NULL;
-  const unsigned char *data = NULL;
-  uint32_t datalen = 0;
+  const unsigned char *data = NULL, *ptr = NULL;
+  uint32_t datalen = 0, len = 0;
 
-  datalen = sftp_msg_read_int(p, buf, buflen);
+  len = sftp_msg_read_int(p, buf, buflen);
 
-  if (*buflen < datalen) {
+  if (*buflen < len) {
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
       "message format error: unable to read %lu bytes of mpint (buflen = %lu)",
-      (unsigned long) datalen, (unsigned long) *buflen);
+      (unsigned long) len, (unsigned long) *buflen);
     log_stacktrace();
     SFTP_DISCONNECT_CONN(SFTP_SSH2_DISCONNECT_BY_APPLICATION, NULL);
   }
 
-  if (datalen > (1024 * 16)) {
+  if (len > (1024 * 16)) {
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
       "message format error: unable to handle mpint of %lu bytes",
-      (unsigned long) datalen);
+      (unsigned long) len);
     log_stacktrace();
     SFTP_DISCONNECT_CONN(SFTP_SSH2_DISCONNECT_BY_APPLICATION, NULL);
   }
 
-  data = (const unsigned char *) sftp_msg_read_data(p, buf, buflen, datalen);
-  if (data == NULL) {
+  ptr = (const unsigned char *) sftp_msg_read_data(p, buf, buflen, len);
+  if (ptr == NULL) {
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
       "message format error: unable to read %lu bytes of mpint data",
-      (unsigned long) datalen);
+      (unsigned long) len);
     log_stacktrace();
     SFTP_DISCONNECT_CONN(SFTP_SSH2_DISCONNECT_BY_APPLICATION, NULL);
   }
 
-  if (data[0] & 0x80) {
+  if ((ptr[0] & 0x80) != 0) {
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
       "message format error: negative mpint numbers not supported");
     log_stacktrace();
     SFTP_DISCONNECT_CONN(SFTP_SSH2_DISCONNECT_BY_APPLICATION, NULL);
+  }
+
+  /* Trim any leading zeros. */
+  data = ptr;
+  datalen = len;
+  while (datalen > 0 &&
+         *data == 0x00) {
+    pr_signals_handle();
+    data++;
+    datalen--;
   }
 
   mpint = BN_bin2bn(data, (int) datalen, NULL);
@@ -446,13 +453,15 @@ uint32_t sftp_msg_write_mpint(unsigned char **buf, uint32_t *buflen,
     return sftp_msg_write_int(buf, buflen, 0);
   }
 
-  if (mpint->neg) {
+#if OPENSSL_VERSION_NUMBER >= 0x0090801fL
+  if (BN_is_negative(mpint)) {
     (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
       "message format error: unable to write mpint (negative numbers not "
       "supported)");
     log_stacktrace();
     SFTP_DISCONNECT_CONN(SFTP_SSH2_DISCONNECT_BY_APPLICATION, NULL);
   }
+#endif /* OpenSSL-0.9.8a or later */
 
   datalen = BN_num_bytes(mpint) + 1;
 
