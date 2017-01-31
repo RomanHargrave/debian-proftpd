@@ -3,11 +3,11 @@ Last-Update: 2014-07-09
 Forwarded: http://bugs.proftpd.org/show_bug.cgi?id=4050
 Bug-Debian: http://bugs.debian.org/745493
 
-Index: git/contrib/mod_exec.c
+Index: proftpd-dfsg/contrib/mod_exec.c
 ===================================================================
---- git.orig/contrib/mod_exec.c	2016-12-10 20:53:38.884273950 +0100
-+++ git/contrib/mod_exec.c	2016-12-10 20:53:38.876273944 +0100
-@@ -742,14 +742,20 @@
+--- proftpd-dfsg.orig/contrib/mod_exec.c
++++ proftpd-dfsg/contrib/mod_exec.c
+@@ -742,14 +742,20 @@ static int exec_ssystem(cmd_rec *cmd, co
  
          if (fds >= 0) {
            int buflen;
@@ -31,7 +31,7 @@ Index: git/contrib/mod_exec.c
              if (buflen > 0) {
                if (exec_opts & EXEC_OPT_SEND_STDOUT) {
  
-@@ -796,9 +802,9 @@
+@@ -796,9 +802,9 @@ static int exec_ssystem(cmd_rec *cmd, co
            }
  
            if (FD_ISSET(exec_stderr_pipe[0], &readfds)) {
@@ -43,7 +43,7 @@ Index: git/contrib/mod_exec.c
              if (buflen > 0) {
  
                /* Trim trailing CRs and LFs. */
-@@ -828,6 +834,7 @@
+@@ -828,6 +834,7 @@ static int exec_ssystem(cmd_rec *cmd, co
                }
              }
            }
@@ -51,11 +51,11 @@ Index: git/contrib/mod_exec.c
          }
  
          res = waitpid(pid, &status, WNOHANG);
-Index: git/contrib/mod_sftp/keys.c
+Index: proftpd-dfsg/contrib/mod_sftp/keys.c
 ===================================================================
---- git.orig/contrib/mod_sftp/keys.c	2016-12-10 20:53:38.884273950 +0100
-+++ git/contrib/mod_sftp/keys.c	2016-12-10 20:53:38.876273944 +0100
-@@ -412,10 +412,15 @@
+--- proftpd-dfsg.orig/contrib/mod_sftp/keys.c
++++ proftpd-dfsg/contrib/mod_sftp/keys.c
+@@ -412,10 +412,15 @@ static int exec_passphrase_provider(serv
  
          if (FD_ISSET(stderr_pipe[0], &readfds)) {
            int stderrlen;
@@ -74,7 +74,7 @@ Index: git/contrib/mod_sftp/keys.c
            if (stderrlen > 0) {
              while (stderrlen &&
                     (stderrbuf[stderrlen-1] == '\r' ||
-@@ -432,6 +437,7 @@
+@@ -432,6 +437,7 @@ static int exec_passphrase_provider(serv
                ": error reading stderr from '%s': %s",
                passphrase_provider, strerror(errno));
            }
@@ -82,11 +82,11 @@ Index: git/contrib/mod_sftp/keys.c
          }
        }
  
-Index: git/contrib/mod_tls.c
+Index: proftpd-dfsg/contrib/mod_tls.c
 ===================================================================
---- git.orig/contrib/mod_tls.c	2016-12-10 20:53:38.884273950 +0100
-+++ git/contrib/mod_tls.c	2016-12-10 20:53:38.880273947 +0100
-@@ -1800,10 +1800,15 @@
+--- proftpd-dfsg.orig/contrib/mod_tls.c
++++ proftpd-dfsg/contrib/mod_tls.c
+@@ -1864,10 +1864,15 @@ static int tls_exec_passphrase_provider(
  
          if (FD_ISSET(stderr_pipe[0], &readfds)) {
            int stderrlen;
@@ -105,7 +105,7 @@ Index: git/contrib/mod_tls.c
            if (stderrlen > 0) {
              while (stderrlen &&
                     (stderrbuf[stderrlen-1] == '\r' ||
-@@ -1820,6 +1825,7 @@
+@@ -1884,6 +1889,7 @@ static int tls_exec_passphrase_provider(
                ": error reading stderr from '%s': %s",
                tls_passphrase_provider, strerror(errno));
            }
