@@ -1,6 +1,6 @@
 /*
  * ProFTPD - mod_sftp sftp
- * Copyright (c) 2008-2015 TJ Saunders
+ * Copyright (c) 2008-2016 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -2616,7 +2616,7 @@ static struct fxp_handle *fxp_handle_create(pool *p) {
      */
     pr_signals_handle();
 
-    RAND_pseudo_bytes(data, data_len);
+    RAND_bytes(data, data_len);
 
     /* Encode the data as hex to create the handle ID. */
     for (i = 0; i < data_len; i++) {
@@ -9034,7 +9034,7 @@ static void fxp_trace_v6_realpath_flags(pool *p, unsigned char flags) {
 }
 
 static int fxp_handle_realpath(struct fxp_packet *fxp) {
-  unsigned char *buf, *ptr, realpath_flags = 0;
+  unsigned char *buf, *ptr, realpath_flags = SSH2_FXRP_NO_CHECK;
   char *path;
   uint32_t buflen, bufsz;
   struct stat st;
@@ -9074,7 +9074,6 @@ static int fxp_handle_realpath(struct fxp_packet *fxp) {
      *
      * for the semantics and defaults of these crazy flags.
      */
-    realpath_flags = SSH2_FXRP_NO_CHECK;
 
     if (fxp->payload_sz >= sizeof(char)) {
       char *composite_path;
@@ -11601,6 +11600,12 @@ int sftp_fxp_handle_packet(pool *p, void *ssh2, uint32_t channel_id,
 
     pr_response_set_pool(fxp->pool);
 
+    /* Make sure to clear the response lists of any cruft from previous
+     * requests.
+     */
+    pr_response_clear(&resp_list);
+    pr_response_clear(&resp_err_list);
+
     switch (fxp->request_type) {
       case SFTP_SSH2_FXP_INIT:
         /* If we already know the version, then the client has sent
@@ -11908,6 +11913,11 @@ int sftp_fxp_close_session(uint32_t channel_id) {
           (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
             "aborting %d unclosed file %s", count,
             count != 1 ? "handles" : "handle");
+
+          /* Make sure that any abort processing has a valid response pool to
+           * work with.
+           */
+          pr_response_set_pool(sess->pool);
 
           res = pr_table_do(sess->handle_tab, fxp_handle_abort, callback_data,
             PR_TABLE_DO_FL_ALL);
