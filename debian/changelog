@@ -19,10 +19,12 @@ proftpd-dfsg (1.3.5d-1) UNRELEASED; urgency=medium
     files; affects only 1.3.5 line. Patch hopefully (Closes: #823409).
 
   [ Francesco Paolo Lovergine ]
-  * New upstream release. Patchset updated to remove already included patches.
+  * New upstream release. (Closes: #854369)
+    * Patchset updated to remove already included patches.
+    * Build w/ OpenSSL 1.1. Do it (Closes: #828513)
   * Makes piuparts happy by removing /srv/ftp on purge 
-  * Removed debconf support and added a proftpd-basic.NEWS entry to warn about that.
-    (Closes: #820984)
+  * Removed debconf support and added a proftpd-basic.NEWS entry to warn about
+    that. (Closes: #820984)
 
  -- Francesco Paolo Lovergine <frankie@debian.org>  Thu, 26 Jan 2017 13:23:53 +0100
 
