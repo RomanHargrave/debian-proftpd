@@ -169,6 +169,10 @@ if [ "$1" = "configure" ]; then
     do_update /etc/proftpd/ldap.conf
     do_update /etc/proftpd/virtuals.conf
 
+	# be safe and change permissions for .conf files where passwords should
+	# potentially be present
+	chmod 600 /etc/proftpd/sql.conf* /etc/proftpd/ldap.conf* || true
+
     # clean run files (pidfile and scoreboard)
     rm -f /run/proftpd/proftpd* /run/proftpd.pid 
 
