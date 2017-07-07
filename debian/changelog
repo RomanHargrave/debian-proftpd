@@ -1,6 +1,8 @@
 proftpd-dfsg (1.3.5e-1) UNRELEASED; urgency=medium
 
   * New upstream version. Patchset updated.
+  * At postinst change permissions of some *.conf files
+    (closes: #638955)
 
  -- Francesco Paolo Lovergine <frankie@debian.org>  Fri, 07 Jul 2017 12:06:53 +0200
 
