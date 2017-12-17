@@ -40,7 +40,8 @@ CONF_ARGS := --prefix=/usr \
 	     --with-includes=$(shell pg_config --includedir):$(shell mysql_config --include|sed -e 's/-I//') \
 	     --mandir=/usr/share/man --sysconfdir=/etc/$(NAME) --localstatedir=/run --libexecdir=/usr/lib/$(NAME) \
 	     --enable-sendfile --enable-facl --enable-dso --enable-autoshadow --enable-ctrls --with-modules=mod_readme \
-	     --enable-ipv6 --enable-nls --enable-memcache --with-lastlog=/var/log/lastlog --enable-pcre $(DEVELOPT)
+	     --enable-ipv6 --enable-nls --enable-memcache --with-lastlog=/var/log/lastlog --enable-pcre $(DEVELOPT) \
+	     --disable-strip
 
 ifeq ($(DEB_BUILD_GNU_TYPE), $(DEB_HOST_GNU_TYPE))
   CONF_ARGS += --build $(DEB_HOST_GNU_TYPE)
@@ -144,8 +145,8 @@ binary-arch: checkroot build install
 	dh_shlibdeps -a
 	dh_installdeb -a
 	dh_perl -a
-	dh_gencontrol -a
 	dh_strip -a
+	dh_gencontrol -a
 	dh_md5sums -a
 	dh_fixperms -a
 	dh_builddeb -a
