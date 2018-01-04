@@ -1,15 +1,17 @@
 proftpd-dfsg (1.3.5e-1) UNRELEASED; urgency=medium
 
-  * New upstream version. Patchset updated.
-  * At postinst change permissions of some *.conf files
-    (closes: #638955)
-
   [ Hilmar Preuße ]
   * Disable stripping in install stage, leave that job to dh tools.
     Thanks to Helmut Grohne <helmut@subdivi.de> for report and patch.
     (Closes: #884558)
   * Call "dh_strip -a" before "dh_gencontrol -a" to generate dbgsym
     packages.
+
+  [ Francesco Paolo Lovergine ]
+  * New upstream version. Patchset updated.
+  * At postinst change permissions of some *.conf files
+    (closes: #638955)
+  * Removed autotools_dev b-d, now obsoleted by current debhelper.
 
  -- Francesco Paolo Lovergine <frankie@debian.org>  Fri, 07 Jul 2017 12:06:53 +0200
 
