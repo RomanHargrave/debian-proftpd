@@ -65,7 +65,7 @@ then
 	fi
 fi
 
-# /var/run could be on a tmpfs
+# /run could be on a tmpfs
 
 [ ! -d /run/proftpd ] && mkdir /run/proftpd
 

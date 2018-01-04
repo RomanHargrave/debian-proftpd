@@ -12,6 +12,11 @@ proftpd-dfsg (1.3.5e-1) UNRELEASED; urgency=medium
   * At postinst change permissions of some *.conf files
     (closes: #638955)
   * Removed autotools_dev b-d, now obsoleted by current debhelper.
+  * Removed explicit path for update-inetd in postinst and postrm to make
+    lintian happy
+  * Policy bumped to 4.1.3.
+  		- Recommends proftpd-doc as for 4.0.0.
+        - Do not invoke /etc/init.d script even as fallback as for 4.0.0 
 
  -- Francesco Paolo Lovergine <frankie@debian.org>  Fri, 07 Jul 2017 12:06:53 +0200
 

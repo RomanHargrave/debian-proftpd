@@ -120,7 +120,7 @@ DONTSTART=0
 . /usr/share/debconf/confmodule
 
 # update-ined is used if found, else you are on your own
-if [ -x /usr/sbin/update-inetd ]; then
+if [ ! -z `which update-inetd` ]; then
     UPDATE_INETD=update-inetd
 else
     UPDATE_INETD=/bin/true

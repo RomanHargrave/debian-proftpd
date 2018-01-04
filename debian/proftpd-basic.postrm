@@ -4,7 +4,7 @@ set -e
 
 if [ "$1" = "disappear" -o "$1" = "remove" ]
 then
-    if [ -x /usr/sbin/update-inetd ]
+	if [ ! -z `which update-inetd` ]
     then
         update-inetd --disable ftp
     fi
