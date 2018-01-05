@@ -179,7 +179,7 @@ if [ "$1" = "configure" ]; then
 fi
 
 if [ -e "/etc/init.d/proftpd" ]; then
-    update-rc.d proftpd defaults 50 >/dev/null
+    update-rc.d proftpd defaults >/dev/null
     if [ $DONTSTART -eq 0 ] ; then
         set +e 
 	    proftpd -t >/dev/null 2>&1
