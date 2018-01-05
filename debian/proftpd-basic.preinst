@@ -11,16 +11,6 @@ set -e
 
 if [ "$1" = "upgrade" ]; then
      invoke-rc.d proftpd stop >/dev/null 2>&1 || true 
-     # Scoreboard file format changed in 1.2.9
-     # Now stopping all inetd sessions and removing it to ensure
-     # a clean upgrade
-     if dpkg --compare-versions "$2" lt "1.2.9-1"; then
-            if [ `pgrep proftpd|wc -l` -ne 0 ]; then
-                    pkill proftpd
-                    sleep 2
-            fi
-            rm -f /run/proftpd/proftpd.scoreboard
-     fi
 fi
 
 exit 0
