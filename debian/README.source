@@ -2,16 +2,15 @@ ProFTPD source for Debian
 -------------------------
 
 This source is created by pre-stripping RFC documents generally
-included in upstream tarballs. A good set of functional fixes
-taken from upstream CVS are also included by means of quilt (see
-/usr/share/doc/quilt/README.gz for details about the
-program). Debian patches are named after the related bug ID on
-bugzilla.proftpd.org, in order to simplify checking of merged changes at
-every new upstream release: by comparing changelog.Debian and upstream
-NEWS files superfluous patches are easily found.
+included in upstream tarballs. A good set of functional fixes taken
+from upstream git repository are also included by means of quilt (see
+/usr/share/doc/quilt/README.gz for details about the program). Debian
+patches are named after the related bug ID on bugzilla.proftpd.org,
+in order to simplify checking of merged changes at every new upstream
+release: by comparing changelog.Debian and upstream NEWS files
+superfluous patches are easily found.
 
-Note that since 1.3.2, upstream CVS has a proper stable branch which 
-should be followed instead of HEAD for useful fixes.
+Note that since 1.3.2, upstream git repository has a proper stable
+branch which should be followed instead of master for useful fixes.
 
- -- Francesco Paolo Lovergine <frankie@debian.org>  Thu Feb 10 09:52:47 CET 2011
-
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Fri Jan  5 10:04:28 CET 2018
