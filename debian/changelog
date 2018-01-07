@@ -6,7 +6,10 @@ proftpd-dfsg (1.3.5e-1) unstable; urgency=medium
     (Closes: #884558)
   * Call "dh_strip -a" before "dh_gencontrol -a" to generate dbgsym
     packages.
-  * update update-rc.d command in postin script
+  * postin script:
+    - update update-rc.d command: don't specify runlevel
+    - don't set DONTSTART and don't check for its value
+      (probably relics from debconf times)
 
   [ Francesco Paolo Lovergine ]
   * New upstream version. Patchset updated.

@@ -115,8 +115,6 @@ EOF
 	fi
 }
 
-DONTSTART=0
-
 . /usr/share/debconf/confmodule
 
 # update-ined is used if found, else you are on your own
@@ -180,17 +178,14 @@ fi
 
 if [ -e "/etc/init.d/proftpd" ]; then
     update-rc.d proftpd defaults >/dev/null
-    if [ $DONTSTART -eq 0 ] ; then
-        set +e 
-	    proftpd -t >/dev/null 2>&1
-    	if [ $? = 0 ]; then
-		set -e
-		invoke-rc.d proftpd start || true
-	else
-		echo "Cannot start proftpd, please check syntax of your configuration file $CONF"
-	fi
+    set +e 
+    proftpd -t >/dev/null 2>&1
+    if [ $? = 0 ]; then
+	set -e
+	invoke-rc.d proftpd start || true
+    else
+	echo "Cannot start proftpd, please check syntax of your configuration file $CONF"
     fi
 fi
 
 #DEBHELPER#
-
