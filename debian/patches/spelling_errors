@@ -1,0 +1,60 @@
+Description: Fixed some spelling errors in sources
+Author: Francesco Paolo Lovergine <frankie@debian.org>
+Last-Update: 2017-01-09
+Forwarded: https://github.com/proftpd/proftpd/pull/666
+
+--- proftpd-dfsg.orig/contrib/mod_sftp/date.c
++++ proftpd-dfsg/contrib/mod_sftp/date.c
+@@ -126,7 +126,7 @@
+       case '?':
+         /* Ignore unsupported options */
+         (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+-          "ingoring supported date(1) option '%c'", (char) optopt);
++          "ignoring supported date(1) option '%c'", (char) optopt);
+         break;
+     }
+   }
+--- proftpd-dfsg.orig/contrib/mod_sftp/keys.c
++++ proftpd-dfsg/contrib/mod_sftp/keys.c
+@@ -938,7 +938,7 @@
+ 
+     if (sftp_keys_validate_ecdsa_params(curve, point) < 0) {
+       (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+-        "erorr validating EC public key: %s", strerror(errno));
++        "error validating EC public key: %s", strerror(errno));
+       EC_POINT_free(point);
+       EC_KEY_free(ec);
+       return NULL;
+--- proftpd-dfsg.orig/contrib/mod_tls.c
++++ proftpd-dfsg/contrib/mod_tls.c
+@@ -1332,7 +1332,7 @@
+   if (idx < 0) {
+     pr_trace_msg(trace_channel, 12,
+       "unable to check certificate CommonName against '%s': "
+-      "no CommoName atribute found", name);
++      "no CommoName attribute found", name);
+     return 0;
+   }
+ 
+--- proftpd-dfsg.orig/doc/utils/ftpwho.html
++++ proftpd-dfsg/doc/utils/ftpwho.html
+@@ -13,7 +13,7 @@
+ 
+ The <B>ftpwho</B> command shows process information for all active proftpd
+ connections, and a count of all connected users off of each server.  Proftpd
+-sesssions spawned from inetd are counted seperately from those created by a
++sessions spawned from inetd are counted seperately from those created by a
+ master proftpd <I>standalone</I> server.
+ 
+ <H2>OPTIONS</H2>
+--- proftpd-dfsg.orig/utils/ftpwho.1.in
++++ proftpd-dfsg/utils/ftpwho.1.in
+@@ -10,7 +10,7 @@
+ The
+ .BI ftpwho
+ command shows process information for all active proftpd connections,
+-and a count of all connected users off of each server.  Proftpd sesssions
++and a count of all connected users off of each server.  Proftpd sessions
+ spawned from inetd are counted separately from those created by a
+ master proftpd
+ .I standalone
