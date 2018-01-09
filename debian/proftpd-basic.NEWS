@@ -1,4 +1,4 @@
-proftpd-dfsg (1.3.5d-1) UNRELEASED; urgency=medium
+proftpd-dfsg (1.3.5d-1) unstable; urgency=medium
 
     Starting from this version, proftpd works by default in standalone mode at
     its first install. It is still possible to use inetd/xinetd mode, but the
