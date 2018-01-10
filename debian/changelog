@@ -6,7 +6,7 @@ proftpd-dfsg (1.3.5e-1) unstable; urgency=medium
     (Closes: #884558)
   * Call "dh_strip -a" before "dh_gencontrol -a" to generate dbgsym
     packages.
-  * postin script:
+  * postinst script:
     - update update-rc.d command: don't specify runlevel
     - don't set DONTSTART and don't check for its value
       (probably relics from debconf times)
@@ -25,7 +25,7 @@ proftpd-dfsg (1.3.5e-1) unstable; urgency=medium
   * Fixed target in recent NEWS file issue to make lintian happy.
   * Fixed various spelling errors with new patch.
 
- -- Francesco Paolo Lovergine <frankie@debian.org>  Fri, 05 Jan 2018 10:03:40 +0100
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Wed, 10 Jan 2018 09:44:28 +0100
 
 proftpd-dfsg (1.3.5d-1) unstable; urgency=medium
 
