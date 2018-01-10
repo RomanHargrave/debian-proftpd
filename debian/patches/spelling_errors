@@ -25,6 +25,24 @@ Forwarded: https://github.com/proftpd/proftpd/pull/666
        EC_POINT_free(point);
        EC_KEY_free(ec);
        return NULL;
+@@ -1809,7 +1809,7 @@
+       if (sftp_keys_validate_ecdsa_params(EC_KEY_get0_group(ec),
+           EC_KEY_get0_public_key(ec)) < 0) {
+         (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+-          "erorr validating EC public key: %s", strerror(errno));
++          "error validating EC public key: %s", strerror(errno));
+         EC_KEY_free(ec);
+         EVP_PKEY_free(pkey);
+         return -1;
+@@ -1817,7 +1817,7 @@
+ 
+       if (validate_ecdsa_private_key(ec)) {
+         (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+-          "erorr validating EC private key: %s", strerror(errno));
++          "error validating EC private key: %s", strerror(errno));
+         EC_KEY_free(ec);
+         EVP_PKEY_free(pkey);
+         return -1;
 --- proftpd-dfsg.orig/contrib/mod_tls.c
 +++ proftpd-dfsg/contrib/mod_tls.c
 @@ -1332,7 +1332,7 @@
@@ -36,6 +54,24 @@ Forwarded: https://github.com/proftpd/proftpd/pull/666
      return 0;
    }
  
+@@ -1340,7 +1340,7 @@
+   if (cn_entry == NULL) {
+     pr_trace_msg(trace_channel, 12,
+       "unable to check certificate CommonName against '%s': "
+-      "error obtaining CommoName atribute found: %s", name, tls_get_errors());
++      "error obtaining CommoName attribute found: %s", name, tls_get_errors());
+     return 0;
+   }
+ 
+@@ -1349,7 +1349,7 @@
+   if (cn_asn1 == NULL) {
+     pr_trace_msg(trace_channel, 12,
+       "unable to check certificate CommonName against '%s': "
+-      "error converting CommoName atribute to ASN.1: %s", name,
++      "error converting CommoName attribute to ASN.1: %s", name,
+       tls_get_errors());
+     return 0;
+   }
 --- proftpd-dfsg.orig/doc/utils/ftpwho.html
 +++ proftpd-dfsg/doc/utils/ftpwho.html
 @@ -13,7 +13,7 @@
@@ -58,3 +94,14 @@ Forwarded: https://github.com/proftpd/proftpd/pull/666
  spawned from inetd are counted separately from those created by a
  master proftpd
  .I standalone
+--- proftpd-dfsg.orig/contrib/mod_ldap.c
++++ proftpd-dfsg/contrib/mod_ldap.c
+@@ -856,7 +856,7 @@
+   cached_quota->nelts = 1;
+ 
+   (void) pr_log_writefile(ldap_logfd, MOD_LDAP_VERSION,
+-    "parsing ftpQuota atribute value '%s'", str);
++    "parsing ftpQuota attribute value '%s'", str);
+ 
+   while ((token = strsep(&str, ","))) {
+     pr_signals_handle();
