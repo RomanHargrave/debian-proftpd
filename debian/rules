@@ -32,6 +32,8 @@ ifeq (,$(DEB_BUILD_GNU_TYPE))
   include debian/scripts/dpkg-arch.mk
 endif
 
+include /usr/share/dpkg/buildflags.mk
+
 DSOMODS1 = mod_unique_id:mod_site_misc:mod_load:mod_ban:mod_quotatab:mod_sql:mod_sql_mysql:mod_sql_postgres:mod_sql_sqlite:mod_sql_odbc:mod_dynmasq:
 DSOMODS2 = mod_quotatab_sql:mod_ldap:mod_quotatab_ldap:mod_ratio:mod_tls:mod_rewrite:mod_radius:mod_wrap:mod_wrap2:mod_wrap2_file:
 DSOMODS3 = mod_wrap2_sql:mod_quotatab_file:mod_quotatab_radius:mod_facl:mod_ctrls_admin:mod_copy:mod_deflate:mod_ifversion:mod_tls_memcache:
@@ -68,8 +70,6 @@ install: build
 	dh_prep
 	
 	dh_auto_install
-	#$(MAKE) DESTDIR=$(CURDIR)/debian/tmp INSTALL_STRIP="$(INSTALL_STRIP)" install
-	#find $(CURDIR)/debian/tmp -type f \( -executable -o -name \*.so\* \) -exec hardening-check {} + || true
 
 configure: configure-stamp
 configure-stamp:
@@ -77,9 +77,7 @@ configure-stamp:
 	
 	# Use current autotools helpers
 	dh_update_autotools_config
-	
-	./configure $(shell dpkg-buildflags --export=configure) $(CONF_ARGS) --with-shared=$(DSOMODS1)$(DSOMODS2)$(DSOMODS3)$(DSOMODS4)
-	#dh_auto_configure -- $(CONF_ARGS) --with-shared=$(DSOMODS1)$(DSOMODS2)$(DSOMODS3)$(DSOMODS4)
+	dh_auto_configure -- $(CONF_ARGS) --with-shared=$(DSOMODS1)$(DSOMODS2)$(DSOMODS3)$(DSOMODS4)
 
 	touch $@
 
