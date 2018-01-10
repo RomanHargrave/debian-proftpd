@@ -30,12 +30,18 @@ Forwarded: not needed
  LIBEXECDIR=@LIBEXECDIR@
  LIBS=@LIBS@ @LIBRARIES@
  LIBTOOL=@LIBTOOL@
-@@ -55,7 +55,7 @@
+@@ -50,12 +50,12 @@
+ 
+ # Preprocessor compilation flags.
+ #
+-CPPFLAGS=@CPPFLAGS@ -DHAVE_CONFIG_H $(DEFAULT_PATHS) $(PLATFORM) $(INCLUDES)
++CPPFLAGS=@CPPFLAGS@ -DHAVE_CONFIG_H $(DEFAULT_PATHS) $(PLATFORM) $(INCLUDES) $(shell dpkg-buildflags --get CPPFLAGS)
+ ADDL_CPPFLAGS=@ADDL_CPPFLAGS@
  
  # Our compiler flags.
  #
 -CFLAGS=@CFLAGS@
-+CFLAGS=@CFLAGS@ $(shell dpkg-buildflags --get CPPFLAGS)
++CFLAGS=@CFLAGS@ $(shell dpkg-buildflags --get CFLAGS)
  DEFINES=$(PLATFORM)
  
  # Module-specific libraries to link against.  These libraries may be
