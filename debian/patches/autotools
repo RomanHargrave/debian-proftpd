@@ -1,4 +1,4 @@
-Description: Do not touch config.h.in and stamp-h.in
+Description: Do not touch config.h.in and stamp-h.in. Also export dpkg build flags.
 Author: Francesco Paolo Lovergine <frankie@debian.org>
 Forwarded: not needed
 
@@ -45,3 +45,69 @@ Forwarded: not needed
  DEFINES=$(PLATFORM)
  
  # Module-specific libraries to link against.  These libraries may be
+--- proftpd-dfsg.orig/contrib/mod_dnsbl/Makefile.in
++++ proftpd-dfsg/contrib/mod_dnsbl/Makefile.in
+@@ -18,8 +18,9 @@
+ 
+ # Necessary redefinitions
+ INCLUDES=-I. -I../.. -I../../include @INCLUDES@
+-CPPFLAGS= $(ADDL_CPPFLAGS) -DHAVE_CONFIG_H $(DEFAULT_PATHS) $(PLATFORM) $(INCLUDES)
+-LDFLAGS=-L../../lib @LDFLAGS@
++CPPFLAGS= $(ADDL_CPPFLAGS) -DHAVE_CONFIG_H $(DEFAULT_PATHS) $(PLATFORM) $(INCLUDES) $(shell dpkg-buildflags --get CPPFLAGS)
++
++LDFLAGS=-L../../lib @LDFLAGS@ $(shell dpkg-buildflags --get LDFLAGS)
+ 
+ .c.o:
+ 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $<
+--- proftpd-dfsg.orig/contrib/mod_load/Makefile.in
++++ proftpd-dfsg/contrib/mod_load/Makefile.in
+@@ -15,8 +15,8 @@
+ MODULE_LIBS=@MODULE_LIBS@
+ 
+ # Necessary redefinitions
+-CPPFLAGS= -DHAVE_CONFIG_H $(DEFAULT_PATHS) $(PLATFORM) $(MODULE_INCLUDES)
+-LDFLAGS=-L../../lib @LDFLAGS@
++CPPFLAGS= -DHAVE_CONFIG_H $(DEFAULT_PATHS) $(PLATFORM) $(MODULE_INCLUDES) $(shell dpkg-buildflags --get CPPFLAGS)
++LDFLAGS=-L../../lib @LDFLAGS@ $(shell dpkg-buildflags --get LDFLAGS)
+ 
+ .c.o:
+ 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $<
+--- proftpd-dfsg.orig/contrib/mod_sftp/Makefile.in
++++ proftpd-dfsg/contrib/mod_sftp/Makefile.in
+@@ -24,8 +24,8 @@
+ 
+ # Necessary redefinitions
+ INCLUDES=-I. -I../.. -I../../include @INCLUDES@
+-CPPFLAGS= $(ADDL_CPPFLAGS) -DHAVE_CONFIG_H $(DEFAULT_PATHS) $(PLATFORM) $(INCLUDES)
+-LDFLAGS=-L../../lib @LDFLAGS@
++CPPFLAGS= $(ADDL_CPPFLAGS) -DHAVE_CONFIG_H $(DEFAULT_PATHS) $(PLATFORM) $(INCLUDES) $(shell dpkg-buildflags --get CPPFLAGS)
++LDFLAGS=-L../../lib @LDFLAGS@ $(shell dpkg-buildflags --get LDFLAGS)
+ 
+ .c.o:
+ 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $<
+--- proftpd-dfsg.orig/contrib/mod_snmp/Makefile.in
++++ proftpd-dfsg/contrib/mod_snmp/Makefile.in
+@@ -18,8 +18,8 @@
+ 
+ # Necessary redefinitions
+ INCLUDES=-I. -I../.. -I../../include @INCLUDES@
+-CPPFLAGS= $(ADDL_CPPFLAGS) -DHAVE_CONFIG_H $(DEFAULT_PATHS) $(PLATFORM) $(INCLUDES)
+-LDFLAGS=-L../../lib @LDFLAGS@
++CPPFLAGS= $(ADDL_CPPFLAGS) -DHAVE_CONFIG_H $(DEFAULT_PATHS) $(PLATFORM) $(INCLUDES) $(shell dpkg-buildflags --get CPPFLAGS)
++LDFLAGS=-L../../lib @LDFLAGS@ $(shell dpkg-buildflags --get LDFLAGS)
+ 
+ .c.o:
+ 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $<
+--- proftpd-dfsg.orig/contrib/mod_wrap2/Makefile.in
++++ proftpd-dfsg/contrib/mod_wrap2/Makefile.in
+@@ -15,8 +15,8 @@
+ MODULE_LIBS=@MODULE_LIBS@
+ 
+ # Necessary redefinitions
+-CPPFLAGS= -DHAVE_CONFIG_H $(DEFAULT_PATHS) $(PLATFORM) $(MODULE_INCLUDES)
+-LDFLAGS=-L../../lib @LDFLAGS@
++CPPFLAGS= -DHAVE_CONFIG_H $(DEFAULT_PATHS) $(PLATFORM) $(MODULE_INCLUDES)  $(shell dpkg-buildflags --get CPPFLAGS)
++LDFLAGS=-L../../lib @LDFLAGS@ $(shell dpkg-buildflags --get LDFLAGS)
+ 
+ .c.o:
+ 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $<
