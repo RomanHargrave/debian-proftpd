@@ -57,7 +57,7 @@ typedef unsigned __int64 uint64_t;
 #include <sys/mman.h>   /* mmap */
 #endif
 
-#include "tpl.h"
+#include "hanson-tpl.h"
 
 #define TPL_GATHER_BUFLEN 8192
 #define TPL_MAGIC "tpl"
@@ -182,7 +182,6 @@ static int tpl_mmap_output_file(char *filename, size_t sz, void **text_out);
 static int tpl_cpu_bigendian(void);
 static int tpl_needs_endian_swap(void *);
 static void tpl_byteswap(void *word, int len);
-static void tpl_fatal(char *fmt, ...);
 static int tpl_serlen(tpl_node *r, tpl_node *n, void *dv, size_t *serlen);
 static int tpl_unpackA0(tpl_node *r);
 static int tpl_oops(const char *fmt, ...);
@@ -322,7 +321,7 @@ static tpl_node *tpl_map_va(char *fmt, va_list ap) {
     tpl_pound_data *pd;
     int *fxlens, num_fxlens, pound_num, pound_prod, applies_to_struct;
     int contig_fxlens[10]; /* temp space for contiguous fxlens */
-    int num_contig_fxlens, i, j;
+    unsigned int num_contig_fxlens, i, j;
     ptrdiff_t inter_elt_len=0; /* padded element length of contiguous structs in array */
 
 
@@ -423,9 +422,10 @@ static tpl_node *tpl_map_va(char *fmt, va_list ap) {
                   }
                   if (num_contig_fxlens >= (sizeof(contig_fxlens)/sizeof(contig_fxlens[0]))) {
                     tpl_hook.fatal("contiguous # exceeds hardcoded limit\n");
+                  } else {
+                    contig_fxlens[num_contig_fxlens++] = pound_num;
+                    pound_prod *= pound_num;
                   }
-                  contig_fxlens[num_contig_fxlens++] = pound_num;
-                  pound_prod *= pound_num;
                 }
                 /* increment c to skip contiguous # so its points to last one */
                 c = peek-1;
@@ -1013,6 +1013,7 @@ TPL_API int tpl_dump(tpl_node *r, int mode, ...) {
                 bufv += rc;
             } else if (rc == -1) {
                 if (errno == EINTR || errno == EAGAIN) continue;
+                va_end(ap);
                 tpl_hook.oops("error writing to fd %d: %s\n", fd, strerror(errno));
                 free(buf);
                 return -1;
@@ -1025,6 +1026,7 @@ TPL_API int tpl_dump(tpl_node *r, int mode, ...) {
           pa_addr = (void*)va_arg(ap, void*);
           pa_sz = va_arg(ap, size_t);
           if (pa_sz < sz) {
+              va_end(ap);
               tpl_hook.oops("tpl_dump: buffer too small, need %d bytes\n", sz);
               return -1;
           }
@@ -1247,7 +1249,7 @@ static int tpl_needs_endian_swap(void *d) {
 }
 
 static size_t tpl_size_for(char c) {
-  int i;
+  register size_t i;
   for(i=0; i < sizeof(tpl_types)/sizeof(tpl_types[0]); i++) {
     if (tpl_types[i].c == c) return tpl_types[i].sz;
   }
@@ -1471,6 +1473,7 @@ TPL_API int tpl_load(tpl_node *r, int mode, ...) {
     } else if (mode & TPL_FD) {
         fd = va_arg(ap,int);
     } else {
+        va_end(ap);
         tpl_hook.oops("unsupported tpl_load mode %d\n", mode);
         return -1;
     }
@@ -1730,8 +1733,8 @@ static int tpl_mmap_output_file(char *filename, size_t sz, void **text_out) {
     }
     if (ftruncate(fd,sz) == -1) {
         tpl_hook.oops("ftruncate failed: %s\n", strerror(errno));
-        munmap( text, sz );
-        close(fd);
+        (void) munmap( text, sz );
+        (void) close(fd);
         return -1;
     }
     *text_out = text;
@@ -2151,12 +2154,13 @@ static void tpl_byteswap(void *word, int len) {
     }
 }
 
-static void tpl_fatal(char *fmt, ...) {
+void tpl_fatal(char *fmt, ...) {
     va_list ap;
     char exit_msg[100];
 
+    memset(exit_msg, '\0', sizeof(exit_msg));
     va_start(ap,fmt);
-    vsnprintf(exit_msg, 100, fmt, ap);
+    vsnprintf(exit_msg, sizeof(exit_msg)-1, fmt, ap);
     va_end(ap);
 
     tpl_hook.oops("%s", exit_msg);
@@ -2255,7 +2259,7 @@ static int tpl_gather_blocking(int fd, void **img, size_t *sz) {
     do { 
         rc = read(fd,&((*(char**)img)[i]),tpllen-i);
         i += (rc>0) ? rc : 0;
-    } while ((rc==-1 && (errno==EINTR||errno==EAGAIN)) || (rc>0 && i<tpllen));
+    } while ((rc==-1 && (errno==EINTR||errno==EAGAIN)) || (rc>0 && (uint32_t)i<tpllen));
 
     if (rc<0) {
         tpl_hook.oops("tpl_gather_fd_blocking failed: %s\n", strerror(errno));
@@ -2265,7 +2269,7 @@ static int tpl_gather_blocking(int fd, void **img, size_t *sz) {
         /* tpl_hook.oops("tpl_gather_fd_blocking: eof\n"); */
         tpl_hook.free(*img);
         return 0;
-    } else if (i != tpllen) {
+    } else if ((uint32_t)i != tpllen) {
         tpl_hook.oops("internal error\n");
         tpl_hook.free(*img);
         return -1;

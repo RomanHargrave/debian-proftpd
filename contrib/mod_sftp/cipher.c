@@ -1,6 +1,6 @@
 /*
  * ProFTPD - mod_sftp ciphers
- * Copyright (c) 2008-2016 TJ Saunders
+ * Copyright (c) 2008-2017 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -54,7 +54,7 @@ static struct sftp_cipher read_ciphers[2] = {
   { NULL, NULL, NULL, 0, NULL, 0, 0 },
   { NULL, NULL, NULL, 0, NULL, 0, 0 }
 };
-static EVP_CIPHER_CTX *read_ctxs[2]; 
+static EVP_CIPHER_CTX *read_ctxs[2];
 
 static struct sftp_cipher write_ciphers[2] = {
   { NULL, NULL, NULL, 0, NULL, 0, 0 },
@@ -355,25 +355,27 @@ const char *sftp_cipher_get_read_algo(void) {
 
 int sftp_cipher_set_read_algo(const char *algo) {
   unsigned int idx = read_cipher_idx;
+  size_t key_len, discard_len;
 
   if (read_ciphers[idx].key) {
     /* If we have an existing key, it means that we are currently rekeying. */
     idx = get_next_read_index();
   }
 
-  read_ciphers[idx].cipher = sftp_crypto_get_cipher(algo,
-    (size_t *) &(read_ciphers[idx].key_len),
-    &(read_ciphers[idx].discard_len));
-
-  if (read_ciphers[idx].cipher == NULL)
+  read_ciphers[idx].cipher = sftp_crypto_get_cipher(algo, &key_len,
+    &discard_len);
+  if (read_ciphers[idx].cipher == NULL) {
     return -1;
+  }
 
   read_ciphers[idx].algo = algo;
+  read_ciphers[idx].key_len = (uint32_t) key_len;
+  read_ciphers[idx].discard_len = discard_len;
   return 0;
 }
 
 int sftp_cipher_set_read_key(pool *p, const EVP_MD *hash, const BIGNUM *k,
-    const char *h, uint32_t hlen) {
+    const char *h, uint32_t hlen, int role) {
   const unsigned char *id = NULL;
   unsigned char *buf, *ptr;
   char letter;
@@ -400,17 +402,17 @@ int sftp_cipher_set_read_key(pool *p, const EVP_MD *hash, const BIGNUM *k,
 
   id_len = sftp_session_get_id(&id);
 
-  /* First, initialize the cipher, but don't provide the key or IV yet. */
-  if (EVP_CipherInit(cipher_ctx, cipher->cipher, NULL, NULL, 0) != 1) {
-    (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
-      "error initializing %s cipher for decryption: %s", cipher->algo,
-      sftp_crypto_get_errors());
-    pr_memscrub(ptr, bufsz);
-    return -1;
-  }
+  /* The letters used depend on the role; see:
+   *  https://tools.ietf.org/html/rfc4253#section-7.2
+   *
+   * If we are the SERVER, then we use the letters for the "client to server"
+   * flows, since we are READING from the client.
+   */
 
-  /* IV: HASH(K || H || "A" || session_id) */
-  letter = 'A';
+  /* client-to-server IV: HASH(K || H || "A" || session_id)
+   * server-to-client IV: HASH(K || H || "B" || session_id)
+   */
+  letter = (role == SFTP_ROLE_SERVER ? 'A' : 'B');
   if (set_cipher_iv(cipher, hash, ptr, (bufsz - buflen), h, hlen, &letter, id,
       id_len) < 0) {
     pr_memscrub(ptr, bufsz);
@@ -419,10 +421,21 @@ int sftp_cipher_set_read_key(pool *p, const EVP_MD *hash, const BIGNUM *k,
 
   key_len = (int) cipher->key_len;
 
-  /* Key: HASH(K || H || "C" || session_id) */
-  letter = 'C';
+  /* client-to-server key: HASH(K || H || "C" || session_id)
+   * server-to-client key: HASH(K || H || "D" || session_id)
+   */
+  letter = (role == SFTP_ROLE_SERVER ? 'C' : 'D');
   if (set_cipher_key(cipher, hash, ptr, (bufsz - buflen), h, hlen, &letter,
       id, id_len) < 0) {
+    pr_memscrub(ptr, bufsz);
+    return -1;
+  }
+
+  if (EVP_CipherInit(cipher_ctx, cipher->cipher, cipher->key,
+      cipher->iv, 0) != 1) {
+    (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+      "error initializing %s cipher for decryption: %s", cipher->algo,
+      sftp_crypto_get_errors());
     pr_memscrub(ptr, bufsz);
     return -1;
   }
@@ -436,15 +449,6 @@ int sftp_cipher_set_read_key(pool *p, const EVP_MD *hash, const BIGNUM *k,
       pr_memscrub(ptr, bufsz);
       return -1;
     }
-  }
-
-  /* Now provide the key and IV. */
-  if (EVP_CipherInit(cipher_ctx, NULL, cipher->key, cipher->iv, -1) != 1) {
-    (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
-      "error setting key/IV for %s cipher for decryption: %s", cipher->algo,
-      sftp_crypto_get_errors());
-    pr_memscrub(ptr, bufsz);
-    return -1;
   }
 
   if (set_cipher_discarded(cipher, cipher_ctx) < 0) {
@@ -518,25 +522,27 @@ const char *sftp_cipher_get_write_algo(void) {
 
 int sftp_cipher_set_write_algo(const char *algo) {
   unsigned int idx = write_cipher_idx;
+  size_t key_len, discard_len;
 
   if (write_ciphers[idx].key) {
     /* If we have an existing key, it means that we are currently rekeying. */
     idx = get_next_write_index();
   }
 
-  write_ciphers[idx].cipher = sftp_crypto_get_cipher(algo,
-    (size_t *) &(write_ciphers[idx].key_len),
-    &(write_ciphers[idx].discard_len));
-
-  if (write_ciphers[idx].cipher == NULL)
+  write_ciphers[idx].cipher = sftp_crypto_get_cipher(algo, &key_len,
+    &discard_len);
+  if (write_ciphers[idx].cipher == NULL) {
     return -1;
+  }
 
   write_ciphers[idx].algo = algo;
+  write_ciphers[idx].key_len = (uint32_t) key_len;
+  write_ciphers[idx].discard_len = discard_len;
   return 0;
 }
 
 int sftp_cipher_set_write_key(pool *p, const EVP_MD *hash, const BIGNUM *k,
-    const char *h, uint32_t hlen) {
+    const char *h, uint32_t hlen, int role) {
   const unsigned char *id = NULL;
   unsigned char *buf, *ptr;
   char letter;
@@ -563,17 +569,17 @@ int sftp_cipher_set_write_key(pool *p, const EVP_MD *hash, const BIGNUM *k,
 
   id_len = sftp_session_get_id(&id);
 
-  /* First, initialize the cipher, but don't provide the key or IV yet. */
-  if (EVP_CipherInit(cipher_ctx, cipher->cipher, NULL, NULL, 1) != 1) {
-    (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
-      "error initializing %s cipher for encryption: %s", cipher->algo,
-      sftp_crypto_get_errors());
-    pr_memscrub(ptr, bufsz);
-    return -1;
-  }
+  /* The letters used depend on the role; see:
+   *  https://tools.ietf.org/html/rfc4253#section-7.2
+   *
+   * If we are the SERVER, then we use the letters for the "server to client"
+   * flows, since we are WRITING to the client.
+   */
 
-  /* IV: HASH(K || H || "B" || session_id) */
-  letter = 'B';
+  /* client-to-server IV: HASH(K || H || "A" || session_id)
+   * server-to-client IV: HASH(K || H || "B" || session_id)
+   */
+  letter = (role == SFTP_ROLE_SERVER ? 'B' : 'A');
   if (set_cipher_iv(cipher, hash, ptr, (bufsz - buflen), h, hlen, &letter, id,
       id_len) < 0) {
     pr_memscrub(ptr, bufsz);
@@ -582,10 +588,21 @@ int sftp_cipher_set_write_key(pool *p, const EVP_MD *hash, const BIGNUM *k,
 
   key_len = (int) cipher->key_len;
 
-  /* Key: HASH(K || H || "D" || session_id) */
-  letter = 'D';
+  /* client-to-server key: HASH(K || H || "C" || session_id)
+   * server-to-client key: HASH(K || H || "D" || session_id)
+   */
+  letter = (role == SFTP_ROLE_SERVER ? 'D' : 'C');
   if (set_cipher_key(cipher, hash, ptr, (bufsz - buflen), h, hlen, &letter,
       id, id_len) < 0) {
+    pr_memscrub(ptr, bufsz);
+    return -1;
+  }
+
+  if (EVP_CipherInit(cipher_ctx, cipher->cipher, cipher->key,
+      cipher->iv, 1) != 1) {
+    (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
+      "error initializing %s cipher for encryption: %s", cipher->algo,
+      sftp_crypto_get_errors());
     pr_memscrub(ptr, bufsz);
     return -1;
   }
@@ -599,15 +616,6 @@ int sftp_cipher_set_write_key(pool *p, const EVP_MD *hash, const BIGNUM *k,
       pr_memscrub(ptr, bufsz);
       return -1;
     }
-  }
-
-  /* Now provide the key and IV. */
-  if (EVP_CipherInit(cipher_ctx, NULL, cipher->key, cipher->iv, -1) != 1) {
-    (void) pr_log_writefile(sftp_logfd, MOD_SFTP_VERSION,
-      "error setting key/IV for %s cipher for encryption: %s", cipher->algo,
-      sftp_crypto_get_errors());
-    pr_memscrub(ptr, bufsz);
-    return -1;
   }
 
   if (set_cipher_discarded(cipher, cipher_ctx) < 0) {
@@ -709,4 +717,3 @@ int sftp_cipher_free(void) {
 #endif /* OpenSSL-1.0.0 and later */
   return 0;
 }
-

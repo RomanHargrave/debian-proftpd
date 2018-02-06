@@ -22,22 +22,19 @@
  * the source code for OpenSSL in the source distribution.
  */
 
-/* Command response routines
- * $Id: response.c,v 1.22 2011-08-13 19:24:06 castaglia Exp $
- */
+/* Command response routines. */
 
 #include "conf.h"
 
 pr_response_t *resp_list = NULL, *resp_err_list = NULL;
 
 static int resp_blocked = FALSE;
-
 static pool *resp_pool = NULL;
 
 static char resp_buf[PR_RESPONSE_BUFFER_SIZE] = {'\0'};
 
-static char *resp_last_response_code = NULL;
-static char *resp_last_response_msg = NULL;
+static const char *resp_last_response_code = NULL;
+static const char *resp_last_response_msg = NULL;
 
 static char *(*resp_handler_cb)(pool *, const char *, ...) = NULL;
 
@@ -86,21 +83,22 @@ void pr_response_set_pool(pool *p) {
 
   /* Copy any old "last" values out of the new pool. */
   if (resp_last_response_code != NULL) {
-    char *ptr;
+    const char *ptr;
 
     ptr = resp_last_response_code;
     resp_last_response_code = pstrdup(p, ptr);
   }
 
   if (resp_last_response_msg != NULL) {
-    char *ptr;
+    const char *ptr;
   
     ptr = resp_last_response_msg;
     resp_last_response_msg = pstrdup(p, ptr);
   }
 }
 
-int pr_response_get_last(pool *p, char **response_code, char **response_msg) {
+int pr_response_get_last(pool *p, const char **response_code,
+    const char **response_msg) {
   if (p == NULL) {
     errno = EINVAL;
     return -1;
@@ -149,7 +147,7 @@ void pr_response_clear(pr_response_t **head) {
 
 void pr_response_flush(pr_response_t **head) {
   unsigned char ml = FALSE;
-  char *last_numeric = NULL;
+  const char *last_numeric = NULL;
   pr_response_t *resp = NULL;
 
   if (head == NULL) {
@@ -157,6 +155,9 @@ void pr_response_flush(pr_response_t **head) {
   }
 
   if (resp_blocked) {
+    pr_trace_msg(trace_channel, 19,
+      "responses blocked, not flushing response chain");
+    pr_response_clear(head);
     return;
   }
 
@@ -164,6 +165,7 @@ void pr_response_flush(pr_response_t **head) {
     /* Not sure what happened to the control connection, but since it's gone,
      * there's no need to flush any messages.
      */
+    pr_response_clear(head);
     return;
   }
 
@@ -210,20 +212,27 @@ void pr_response_flush(pr_response_t **head) {
 
 void pr_response_add_err(const char *numeric, const char *fmt, ...) {
   pr_response_t *resp = NULL, **head = NULL;
+  int res;
   va_list msg;
 
+  if (fmt == NULL) {
+    return;
+  }
+
   va_start(msg, fmt);
-  vsnprintf(resp_buf, sizeof(resp_buf), fmt, msg);
+  res = vsnprintf(resp_buf, sizeof(resp_buf), fmt, msg);
   va_end(msg);
   
   resp_buf[sizeof(resp_buf) - 1] = '\0';
   
   resp = (pr_response_t *) pcalloc(resp_pool, sizeof(pr_response_t));
   resp->num = (numeric ? pstrdup(resp_pool, numeric) : NULL);
-  resp->msg = pstrdup(resp_pool, resp_buf);
+  resp->msg = pstrndup(resp_pool, resp_buf, res);
 
-  resp_last_response_code = pstrdup(resp_pool, resp->num);
-  resp_last_response_msg = pstrdup(resp_pool, resp->msg);
+  if (numeric != R_DUP) {
+    resp_last_response_code = pstrdup(resp_pool, resp->num);
+  }
+  resp_last_response_msg = pstrndup(resp_pool, resp->msg, res);
 
   pr_trace_msg(trace_channel, 7, "error response added to pending list: %s %s",
     resp->num ? resp->num : "(null)", resp->msg);
@@ -247,6 +256,7 @@ void pr_response_add_err(const char *numeric, const char *fmt, ...) {
     *head &&
     (!numeric || !(*head)->num || strcmp((*head)->num, numeric) <= 0) &&
     !(numeric && !(*head)->num && head == &resp_err_list);
+
   head = &(*head)->next);
 
   resp->next = *head;
@@ -255,20 +265,27 @@ void pr_response_add_err(const char *numeric, const char *fmt, ...) {
 
 void pr_response_add(const char *numeric, const char *fmt, ...) {
   pr_response_t *resp = NULL, **head = NULL;
+  int res;
   va_list msg;
 
+  if (fmt == NULL) {
+    return;
+  }
+
   va_start(msg, fmt);
-  vsnprintf(resp_buf, sizeof(resp_buf), fmt, msg);
+  res = vsnprintf(resp_buf, sizeof(resp_buf), fmt, msg);
   va_end(msg);
 
   resp_buf[sizeof(resp_buf) - 1] = '\0';
   
   resp = (pr_response_t *) pcalloc(resp_pool, sizeof(pr_response_t));
   resp->num = (numeric ? pstrdup(resp_pool, numeric) : NULL);
-  resp->msg = pstrdup(resp_pool, resp_buf);
+  resp->msg = pstrndup(resp_pool, resp_buf, res);
 
-  resp_last_response_code = pstrdup(resp_pool, resp->num);
-  resp_last_response_msg = pstrdup(resp_pool, resp->msg);
+  if (numeric != R_DUP) {
+    resp_last_response_code = pstrdup(resp_pool, resp->num);
+  }
+  resp_last_response_msg = pstrndup(resp_pool, resp->msg, res);
 
   pr_trace_msg(trace_channel, 7, "response added to pending list: %s %s",
     resp->num ? resp->num : "(null)", resp->msg);
@@ -299,11 +316,14 @@ void pr_response_add(const char *numeric, const char *fmt, ...) {
 }
 
 void pr_response_send_async(const char *resp_numeric, const char *fmt, ...) {
+  int res;
   char buf[PR_TUNABLE_BUFFER_SIZE] = {'\0'};
   va_list msg;
-  int maxlen;
+  size_t len, max_len;
 
   if (resp_blocked) {
+    pr_trace_msg(trace_channel, 19,
+      "responses blocked, not sending async response");
     return;
   }
 
@@ -315,20 +335,22 @@ void pr_response_send_async(const char *resp_numeric, const char *fmt, ...) {
   }
 
   sstrncpy(buf, resp_numeric, sizeof(buf));
-  sstrcat(buf, " ", sizeof(buf));
+
+  len = strlen(resp_numeric);
+  sstrcat(buf + len, " ", sizeof(buf) - len);
   
-  maxlen = sizeof(buf) - strlen(buf) - 1;
+  max_len = sizeof(buf) - len;
   
   va_start(msg, fmt);
-  vsnprintf(buf + strlen(buf), maxlen, fmt, msg);
+  res = vsnprintf(buf + len + 1, max_len, fmt, msg);
   va_end(msg);
   
   buf[sizeof(buf) - 1] = '\0';
 
   resp_last_response_code = pstrdup(resp_pool, resp_numeric);
-  resp_last_response_msg = pstrdup(resp_pool, buf + strlen(resp_numeric) + 1);
+  resp_last_response_msg = pstrdup(resp_pool, buf + len + 1);
 
-  sstrcat(buf, "\r\n", sizeof(buf));
+  sstrcat(buf + res, "\r\n", sizeof(buf));
   RESPONSE_WRITE_STR_ASYNC(session.c->outstrm, "%s", buf)
 }
 
@@ -336,6 +358,7 @@ void pr_response_send(const char *resp_numeric, const char *fmt, ...) {
   va_list msg;
 
   if (resp_blocked) {
+    pr_trace_msg(trace_channel, 19, "responses blocked, not sending response");
     return;
   }
 
@@ -363,6 +386,8 @@ void pr_response_send_raw(const char *fmt, ...) {
   va_list msg;
 
   if (resp_blocked) {
+    pr_trace_msg(trace_channel, 19,
+      "responses blocked, not sending raw response");
     return;
   }
 
@@ -381,4 +406,3 @@ void pr_response_send_raw(const char *fmt, ...) {
 
   RESPONSE_WRITE_STR(session.c->outstrm, "%s\r\n", resp_buf)
 }
-

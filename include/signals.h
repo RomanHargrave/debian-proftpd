@@ -1,6 +1,6 @@
 /*
- * ProFTPD - mod_snmp stacktrace logging
- * Copyright (c) 2008-2011 TJ Saunders
+ * ProFTPD - FTP server daemon
+ * Copyright (c) 2014 The ProFTPD Project team
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -16,19 +16,28 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335, USA.
  *
- * As a special exemption, TJ Saunders and other respective copyright holders
- * give permission to link this program with OpenSSL, and distribute the
- * resulting executable, without including the source code for OpenSSL in the
- * source distribution.
- *
- * $Id: stacktrace.h,v 1.1 2013-05-15 15:20:27 castaglia Exp $
+ * As a special exemption, the ProFTPD Project team and other respective
+ * copyright holders give permission to link this program with OpenSSL, and
+ * distribute the resulting executable, without including the source code for
+ * OpenSSL in the source distribution.
  */
 
-#include "mod_snmp.h"
+/* Signal handling API. */
 
-#ifndef MOD_SNMP_STACKTRACE_H
-#define MOD_SNMP_STACKTRACE_H
+#ifndef PR_SIGNALS_H
+#define PR_SIGNALS_H
 
-void snmp_stacktrace_log(void);
+#include "config.h"
 
-#endif
+void pr_signals_block(void);
+void pr_signals_unblock(void);
+void pr_signals_handle(void);
+
+/* Signal handling functions. */
+RETSIGTYPE pr_signals_handle_disconnect(int);
+RETSIGTYPE pr_signals_handle_event(int);
+
+/* Internal use only. */
+int init_signals(void);
+
+#endif /* PR_SIGNALS_H */
