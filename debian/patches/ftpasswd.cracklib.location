@@ -4,11 +4,9 @@ Author: Paul Martin <pm@debian.org>
 Bug-Debian: http://bugs.debian.org/159365
 Forwarded: not needed
 
-Index: proftpd-dfsg/contrib/ftpasswd
-===================================================================
---- proftpd-dfsg.orig/contrib/ftpasswd	2014-01-30 13:53:27.000000000 +0100
-+++ proftpd-dfsg/contrib/ftpasswd	2014-01-30 13:53:27.000000000 +0100
-@@ -37,7 +37,8 @@
+--- proftpd-dfsg.orig/contrib/ftpasswd
++++ proftpd-dfsg/contrib/ftpasswd
+@@ -35,7 +35,8 @@
  my $default_passwd_file = "./ftpd.passwd";
  my $default_group_file = "./ftpd.group";
  my $shell_file = "/etc/shells";

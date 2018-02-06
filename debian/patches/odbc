@@ -3,14 +3,13 @@ Author: Francesco Paolo Lovergine <frankie@debian.org>
 Forwarded: not needed
 Bug-Debian: http://bugs.debian.org/366397
 
-Index: proftpd-dfsg/contrib/mod_sql_odbc.c
-===================================================================
 --- proftpd-dfsg.orig/contrib/mod_sql_odbc.c
 +++ proftpd-dfsg/contrib/mod_sql_odbc.c
-@@ -22,6 +22,7 @@
+@@ -19,6 +19,8 @@
+  * As a special exemption, TJ Saunders gives permission to link this program
+  * with OpenSSL, and distribute the resulting executable, without including
   * the source code for OpenSSL in the source distribution.
-  *
-  * $Id: mod_sql_odbc.c,v 1.15 2013-09-25 04:25:54 castaglia Exp $
++ * 
 + * $Libraries: -lodbc $
   */
  

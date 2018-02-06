@@ -4,7 +4,7 @@ Forwarded: not needed
 
 --- proftpd-dfsg.orig/Makefile.in
 +++ proftpd-dfsg/Makefile.in
-@@ -233,10 +233,10 @@
+@@ -235,10 +235,10 @@
  	chmod a+x configure config.sub install-sh modules/glue.sh
  
  # autoheader might not change config.h.in, so touch a stamp file.
@@ -28,7 +28,7 @@ Forwarded: not needed
 -LDFLAGS=@LDFLAGS@ @LIBDIRS@
 +LDFLAGS=@LDFLAGS@ @LIBDIRS@ $(shell dpkg-buildflags --get LDFLAGS)
  LIBEXECDIR=@LIBEXECDIR@
- LIBS=@LIBS@ @LIBRARIES@
+ LIBS=@LIBS@ @LIBRARIES@ @LIBADD_DL@
  LIBTOOL=@LIBTOOL@
 @@ -50,12 +50,12 @@
  
@@ -74,7 +74,7 @@ Forwarded: not needed
  	$(CC) $(CPPFLAGS) $(CFLAGS) -c $<
 --- proftpd-dfsg.orig/contrib/mod_sftp/Makefile.in
 +++ proftpd-dfsg/contrib/mod_sftp/Makefile.in
-@@ -24,8 +24,8 @@
+@@ -27,8 +27,8 @@
  
  # Necessary redefinitions
  INCLUDES=-I. -I../.. -I../../include @INCLUDES@
@@ -83,8 +83,8 @@ Forwarded: not needed
 +CPPFLAGS= $(ADDL_CPPFLAGS) -DHAVE_CONFIG_H $(DEFAULT_PATHS) $(PLATFORM) $(INCLUDES) $(shell dpkg-buildflags --get CPPFLAGS)
 +LDFLAGS=-L../../lib @LDFLAGS@ $(shell dpkg-buildflags --get LDFLAGS)
  
- .c.o:
- 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $<
+ # We special-case the building of umac128.o in order to use preprocessor
+ # tricks to get the implementation, rather than making it be all in runtime.
 --- proftpd-dfsg.orig/contrib/mod_snmp/Makefile.in
 +++ proftpd-dfsg/contrib/mod_snmp/Makefile.in
 @@ -18,8 +18,8 @@

@@ -2,11 +2,9 @@ Description: Change pam name ftp -> proftpd
 Author: Francesco Paolo Lovergine <frankie@debian.org>
 Forwarded: not needed
 
-Index: proftpd-dfsg/modules/mod_auth_pam.c
-===================================================================
---- proftpd-dfsg.orig/modules/mod_auth_pam.c	2011-10-05 18:05:31.000000000 +0200
-+++ proftpd-dfsg/modules/mod_auth_pam.c	2011-10-05 18:06:02.000000000 +0200
-@@ -71,7 +71,7 @@
+--- proftpd-dfsg.orig/modules/mod_auth_pam.c
++++ proftpd-dfsg/modules/mod_auth_pam.c
+@@ -66,7 +66,7 @@
  static authtable auth_pam_authtab[2];
  
  static pam_handle_t *	pamh			= NULL;

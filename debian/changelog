@@ -1,3 +1,11 @@
+proftpd-dfsg (1.3.6-1) UNRELEASED; urgency=medium
+
+  * New upstream release.
+  * Patches refreshed.
+  * Removed some patches noew already applied upstream or obsoleted.
+
+ -- Francesco Paolo Lovergine <frankie@debian.org>  Tue, 06 Feb 2018 14:58:35 +0100
+
 proftpd-dfsg (1.3.5e-1) unstable; urgency=medium
 
   [ Hilmar Preuße ]

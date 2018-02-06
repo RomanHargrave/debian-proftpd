@@ -3,11 +3,9 @@ Author: Francesco Paolo Lovergine <frankie@debian.org>
 Forwarded: not needed
 Bug-Debian: http://bugs.debian.org/366397
 
-Index: proftpd-dfsg/contrib/mod_wrap.c
-===================================================================
---- proftpd-dfsg.orig/contrib/mod_wrap.c	2013-03-07 10:26:21.000000000 +0100
-+++ proftpd-dfsg/contrib/mod_wrap.c	2013-03-07 10:26:21.000000000 +0100
-@@ -942,8 +942,7 @@
+--- proftpd-dfsg.orig/contrib/mod_wrap.c
++++ proftpd-dfsg/contrib/mod_wrap.c
+@@ -949,8 +949,7 @@
  
    fromhost(&request);
  
