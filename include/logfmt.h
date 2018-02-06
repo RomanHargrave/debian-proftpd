@@ -1,7 +1,6 @@
 /*
- * ProFTPD: mod_log
- *
- * Copyright (c) 2013 TJ Saunders
+ * ProFTPD: LogFormat
+ * Copyright (c) 2013-2017 TJ Saunders
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,12 +20,10 @@
  * give permission to link this program with OpenSSL, and distribute the
  * resulting executable, without including the source code for OpenSSL in the
  * source distribution.
- *
- * $Id: mod_log.h,v 1.2 2013-11-11 01:34:04 castaglia Exp $
  */
 
-#ifndef MOD_LOG_H
-#define MOD_LOG_H
+#ifndef PR_LOGFMT_H
+#define PR_LOGFMT_H
 
 /* These "meta" sequences represent the parsed LogFormat variables. */
 #define LOGFMT_META_START		0xff
@@ -75,5 +72,11 @@
 #define LOGFMT_META_ISO8601		42
 #define LOGFMT_META_GROUP		43
 #define LOGFMT_META_BASENAME		44
+#define LOGFMT_META_FILE_OFFSET		45
+#define LOGFMT_META_XFER_MS		46
+#define LOGFMT_META_RESPONSE_MS		47
+#define LOGFMT_META_FILE_SIZE		48
+#define LOGFMT_META_XFER_TYPE		49
+#define LOGFMT_META_REMOTE_PORT		50
 
-#endif /* MOD_LOG_H */
+#endif /* PR_LOGFMT_H */
