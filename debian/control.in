@@ -20,7 +20,8 @@ Build-Depends: debhelper (>= 9.20160114),
                unixodbc-dev,
                zlib1g-dev,
                libgeoip-dev,
-               libmemcached-dev (>= 0.41)
+               libmemcached-dev (>= 0.41),
+               libhiredis-dev
 Homepage: http://www.proftpd.org/
 Vcs-Git: https://anonscm.debian.org/git/pkg-proftpd/proftpd-dfsg.git
 Vcs-Browser: https://anonscm.debian.org/git/pkg-proftpd/proftpd-dfsg.git

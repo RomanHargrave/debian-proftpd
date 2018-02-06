@@ -4,6 +4,8 @@ Author: Paul Martin <pm@debian.org>
 Bug-Debian: http://bugs.debian.org/159365
 Forwarded: not needed
 
+Index: proftpd-dfsg/contrib/ftpasswd
+===================================================================
 --- proftpd-dfsg.orig/contrib/ftpasswd
 +++ proftpd-dfsg/contrib/ftpasswd
 @@ -35,7 +35,8 @@

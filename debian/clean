@@ -11,6 +11,10 @@ contrib/mod_load/mod_load.h
 contrib/mod_load/Makefile
 contrib/mod_sftp/mod_sftp.h
 contrib/mod_sftp/Makefile
+contrib/mod_auth_otp/auth-otp
+contrib/mod_auth_otp/Makefile
+contrib/mod_auth_otp/mod_auth_otp.h
+contrib/mod_auth_otp/t/Makefile
 src/ftpdctl.8
 src/proftpd.8
 src/proftpd.conf.5

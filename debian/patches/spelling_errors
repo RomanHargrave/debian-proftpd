@@ -3,8 +3,10 @@ Author: Francesco Paolo Lovergine <frankie@debian.org>
 Last-Update: 2017-01-09
 Forwarded: https://github.com/proftpd/proftpd/pull/666
 
---- proftpd-dfsg.orig/contrib/mod_sftp/date.c
-+++ proftpd-dfsg/contrib/mod_sftp/date.c
+Index: proftpd-dfsg/contrib/mod_sftp/date.c
+===================================================================
+--- proftpd-dfsg.orig/contrib/mod_sftp/date.c	2018-01-15 21:09:11.000000000 +0100
++++ proftpd-dfsg/contrib/mod_sftp/date.c	2018-01-15 21:09:11.000000000 +0100
 @@ -124,7 +124,7 @@
        case '?':
          /* Ignore unsupported options */
@@ -14,8 +16,10 @@ Forwarded: https://github.com/proftpd/proftpd/pull/666
          break;
      }
    }
---- proftpd-dfsg.orig/contrib/mod_sftp/keys.c
-+++ proftpd-dfsg/contrib/mod_sftp/keys.c
+Index: proftpd-dfsg/contrib/mod_sftp/keys.c
+===================================================================
+--- proftpd-dfsg.orig/contrib/mod_sftp/keys.c	2018-01-15 21:09:11.000000000 +0100
++++ proftpd-dfsg/contrib/mod_sftp/keys.c	2018-01-15 21:09:11.000000000 +0100
 @@ -995,7 +995,7 @@
  
      if (sftp_keys_validate_ecdsa_params(curve, point) < 0) {
@@ -43,8 +47,10 @@ Forwarded: https://github.com/proftpd/proftpd/pull/666
          EC_KEY_free(ec);
          EVP_PKEY_free(pkey);
          return -1;
---- proftpd-dfsg.orig/contrib/mod_tls.c
-+++ proftpd-dfsg/contrib/mod_tls.c
+Index: proftpd-dfsg/contrib/mod_tls.c
+===================================================================
+--- proftpd-dfsg.orig/contrib/mod_tls.c	2018-01-15 21:09:11.000000000 +0100
++++ proftpd-dfsg/contrib/mod_tls.c	2018-01-15 21:09:11.000000000 +0100
 @@ -2142,7 +2142,7 @@
    if (idx < 0) {
      pr_trace_msg(trace_channel, 12,
@@ -72,8 +78,10 @@ Forwarded: https://github.com/proftpd/proftpd/pull/666
        tls_get_errors());
      return 0;
    }
---- proftpd-dfsg.orig/doc/utils/ftpwho.html
-+++ proftpd-dfsg/doc/utils/ftpwho.html
+Index: proftpd-dfsg/doc/utils/ftpwho.html
+===================================================================
+--- proftpd-dfsg.orig/doc/utils/ftpwho.html	2018-01-15 21:09:11.000000000 +0100
++++ proftpd-dfsg/doc/utils/ftpwho.html	2018-01-15 21:09:11.000000000 +0100
 @@ -14,7 +14,7 @@
  
  The <B>ftpwho</B> command shows process information for all active proftpd
@@ -83,8 +91,10 @@ Forwarded: https://github.com/proftpd/proftpd/pull/666
  master proftpd <I>standalone</I> server.
  
  <H2>OPTIONS</H2>
---- proftpd-dfsg.orig/utils/ftpwho.1.in
-+++ proftpd-dfsg/utils/ftpwho.1.in
+Index: proftpd-dfsg/utils/ftpwho.1.in
+===================================================================
+--- proftpd-dfsg.orig/utils/ftpwho.1.in	2018-01-15 21:09:11.000000000 +0100
++++ proftpd-dfsg/utils/ftpwho.1.in	2018-01-15 21:09:11.000000000 +0100
 @@ -10,7 +10,7 @@
  The
  .BI ftpwho
@@ -94,8 +104,10 @@ Forwarded: https://github.com/proftpd/proftpd/pull/666
  spawned from inetd are counted separately from those created by a
  master proftpd
  .I standalone
---- proftpd-dfsg.orig/contrib/mod_ldap.c
-+++ proftpd-dfsg/contrib/mod_ldap.c
+Index: proftpd-dfsg/contrib/mod_ldap.c
+===================================================================
+--- proftpd-dfsg.orig/contrib/mod_ldap.c	2018-01-15 21:09:11.000000000 +0100
++++ proftpd-dfsg/contrib/mod_ldap.c	2018-01-15 21:09:11.000000000 +0100
 @@ -930,7 +930,7 @@
    cached_quota->nelts = 1;
  

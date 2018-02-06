@@ -5,8 +5,10 @@ Author: Francesco Paolo Lovergine <frankie@debian.org>
 Forwarded: not needed
 Bug-Debian: http://bugs.debian.org/479893
 
---- proftpd-dfsg.orig/lib/libcap/Makefile
-+++ proftpd-dfsg/lib/libcap/Makefile
+Index: proftpd-dfsg/lib/libcap/Makefile
+===================================================================
+--- proftpd-dfsg.orig/lib/libcap/Makefile	2018-01-14 23:22:58.000000000 +0100
++++ proftpd-dfsg/lib/libcap/Makefile	2018-01-14 23:22:58.000000000 +0100
 @@ -23,7 +23,7 @@
  INCLS=libcap.h cap_names.h $(INCS)
  OBJS=$(addsuffix .o, $(FILES))
@@ -16,8 +18,10 @@ Bug-Debian: http://bugs.debian.org/479893
  
  _makenames: _makenames.c cap_names.sed
  	$(CC) $(CFLAGS) $(LDFLAGS) $< -o $@
---- proftpd-dfsg.orig/modules/mod_cap.c
-+++ proftpd-dfsg/modules/mod_cap.c
+Index: proftpd-dfsg/modules/mod_cap.c
+===================================================================
+--- proftpd-dfsg.orig/modules/mod_cap.c	2018-01-14 23:22:58.000000000 +0100
++++ proftpd-dfsg/modules/mod_cap.c	2018-01-14 23:22:58.000000000 +0100
 @@ -42,10 +42,8 @@
  #  define _LINUX_BYTEORDER_GENERIC_H
  # endif
