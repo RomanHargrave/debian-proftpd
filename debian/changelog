@@ -26,6 +26,8 @@ proftpd-dfsg (1.3.6-1) UNRELEASED; urgency=medium
   * New patches:
     - upstream_4335 (upstream #4336) to build mod_auth_otp.so
     - upstream_4336 (upstream #4336) mod_redis & mod_memache fail to link
+    - upstream_4312 (upstream #4312) Close any "extra" open fds at startup.
+      (see #870624)
 
   * Include geoip sample config into proftp-basic (Closes: #872452).
   * Add B-D on libhiredis-dev to build Redis support.
