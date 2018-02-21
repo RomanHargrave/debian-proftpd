@@ -7,7 +7,7 @@ proftpd-dfsg (1.3.6-1) UNRELEASED; urgency=medium
     - Fixes another crash bug mit mod_ssl (Closes: #839880)
     - Restores file permissions of /etc/proftpd/passwd
       (Closes: #796233)
-    - Has support for systemd (Closes: #740177)
+    - Has support for systemd (see: #740177)
 
   * (New) modules enabled
     - Redis: mod_redis, mod_tls_redis, mod_wrap2_redis.
