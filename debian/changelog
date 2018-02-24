@@ -1,6 +1,6 @@
-proftpd-dfsg (1.3.6-1) UNRELEASED; urgency=medium
+proftpd-dfsg (1.3.6-1) unstable; urgency=medium
 
-  [Hilmar Preuße]
+  [ Hilmar Preuße ]
   * New upstream release (Closes: #879113)
     - Has support for One time passwords (Closes: #94162)
     - Improved documentation of MaxInstances (Closes: #336001)
@@ -31,6 +31,11 @@ proftpd-dfsg (1.3.6-1) UNRELEASED; urgency=medium
 
   * Include geoip sample config into proftp-basic (Closes: #872452).
   * Add B-D on libhiredis-dev to build Redis support.
+  * Build mod_readme as module instead of built in (enabled by default).
+
+  * init.d-script-should-always-start-service:
+    Remove RUN="yes" statement from /etc/default/proftpd, set to RUN="yes" in
+    init-Skript.
 
  -- Francesco Paolo Lovergine <frankie@debian.org>  Mon, 15 Jan 2018 21:14:17 +0100
 

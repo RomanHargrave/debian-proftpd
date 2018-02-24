@@ -23,6 +23,7 @@ usr/lib/proftpd/mod_quotatab_sql.so
 usr/lib/proftpd/mod_radius.so
 usr/lib/proftpd/mod_ratio.so
 usr/lib/proftpd/mod_redis.so
+usr/lib/proftpd/mod_readme.so
 usr/lib/proftpd/mod_rewrite.so
 usr/lib/proftpd/mod_shaper.so
 usr/lib/proftpd/mod_site_misc.so
