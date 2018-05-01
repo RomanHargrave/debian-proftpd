@@ -44,7 +44,7 @@ CONF_ARGS := --prefix=/usr \
 	     --mandir=/usr/share/man --sysconfdir=/etc/$(NAME) --localstatedir=/run --libexecdir=/usr/lib/$(NAME) \
 	     --enable-sendfile --enable-facl --enable-dso --enable-autoshadow --enable-ctrls \
 	     --enable-ipv6 --enable-nls --enable-memcache --with-lastlog=/var/log/lastlog --enable-pcre $(DEVELOPT) \
-	     --disable-strip --enable-redis
+	     --disable-strip --enable-redis --disable-xattr
 
 ifeq ($(DEB_BUILD_GNU_TYPE), $(DEB_HOST_GNU_TYPE))
   CONF_ARGS += --build $(DEB_HOST_GNU_TYPE)
