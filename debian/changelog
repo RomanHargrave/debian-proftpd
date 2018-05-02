@@ -1,7 +1,7 @@
 proftpd-dfsg (1.3.6-3) UNRELEASED; urgency=medium
 
   [ Hilmar Preuße ]
-  * Run configure w/ --disable-xattr to fix FTBFS on kfreebsd.
+  * Run configure w/ --disable-xattr only on kfreebsd to fix FTBFS.
     (Closes: #897168)
 
  -- Francesco Paolo Lovergine <frankie@debian.org>  Tue, 01 May 2018 14:57:41 +0200
