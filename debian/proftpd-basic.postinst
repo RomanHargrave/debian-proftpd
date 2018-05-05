@@ -115,6 +115,12 @@ EOF
 	fi
 }
 
+create_run_dir () {
+
+	[ ! -d /run/proftpd ] && mkdir /run/proftpd
+}
+
+
 . /usr/share/debconf/confmodule
 
 # update-ined is used if found, else you are on your own
@@ -125,7 +131,10 @@ else
 fi
 
 if [ "$1" = "configure" ]; then
-    
+
+    # create diretory in /run
+    create_run_dir
+
     # mv eventual old configuration in the new location
     if [ -f /etc/proftpd.conf -a ! -f $CONF ]; then
     	mv /etc/proftpd.conf $CONF
