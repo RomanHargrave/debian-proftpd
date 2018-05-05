@@ -132,14 +132,14 @@ fi
 
 if [ "$1" = "configure" ]; then
 
-    # create diretory in /run
+    # create directory in /run
     create_run_dir
 
     # mv eventual old configuration in the new location
     if [ -f /etc/proftpd.conf -a ! -f $CONF ]; then
     	mv /etc/proftpd.conf $CONF
     fi
-    
+
     # use current configuration files or generate new ones from scratch
     for name in proftpd modules sql ldap tls virtuals
     do
