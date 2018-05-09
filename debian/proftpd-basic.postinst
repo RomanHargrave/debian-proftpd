@@ -99,6 +99,12 @@ do_update () {
     fi
 }
 
+create_rundir () {
+    if [ ! -d /run/proftpd ]; then
+       mkdir /run/proftpd
+    fi
+}
+
 disable_script () {
 	file=$1
 	if [ -x ${file} ]; then
@@ -115,12 +121,6 @@ EOF
 	fi
 }
 
-create_run_dir () {
-
-	[ ! -d /run/proftpd ] && mkdir /run/proftpd
-}
-
-
 . /usr/share/debconf/confmodule
 
 # update-ined is used if found, else you are on your own
@@ -133,7 +133,7 @@ fi
 if [ "$1" = "configure" ]; then
 
     # create directory in /run
-    create_run_dir
+    create_rundir
 
     # mv eventual old configuration in the new location
     if [ -f /etc/proftpd.conf -a ! -f $CONF ]; then
