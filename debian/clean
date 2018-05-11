@@ -11,6 +11,8 @@ contrib/mod_auth_otp/auth-otp
 contrib/mod_auth_otp/Makefile
 contrib/mod_auth_otp/mod_auth_otp.h
 contrib/mod_auth_otp/t/Makefile
+contrib/mod_snmp/Makefile
+contrib/mod_snmp/mod_snmp.h
 src/ftpdctl.8
 src/proftpd.8
 src/proftpd.conf.5

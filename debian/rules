@@ -45,7 +45,7 @@ DSOMODS1 = mod_unique_id:mod_site_misc:mod_load:mod_ban:mod_quotatab:mod_sql:mod
 DSOMODS2 = mod_quotatab_sql:mod_ldap:mod_quotatab_ldap:mod_ratio:mod_tls:mod_rewrite:mod_radius:mod_wrap:mod_wrap2:mod_wrap2_file
 DSOMODS3 = mod_wrap2_sql:mod_quotatab_file:mod_quotatab_radius:mod_facl:mod_ctrls_admin:mod_copy:mod_deflate:mod_ifversion
 DSOMODS4 = mod_geoip:mod_exec:mod_sftp:mod_sftp_pam:mod_sftp_sql:mod_shaper:mod_sql_passwd:mod_ifsession:mod_auth_otp:mod_tls_redis
-DSOMODS5 = mod_wrap2_redis:mod_redis:mod_memcache:mod_tls_memcache:mod_readme
+DSOMODS5 = mod_wrap2_redis:mod_redis:mod_memcache:mod_tls_memcache:mod_readme:mod_snmp
 CONF_ARGS := --prefix=/usr \
 	     --with-includes=$(shell pg_config --includedir):$(shell mysql_config --include|sed -e 's/-I//') \
 	     --mandir=/usr/share/man --sysconfdir=/etc/$(NAME) --localstatedir=/run --libexecdir=/usr/lib/$(NAME) \

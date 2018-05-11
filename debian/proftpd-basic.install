@@ -3,7 +3,8 @@ usr/bin/ftpcount
 usr/bin/ftpdctl
 usr/bin/ftptop
 usr/bin/ftpwho
-etc/proftpd
+etc/proftpd/blacklist.dat
+etc/proftpd/dhparams.pem
 usr/lib/proftpd/mod_auth_otp.so
 usr/lib/proftpd/mod_ban.so
 usr/lib/proftpd/mod_copy.so

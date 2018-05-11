@@ -205,3 +205,20 @@ Description: Versatile, virtual-hosting FTP daemon - GeoIP module
  upload/download ratios are also supported.
  .
  This package provides GeoIP functionalities.
+
+Package: proftpd-mod-snmp
+Architecture: any
+Depends: proftpd-basic (=${binary:Version}), ${misc:Depends}, ${shlibs:Depends}
+Description: Versatile, virtual-hosting FTP daemon - SNMP module
+ ProFTPD is a powerful modular FTP/SFTP/FTPS server. This File Transfer
+ Protocol daemon supports also hidden directories, virtual hosts, and
+ per-directory ".ftpaccess" files. It uses a single main configuration
+ file, with a syntax similar to Apache.
+ .
+ Because of the advanced design, anonymous-FTP directories can have
+ an arbitrary internal structure (bin, lib, etc, and special files are
+ not needed). Advanced features such as multiple password files and
+ upload/download ratios are also supported.
+ .
+ The mod_snmp module implements SNMPv1 and SNMPv2, for monitoring of
+ proftpd statistics via SNMP.
