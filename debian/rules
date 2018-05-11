@@ -93,21 +93,12 @@ configure-stamp:
 clean: debian/control debian/proftpd-substvars myclean
 myclean:
 	dh_testdir
-	#[ ! -f $(CURDIR)/Makefile ] || $(MAKE) distclean
 	dh_auto_clean
 	dh_clean
 	
 	# A few surplus files are removed using debian/clean
-	rm -f $$(find . -type l) $$(find . -name "*~" -o -name "*.o")
-	rm -f $(NAME) lib/*.a
-	rm -rf debian/$(PACKAGE) debian/$(NAME)-doc
-	rm -rf debian/files* debian/*.gz core
-	rm -f $$(find * -name "*.orig")
-	rm -rf $$(find $(CURDIR) -name .libs)
-	rm -f $$(find $(CURDIR) -name config.log )
-	rm -f $$(find $(CURDIR) -name config.status )
-	# clean up libtool files still around
-	find contrib -name "*.la" -exec rm -f {} \;
+	rm -f $$(find . -type l) $$(find . -name "*~" -o -name "*.orig")
+	rm -rf debian/*.gz core
 
 binary-indep: checkroot build
 	dh_installdirs -i

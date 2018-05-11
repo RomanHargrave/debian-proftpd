@@ -13,6 +13,16 @@ contrib/mod_auth_otp/mod_auth_otp.h
 contrib/mod_auth_otp/t/Makefile
 contrib/mod_snmp/Makefile
 contrib/mod_snmp/mod_snmp.h
+contrib/mod_auth_otp/config.log
+contrib/mod_auth_otp/config.status
+contrib/mod_load/config.log
+contrib/mod_load/config.status
+contrib/mod_sftp/config.log
+contrib/mod_sftp/config.status
+contrib/mod_snmp/config.log
+contrib/mod_snmp/config.status
+contrib/mod_wrap2/config.log
+contrib/mod_wrap2/config.status
 src/ftpdctl.8
 src/proftpd.8
 src/proftpd.conf.5
