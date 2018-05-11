@@ -1,5 +1,3 @@
-config.cache
-config.log
 ftpshut
 Make.rules
 modules/mod_ratio.c
