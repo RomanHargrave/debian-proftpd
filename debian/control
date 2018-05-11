@@ -49,7 +49,8 @@ Suggests: openbsd-inetd | inet-superserver,
           proftpd-mod-odbc,
           proftpd-mod-pgsql,
           proftpd-mod-sqlite,
-          proftpd-mod-geoip
+          proftpd-mod-geoip,
+          proftpd-mod-snmp
 Recommends: proftpd-doc
 Description: Versatile, virtual-hosting FTP daemon - binaries
  ProFTPD is a powerful modular FTP/SFTP/FTPS server. This File Transfer
@@ -113,6 +114,7 @@ Homepage: http://www.proftpd.org/docs
 Package: proftpd-mod-mysql
 Architecture: any
 Depends: proftpd-basic (=${binary:Version}), ${misc:Depends}, ${shlibs:Depends}
+Enhances: proftpd-basic
 Description: Versatile, virtual-hosting FTP daemon - MySQL module
  ProFTPD is a powerful modular FTP/SFTP/FTPS server. This File Transfer
  Protocol daemon supports also hidden directories, virtual hosts, and
@@ -129,6 +131,7 @@ Description: Versatile, virtual-hosting FTP daemon - MySQL module
 Package: proftpd-mod-pgsql
 Architecture: any
 Depends: proftpd-basic (=${binary:Version}), ${misc:Depends}, ${shlibs:Depends}
+Enhances: proftpd-basic
 Description: Versatile, virtual-hosting FTP daemon - PostgreSQL module
  ProFTPD is a powerful modular FTP/SFTP/FTPS server. This File Transfer
  Protocol daemon supports also hidden directories, virtual hosts, and
@@ -145,6 +148,7 @@ Description: Versatile, virtual-hosting FTP daemon - PostgreSQL module
 Package: proftpd-mod-ldap
 Architecture: any
 Depends: proftpd-basic (=${binary:Version}), ${misc:Depends}, ${shlibs:Depends}
+Enhances: proftpd-basic
 Description: Versatile, virtual-hosting FTP daemon - LDAP module
  ProFTPD is a powerful modular FTP/SFTP/FTPS server. This File Transfer
  Protocol daemon supports also hidden directories, virtual hosts, and
@@ -161,6 +165,7 @@ Description: Versatile, virtual-hosting FTP daemon - LDAP module
 Package: proftpd-mod-odbc
 Architecture: any
 Depends: proftpd-basic (=${binary:Version}), ${misc:Depends}, ${shlibs:Depends}
+Enhances: proftpd-basic
 Description: Versatile, virtual-hosting FTP daemon - ODBC module
  ProFTPD is a powerful modular FTP/SFTP/FTPS server. This File Transfer
  Protocol daemon supports also hidden directories, virtual hosts, and
@@ -177,6 +182,7 @@ Description: Versatile, virtual-hosting FTP daemon - ODBC module
 Package: proftpd-mod-sqlite
 Architecture: any
 Depends: proftpd-basic (=${binary:Version}), ${misc:Depends}, ${shlibs:Depends}
+Enhances: proftpd-basic
 Description: Versatile, virtual-hosting FTP daemon - SQLite3 module
  ProFTPD is a powerful modular FTP/SFTP/FTPS server. This File Transfer
  Protocol daemon supports also hidden directories, virtual hosts, and
@@ -193,6 +199,7 @@ Description: Versatile, virtual-hosting FTP daemon - SQLite3 module
 Package: proftpd-mod-geoip
 Architecture: any
 Depends: proftpd-basic (=${binary:Version}), ${misc:Depends}, ${shlibs:Depends}
+Enhances: proftpd-basic
 Description: Versatile, virtual-hosting FTP daemon - GeoIP module
  ProFTPD is a powerful modular FTP/SFTP/FTPS server. This File Transfer
  Protocol daemon supports also hidden directories, virtual hosts, and
@@ -209,6 +216,7 @@ Description: Versatile, virtual-hosting FTP daemon - GeoIP module
 Package: proftpd-mod-snmp
 Architecture: any
 Depends: proftpd-basic (=${binary:Version}), ${misc:Depends}, ${shlibs:Depends}
+Enhances: proftpd-basic
 Description: Versatile, virtual-hosting FTP daemon - SNMP module
  ProFTPD is a powerful modular FTP/SFTP/FTPS server. This File Transfer
  Protocol daemon supports also hidden directories, virtual hosts, and
