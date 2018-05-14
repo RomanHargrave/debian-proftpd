@@ -125,7 +125,7 @@ binary-arch: checkroot build install
 	dh_installlogrotate -a
 	dh_installpam -a --name=$(NAME)
 	dh_lintian -a
-	# removes ftpasswd.1 installed by upstream see #671063
+	# removes ftpasswd.1 installed by upstream see #699800
 	rm -f debian/$(PACKAGE)/usr/share/man/man1/ftpasswd.1*
 	# removes proftpd.conf installed by upstream
 	rm -f debian/$(PACKAGE)/etc/$(NAME)/$(NAME).conf
