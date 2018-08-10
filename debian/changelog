@@ -3,6 +3,7 @@ proftpd-dfsg (1.3.6-3) UNRELEASED; urgency=medium
   [ Hilmar Preuße ]
   * Pick github_pr_710.patch from upstream:
     [PATCH] Issue #674: Update mod_sftp to handle changed APIs in OpenSSL
+    [PATCH] Bug#4356: Fix infinite loop by actually iterating properly for the next configuration record.
 
   * Run configure w/ --disable-xattr only on kfreebsd to fix FTBFS.
     (Closes: #897168)
