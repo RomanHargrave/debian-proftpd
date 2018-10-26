@@ -14,6 +14,7 @@ proftpd-dfsg (1.3.6-3) UNRELEASED; urgency=medium
   * New Proftp module package: proftpd-mod-snmp.
   * Add "Enhances: proftpd-basic" to all modules built by this package.
   * d/rules: remove clean code, which is covered by upstreams Makefile.
+  * W: proftpd-basic: maintainer-script-should-not-parse-etc-passwd-or-group
 
  -- Francesco Paolo Lovergine <frankie@debian.org>  Tue, 01 May 2018 14:57:41 +0200
 
