@@ -1,0 +1,50 @@
+Index: proftpd/contrib/ftpasswd
+===================================================================
+--- proftpd.orig/contrib/ftpasswd	2018-11-01 20:53:14.191582033 +0100
++++ proftpd/contrib/ftpasswd	2018-11-01 20:53:14.191582033 +0100
+@@ -1,4 +1,4 @@
+-#!/usr/bin/env perl
++#!/usr/bin/perl
+ # ---------------------------------------------------------------------------
+ # Copyright (C) 2000-2015 TJ Saunders <tj@castaglia.org>
+ #
+Index: proftpd/contrib/ftpmail
+===================================================================
+--- proftpd.orig/contrib/ftpmail	2018-11-01 20:53:14.191582033 +0100
++++ proftpd/contrib/ftpmail	2018-11-01 20:53:14.191582033 +0100
+@@ -1,4 +1,4 @@
+-#!/usr/bin/env perl
++#!/usr/bin/perl
+ # ---------------------------------------------------------------------------
+ # Copyright (C) 2008-2013 TJ Saunders <tj@castaglia.org>
+ #
+Index: proftpd/contrib/ftpquota
+===================================================================
+--- proftpd.orig/contrib/ftpquota	2018-11-01 20:53:14.191582033 +0100
++++ proftpd/contrib/ftpquota	2018-11-01 20:53:14.191582033 +0100
+@@ -1,4 +1,4 @@
+-#!/usr/bin/env perl
++#!/usr/bin/perl
+ # -------------------------------------------------------------------------
+ # Copyright (C) 2000-2017 TJ Saunders <tj@castaglia.org>
+ #
+Index: proftpd/src/prxs.in
+===================================================================
+--- proftpd.orig/src/prxs.in	2018-11-01 20:53:14.191582033 +0100
++++ proftpd/src/prxs.in	2018-11-01 20:53:14.191582033 +0100
+@@ -1,4 +1,4 @@
+-#!/usr/bin/env perl
++#!/usr/bin/perl
+ 
+ # ---------------------------------------------------------------------------
+ # Copyright (C) 2008-2012 TJ Saunders <tj@castaglia.org>
+Index: proftpd/contrib/xferstats.holger-preiss
+===================================================================
+--- proftpd.orig/contrib/xferstats.holger-preiss	2018-11-01 20:53:13.975569937 +0100
++++ proftpd/contrib/xferstats.holger-preiss	2018-11-01 20:55:29.843757717 +0100
+@@ -1,4 +1,4 @@
+-#!/usr/bin/env perl
++#!/usr/bin/perl
+ # ---------------------------------------------------------------------------
+ #
+ # USAGE: xferstats <options>
