@@ -3,7 +3,7 @@ Section: net
 Priority: optional
 Maintainer: ProFTPD Maintainance Team <pkg-proftpd-maintainers@alioth-lists.debian.net>
 Uploaders: Francesco Paolo Lovergine <frankie@debian.org>
-Standards-Version: 4.1.4
+Standards-Version: 4.2.1
 Build-Depends: debhelper (>= 9.20160114),
                libacl1-dev,
                libattr1-dev,
