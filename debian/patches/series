@@ -15,4 +15,4 @@ upstream_4312
 upstream_4312_fix_version
 github_pr_710
 upstream_4356
-github_issue_674
+wrong-path-for-interpreter_perl.diff

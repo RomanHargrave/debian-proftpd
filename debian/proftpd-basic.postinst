@@ -25,7 +25,7 @@ MODULES_NEW=$ETC_DIR/modules.conf.proftpd-new
 
 installftp()
 {
-	if ! grep -q "^ftp:" /etc/passwd
+	if ! getent passwd ftp > /dev/null
 	then
 	    adduser --system ftp --home /srv/ftp || true
             if [ -f /usr/share/proftpd/templates/welcome.msg -a -d ~ftp ] ; then
@@ -37,7 +37,7 @@ installftp()
 
 add_sysuser()
 {
-	if ! grep -q "^proftpd:" /etc/passwd
+	if ! getent passwd proftpd > /dev/null
 	then
 		adduser --system --disabled-login --no-create-home --home /run/proftpd proftpd || true
 	else

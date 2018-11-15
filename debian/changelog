@@ -3,7 +3,9 @@ proftpd-dfsg (1.3.6-3) UNRELEASED; urgency=medium
   [ Hilmar Preuße ]
   * Pick github_pr_710.patch from upstream:
     [PATCH] Issue #674: Update mod_sftp to handle changed APIs in OpenSSL
-    [PATCH] Bug#4356: Fix infinite loop by actually iterating properly for the next configuration record.
+    (Closes: #911875).
+    [PATCH] Bug#4356: Fix infinite loop by actually iterating properly
+            for the next configuration record.
 
   * Run configure w/ --disable-xattr only on kfreebsd to fix FTBFS.
     (Closes: #897168)
@@ -12,6 +14,12 @@ proftpd-dfsg (1.3.6-3) UNRELEASED; urgency=medium
   * New Proftp module package: proftpd-mod-snmp.
   * Add "Enhances: proftpd-basic" to all modules built by this package.
   * d/rules: remove clean code, which is covered by upstreams Makefile.
+  * Lintian:
+    W: maintainer-script-should-not-parse-etc-passwd-or-group
+    E: wrong-path-for-interpreter
+
+  [ Francesco Paolo Lovergine ]
+  * Policy bumped to 4.2.1. No changes required.
 
  -- Francesco Paolo Lovergine <frankie@debian.org>  Tue, 01 May 2018 14:57:41 +0200
 
